@@ -149,20 +149,24 @@ def _handle_speak(args: dict, **kw) -> str:
             if disc.status != "active":
                 return tool_error(f"Discussion {discussion_id} is {disc.status}")
 
-            # Validate participant is registered
+            # Validate participant is registered (coordinator is always allowed)
             active_names = rdb.get_active_participant_names(conn, discussion_id)
-            if participant not in active_names:
+            is_coordinator = participant == "coordinator"
+            if not is_coordinator and participant not in active_names:
                 return tool_error(
                     f"Participant '{participant}' is not an active member of this discussion. "
                     f"Active: {', '.join(active_names)}"
                 )
 
+            # Coordinator speech is always recorded in round 0 and does not
+            # participate in round progression logic.
             speech = rdb.add_speech(
                 conn,
                 discussion_id=discussion_id,
                 participant=participant,
                 content=content,
                 reply_to=reply_to,
+                round_override=0 if is_coordinator else None,
             )
 
             # Determine round state after this speech

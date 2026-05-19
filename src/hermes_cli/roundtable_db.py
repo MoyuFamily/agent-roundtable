@@ -454,6 +454,7 @@ def add_speech(
     content: str,
     *,
     reply_to: Optional[int] = None,
+    round_override: Optional[int] = None,
 ) -> Speech:
     """Record a speech and potentially advance the round.
 
@@ -465,6 +466,8 @@ def add_speech(
       current_round advances by 1.
     - If current_round exceeds max_rounds after advancing, the discussion
       is auto-concluded.
+    - round_override forces the speech into a specific round (e.g. 0 for
+      coordinator) and skips round-advancement checks for that speech.
     """
     disc = get_discussion(conn, discussion_id)
     if not disc:
@@ -474,6 +477,7 @@ def add_speech(
 
     now = int(time.time())
     current_round = disc.current_round
+    speech_round = round_override if round_override is not None else current_round
 
     # Validate reply_to if provided
     if reply_to is not None:
@@ -492,22 +496,27 @@ def add_speech(
             """INSERT INTO speeches
                (discussion_id, round, participant, content, reply_to, created_at)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (discussion_id, current_round, participant, content, reply_to, now),
+            (discussion_id, speech_round, participant, content, reply_to, now),
         )
         speech_id = cur.lastrowid
 
         # Check if round should advance:
-        # All active participants have spoken in the current round
+        # Only check for normal (non-overridden) speeches — overridden speeches
+        # (e.g. coordinator) don't participate in round progression.
         active_names = get_active_participant_names(conn, discussion_id)
-        speakers_this_round = conn.execute(
-            """SELECT DISTINCT participant FROM speeches
-               WHERE discussion_id = ? AND round = ?""",
-            (discussion_id, current_round),
-        ).fetchall()
-        spoke_names = {r["participant"] for r in speakers_this_round}
-
-        round_complete = all(name in spoke_names for name in active_names)
+        round_complete = False
         discussion_complete = False
+
+        if round_override is None:
+            # All active participants have spoken in the current round
+            speakers_this_round = conn.execute(
+                """SELECT DISTINCT participant FROM speeches
+                   WHERE discussion_id = ? AND round = ?""",
+                (discussion_id, current_round),
+            ).fetchall()
+            spoke_names = {r["participant"] for r in speakers_this_round}
+
+            round_complete = all(name in spoke_names for name in active_names)
 
         if round_complete and current_round >= 0:
             # Advance round (but not beyond max_rounds if auto-conclude)
@@ -553,7 +562,7 @@ def add_speech(
     return Speech(
         id=speech_id or 0,  # lastrowid is int for AUTOINCREMENT
         discussion_id=discussion_id,
-        round=current_round,
+        round=speech_round,
         participant=participant,
         content=content,
         reply_to=reply_to,

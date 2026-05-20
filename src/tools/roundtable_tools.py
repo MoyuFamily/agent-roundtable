@@ -160,7 +160,7 @@ def _handle_speak(args: dict, **kw) -> str:
 
             # Coordinator speech is always recorded in round 0 and does not
             # participate in round progression logic.
-            speech = rdb.add_speech(
+            add_result = rdb.add_speech(
                 conn,
                 discussion_id=discussion_id,
                 participant=participant,
@@ -168,31 +168,17 @@ def _handle_speak(args: dict, **kw) -> str:
                 reply_to=reply_to,
                 round_override=0 if is_coordinator else None,
             )
+            speech = add_result["speech"]
+            round_complete = add_result["round_complete"]
+            discussion_complete = add_result["discussion_complete"]
+            next_speaker = add_result["next_speaker"]
 
-            # Determine round state after this speech
-            disc_after = rdb.get_discussion(conn, discussion_id)
-            speakers_this_round = conn.execute(
-                """SELECT DISTINCT participant FROM speeches
-                   WHERE discussion_id = ? AND round = ?""",
-                (discussion_id, disc.current_round),
-            ).fetchall()
-            spoke_names = {r["participant"] for r in speakers_this_round}
-            round_complete = all(name in spoke_names for name in active_names)
-
-            # Determine next speaker
-            next_speaker = None
-            if disc_after and disc_after.status == "active":
-                target_round = disc_after.current_round
-                speakers_next = conn.execute(
-                    """SELECT DISTINCT participant FROM speeches
-                       WHERE discussion_id = ? AND round = ?""",
-                    (discussion_id, target_round),
-                ).fetchall()
-                spoke_next = {r["participant"] for r in speakers_next}
-                for name in active_names:
-                    if name not in spoke_next:
-                        next_speaker = name
-                        break
+            # Auto-calculate convergence when a round completes
+            convergence_score = None
+            if round_complete and speech.round > 0:
+                convergence_score = rdb.calculate_convergence(
+                    conn, discussion_id, speech.round
+                )
 
             return _ok(
                 speech_id=speech.id,
@@ -200,9 +186,8 @@ def _handle_speak(args: dict, **kw) -> str:
                 participant=speech.participant,
                 next_speaker=next_speaker,
                 round_complete=round_complete,
-                discussion_complete=disc_after.status != "active"
-                if disc_after
-                else False,
+                discussion_complete=discussion_complete,
+                convergence_score=convergence_score,
             )
         finally:
             conn.close()
@@ -403,6 +388,14 @@ def _handle_summarize(args: dict, **kw) -> str:
             if not final_score and conv_history:
                 final_score = conv_history[-1].score
 
+            # Build structured summary for LLM consumption
+            from roundtable.core import RoundtableCore
+            structured_summary = RoundtableCore._build_structured_summary(
+                disc, participants, speeches, p_map,
+                consensus_pts, disagreement_pts, new_points,
+                final_score, conv_history,
+            )
+
             return json.dumps({
                 "ok": True,
                 "discussion_id": disc.id,
@@ -437,6 +430,7 @@ def _handle_summarize(args: dict, **kw) -> str:
                 ],
                 "output_path": disc.output_path,
                 "formatted_history": _format_history(speeches, p_map),
+                "structured_summary": structured_summary,
             })
         finally:
             conn.close()
@@ -523,6 +517,27 @@ def _handle_list(args: dict, **kw) -> str:
     except Exception as e:
         logger.exception("roundtable_list failed")
         return tool_error(f"roundtable_list: {e}")
+
+
+def _handle_advance(args: dict, **kw) -> str:
+    """Explicitly advance to the next round in a discussion."""
+    discussion_id = args.get("discussion_id", "").strip()
+    if not discussion_id:
+        return tool_error("discussion_id is required")
+
+    try:
+        rdb, conn = _connect()
+        try:
+            result = rdb.advance_round(conn, discussion_id)
+            return _ok(
+                discussion_id=discussion_id,
+                **result,
+            )
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.exception("roundtable_advance failed")
+        return tool_error(f"roundtable_advance: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -737,6 +752,26 @@ ROUNDTABLE_LIST_SCHEMA = {
     },
 }
 
+ROUNDTABLE_ADVANCE_SCHEMA = {
+    "name": "roundtable_advance",
+    "description": (
+        "Explicitly advance to the next round. Use when auto-advance "
+        "doesn't trigger (e.g. not all participants spoke, or you want "
+        "to move on early). If max_rounds is exceeded, the discussion "
+        "is automatically concluded."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "discussion_id": {
+                "type": "string",
+                "description": "Discussion ID (rt_xxxxxxxx)",
+            },
+        },
+        "required": ["discussion_id"],
+    },
+}
+
 
 # ---------------------------------------------------------------------------
 # Registration
@@ -803,4 +838,13 @@ registry.register(
     handler=_handle_list,
     check_fn=_check_roundtable_enabled,
     emoji="📋",
+)
+
+registry.register(
+    name="roundtable_advance",
+    toolset="roundtable",
+    schema=ROUNDTABLE_ADVANCE_SCHEMA,
+    handler=_handle_advance,
+    check_fn=_check_roundtable_enabled,
+    emoji="⏭️",
 )

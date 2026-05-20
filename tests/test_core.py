@@ -41,7 +41,7 @@ def test_core_module_imports():
 
 
 def test_schema_constants_available():
-    """Verify all 7 tool schemas are accessible from the Hermes adapter."""
+    """Verify all 8 tool schemas are accessible from the Hermes adapter."""
     from roundtable.adapters.hermes import (
         ROUNDTABLE_INIT_SCHEMA,
         ROUNDTABLE_SPEAK_SCHEMA,
@@ -50,12 +50,13 @@ def test_schema_constants_available():
         ROUNDTABLE_SUMMARIZE_SCHEMA,
         ROUNDTABLE_END_SCHEMA,
         ROUNDTABLE_LIST_SCHEMA,
+        ROUNDTABLE_ADVANCE_SCHEMA,
     )
     schemas = [
         ROUNDTABLE_INIT_SCHEMA, ROUNDTABLE_SPEAK_SCHEMA,
         ROUNDTABLE_READ_SCHEMA, ROUNDTABLE_STATUS_SCHEMA,
         ROUNDTABLE_SUMMARIZE_SCHEMA, ROUNDTABLE_END_SCHEMA,
-        ROUNDTABLE_LIST_SCHEMA,
+        ROUNDTABLE_LIST_SCHEMA, ROUNDTABLE_ADVANCE_SCHEMA,
     ]
     for s in schemas:
         assert "name" in s
@@ -249,3 +250,87 @@ def test_summarize(core):
     assert "participants" in result
     assert "consensus_points" in result
     assert "formatted_history" in result
+    assert "structured_summary" in result
+    assert isinstance(result["structured_summary"], str)
+    assert len(result["structured_summary"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# advance
+# ---------------------------------------------------------------------------
+
+
+def test_advance_round(core):
+    disc = core.create_discussion(topic="Test", participants=_make_participants())
+    disc_id = disc["discussion_id"]
+
+    # Round 0: speak
+    core.speak(disc_id, "alice", "r0s1")
+    core.speak(disc_id, "bob", "r0s2")
+
+    # Explicitly advance to round 2 (skip round 1)
+    result = core.advance(disc_id)
+    assert result["ok"] is True
+    assert result["new_round"] == 2
+    assert result["discussion_complete"] is False
+
+    # Verify status shows round 2
+    status = core.status(disc_id)
+    assert status["current_round"] == 2
+
+
+def test_advance_exceeds_max_rounds(core):
+    disc = core.create_discussion(
+        topic="Test", participants=_make_participants(), max_rounds=2
+    )
+    disc_id = disc["discussion_id"]
+
+    # Advance past max
+    core.advance(disc_id)  # round 1
+    core.advance(disc_id)  # round 2
+    result = core.advance(disc_id)  # round 3 > max_rounds=2
+    assert result["ok"] is True
+    assert result["discussion_complete"] is True
+
+    # Discussion should be concluded
+    status = core.status(disc_id)
+    assert status["status"] == "concluded"
+
+
+def test_round_tracking_multi_round(core):
+    """Verify that speeches are correctly assigned to rounds across multiple rounds."""
+    disc = core.create_discussion(topic="Test", participants=_make_participants())
+    disc_id = disc["discussion_id"]
+
+    # Round 0
+    r1 = core.speak(disc_id, "alice", "r0 alice")
+    assert r1["round"] == 0
+    r2 = core.speak(disc_id, "bob", "r0 bob")
+    assert r2["round"] == 0
+    assert r2["round_complete"] is True
+
+    # Round 1 (auto-advanced)
+    r3 = core.speak(disc_id, "alice", "r1 alice")
+    assert r3["round"] == 1
+    r4 = core.speak(disc_id, "bob", "r1 bob")
+    assert r4["round"] == 1
+    assert r4["round_complete"] is True
+
+    # Verify via read
+    result = core.read(disc_id, since_round=1)
+    assert result["speech_count"] == 2
+    assert all(s["round"] == 1 for s in result["speeches"])
+
+
+# ---------------------------------------------------------------------------
+# convergence
+# ---------------------------------------------------------------------------
+
+
+def test_calculate_convergence(core):
+    disc = core.create_discussion(topic="Test", participants=_make_participants())
+    disc_id = disc["discussion_id"]
+
+    result = core.calculate_convergence(disc_id, 0)
+    assert result["ok"] is True
+    assert result["convergence_score"] is None  # no findings yet

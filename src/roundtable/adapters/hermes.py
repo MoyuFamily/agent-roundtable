@@ -100,6 +100,13 @@ def _handle_list(args: dict, **kw) -> str:
     return _handle(args, "list_discussions")
 
 
+def _handle_advance(args: dict, **kw) -> str:
+    discussion_id = args.get("discussion_id", "").strip()
+    if not discussion_id:
+        return _err("discussion_id is required")
+    return _handle({"discussion_id": discussion_id}, "advance")
+
+
 # ---------------------------------------------------------------------------
 # Tool schemas (identical to original)
 # ---------------------------------------------------------------------------
@@ -242,6 +249,22 @@ ROUNDTABLE_LIST_SCHEMA = {
     },
 }
 
+ROUNDTABLE_ADVANCE_SCHEMA = {
+    "name": "roundtable_advance",
+    "description": (
+        "Explicitly advance to the next round. Use when auto-advance "
+        "doesn't trigger. If max_rounds is exceeded, the discussion "
+        "is automatically concluded."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "discussion_id": {"type": "string", "description": "Discussion ID (rt_xxxxxxxx)"},
+        },
+        "required": ["discussion_id"],
+    },
+}
+
 
 # ---------------------------------------------------------------------------
 # Registration function — called by Hermes tool discovery
@@ -249,7 +272,7 @@ ROUNDTABLE_LIST_SCHEMA = {
 
 
 def register_roundtable_tools(registry, *, check_fn=None):
-    """Register all 7 roundtable tools with a Hermes tool registry.
+    """Register all 8 roundtable tools with a Hermes tool registry.
 
     Args:
         registry: The Hermes tools.registry object.
@@ -263,6 +286,7 @@ def register_roundtable_tools(registry, *, check_fn=None):
         ("roundtable_summarize", ROUNDTABLE_SUMMARIZE_SCHEMA, _handle_summarize, "📝"),
         ("roundtable_end", ROUNDTABLE_END_SCHEMA, _handle_end, "🏁"),
         ("roundtable_list", ROUNDTABLE_LIST_SCHEMA, _handle_list, "📋"),
+        ("roundtable_advance", ROUNDTABLE_ADVANCE_SCHEMA, _handle_advance, "⏭️"),
     ]
     for name, schema, handler, emoji in tools:
         registry.register(

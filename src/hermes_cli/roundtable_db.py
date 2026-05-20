@@ -455,19 +455,11 @@ def add_speech(
     *,
     reply_to: Optional[int] = None,
     round_override: Optional[int] = None,
-) -> Speech:
+) -> Dict[str, Any]:
     """Record a speech and potentially advance the round.
 
-    Returns the created Speech with auto-assigned round.
-
-    Round logic:
-    - Round 0 = opening (anyone can speak in round 0)
-    - When all active participants have spoken in the current round,
-      current_round advances by 1.
-    - If current_round exceeds max_rounds after advancing, the discussion
-      is auto-concluded.
-    - round_override forces the speech into a specific round (e.g. 0 for
-      coordinator) and skips round-advancement checks for that speech.
+    Returns dict with: speech (Speech), round_complete (bool),
+    discussion_complete (bool), next_speaker (str|None).
     """
     disc = get_discussion(conn, discussion_id)
     if not disc:
@@ -535,14 +527,12 @@ def add_speech(
                 )
                 discussion_complete = True
 
-        # Determine next speaker
+        # Determine next speaker based on post-advance round
+        disc_after = get_discussion(conn, discussion_id)
+        target_round = disc_after.current_round if disc_after else disc.current_round
         next_speaker = None
         if not discussion_complete and active_names:
             if disc.speech_order == "fixed":
-                # Next in the participant list who hasn't spoken in new round
-                target_round = disc.current_round
-                if round_complete:
-                    target_round = disc.current_round  # already advanced
                 speakers_next = conn.execute(
                     """SELECT DISTINCT participant FROM speeches
                        WHERE discussion_id = ? AND round = ?""",
@@ -559,8 +549,8 @@ def add_speech(
         conn.execute("ROLLBACK")
         raise
 
-    return Speech(
-        id=speech_id or 0,  # lastrowid is int for AUTOINCREMENT
+    speech = Speech(
+        id=speech_id or 0,
         discussion_id=discussion_id,
         round=speech_round,
         participant=participant,
@@ -568,6 +558,12 @@ def add_speech(
         reply_to=reply_to,
         created_at=now,
     )
+    return {
+        "speech": speech,
+        "round_complete": round_complete,
+        "discussion_complete": discussion_complete,
+        "next_speaker": next_speaker,
+    }
 
 
 def get_speeches(

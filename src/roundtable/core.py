@@ -131,7 +131,7 @@ class RoundtableCore:
                     f"Active: {', '.join(active_names)}"
                 )
 
-            speech = self.db.add_speech(
+            result = self.db.add_speech(
                 conn,
                 discussion_id=discussion_id,
                 participant=participant,
@@ -139,32 +139,17 @@ class RoundtableCore:
                 reply_to=reply_to,
                 round_override=0 if is_coordinator else None,
             )
+            speech = result["speech"]
+            round_complete = result["round_complete"]
+            discussion_complete = result["discussion_complete"]
+            next_speaker = result["next_speaker"]
 
-            disc_after = self.db.get_discussion(conn, discussion_id)
-
-            # Round completion check
-            speakers_this_round = conn.execute(
-                """SELECT DISTINCT participant FROM speeches
-                   WHERE discussion_id = ? AND round = ?""",
-                (discussion_id, disc.current_round),
-            ).fetchall()
-            spoke_names = {r["participant"] for r in speakers_this_round}
-            round_complete = all(name in spoke_names for name in active_names)
-
-            # Next speaker
-            next_speaker = None
-            if disc_after and disc_after.status == "active":
-                target_round = disc_after.current_round
-                speakers_next = conn.execute(
-                    """SELECT DISTINCT participant FROM speeches
-                       WHERE discussion_id = ? AND round = ?""",
-                    (discussion_id, target_round),
-                ).fetchall()
-                spoke_next = {r["participant"] for r in speakers_next}
-                for name in active_names:
-                    if name not in spoke_next:
-                        next_speaker = name
-                        break
+            # Auto-calculate convergence when a round completes
+            convergence_score = None
+            if round_complete and speech.round > 0:
+                convergence_score = self.db.calculate_convergence(
+                    conn, discussion_id, speech.round
+                )
 
             return {
                 "ok": True,
@@ -173,7 +158,8 @@ class RoundtableCore:
                 "participant": speech.participant,
                 "next_speaker": next_speaker,
                 "round_complete": round_complete,
-                "discussion_complete": disc_after.status != "active" if disc_after else False,
+                "discussion_complete": discussion_complete,
+                "convergence_score": convergence_score,
             }
         finally:
             conn.close()
@@ -347,6 +333,14 @@ class RoundtableCore:
             if not final_score and conv_history:
                 final_score = conv_history[-1].score
 
+            # Build a structured summary — compact enough for LLM context,
+            # rich enough to write a conclusion without re-reading raw speeches.
+            structured_summary = self._build_structured_summary(
+                disc, participants, speeches, p_map,
+                consensus_pts, disagreement_pts, new_points,
+                final_score, conv_history,
+            )
+
             return {
                 "ok": True,
                 "discussion_id": disc.id,
@@ -381,6 +375,7 @@ class RoundtableCore:
                 ],
                 "output_path": disc.output_path,
                 "formatted_history": self._format_history(speeches, p_map),
+                "structured_summary": structured_summary,
             }
         finally:
             conn.close()
@@ -459,6 +454,44 @@ class RoundtableCore:
         finally:
             conn.close()
 
+    def advance(self, discussion_id: str) -> Dict[str, Any]:
+        """Explicitly advance to the next round.
+
+        Returns dict with new_round, max_rounds, discussion_complete.
+        """
+        if not discussion_id:
+            raise ValueError("discussion_id is required")
+
+        conn = self.db.connect()
+        try:
+            result = self.db.advance_round(conn, discussion_id)
+            return {"ok": True, "discussion_id": discussion_id, **result}
+        finally:
+            conn.close()
+
+    def calculate_convergence(
+        self, discussion_id: str, round_num: int
+    ) -> Dict[str, Any]:
+        """Calculate convergence score for a round from its findings.
+
+        Score = consensus / (consensus + disagreement).
+        Returns None score if no findings exist.
+        """
+        if not discussion_id:
+            raise ValueError("discussion_id is required")
+
+        conn = self.db.connect()
+        try:
+            score = self.db.calculate_convergence(conn, discussion_id, round_num)
+            return {
+                "ok": True,
+                "discussion_id": discussion_id,
+                "round": round_num,
+                "convergence_score": score,
+            }
+        finally:
+            conn.close()
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -477,3 +510,77 @@ class RoundtableCore:
                 f"[#{s.id}] Round {s.round} | {display}{role_str}{ref_str}:\n  {s.content}"
             )
         return "\n\n".join(lines) if lines else "(暂无发言)"
+
+    @staticmethod
+    def _build_structured_summary(
+        disc, participants, speeches, p_map,
+        consensus_pts, disagreement_pts, new_points,
+        final_score, conv_history,
+    ) -> str:
+        """Build a compact structured summary for LLM consumption.
+
+        Returns a Markdown string (~500-2000 chars) that gives the coordinator
+        enough context to write a conclusion document without re-reading all
+        raw speech content.
+        """
+        lines = []
+        lines.append(f"# 圆桌讨论摘要: {disc.topic}")
+        if disc.context:
+            lines.append(f"\n**背景**: {disc.context}")
+
+        # Participants
+        lines.append("\n## 参与者")
+        for p in participants:
+            name = p.display_name or p.participant
+            role = p.role or "未指定"
+            perspective = p.perspective or ""
+            persp_str = f" — {perspective}" if perspective else ""
+            lines.append(f"- **{name}** ({role}){persp_str}")
+
+        # Per-round summary (key points only, truncate content)
+        lines.append(f"\n## 讨论轮次 (共 {disc.current_round} 轮)")
+        rounds_dict: dict = {}
+        for s in speeches:
+            rounds_dict.setdefault(s.round, []).append(s)
+
+        for rnd in sorted(rounds_dict.keys()):
+            round_speeches = rounds_dict[rnd]
+            lines.append(f"\n### Round {rnd}")
+            for s in round_speeches:
+                p_info = p_map.get(s.participant, {})
+                display = p_info.get("display_name", s.participant)
+                role = p_info.get("role", "")
+                role_str = f" ({role})" if role else ""
+                # Truncate content to 300 chars for summary
+                content = s.content
+                if len(content) > 300:
+                    content = content[:297] + "..."
+                lines.append(f"- **{display}**{role_str}: {content}")
+
+        # Findings
+        if consensus_pts:
+            lines.append("\n## 共识点")
+            for pt in consensus_pts:
+                lines.append(f"- {pt}")
+
+        if disagreement_pts:
+            lines.append("\n## 分歧点")
+            for pt in disagreement_pts:
+                lines.append(f"- {pt}")
+
+        if new_points:
+            lines.append("\n## 新议题")
+            for pt in new_points:
+                lines.append(f"- {pt}")
+
+        # Convergence
+        if final_score is not None:
+            lines.append(f"\n## 收敛度: {final_score:.2f}")
+        if conv_history:
+            for c in conv_history:
+                lines.append(
+                    f"- Round {c.round}: score={c.score:.2f}, "
+                    f"consensus={c.consensus_count}, disagreement={c.disagreement_count}"
+                )
+
+        return "\n".join(lines)

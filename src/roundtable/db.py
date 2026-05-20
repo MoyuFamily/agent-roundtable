@@ -12,7 +12,7 @@ import secrets
 import sqlite3
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from roundtable.exceptions import (
     DiscussionNotFoundError,
@@ -333,7 +333,12 @@ class RoundtableDB:
         *,
         reply_to: Optional[int] = None,
         round_override: Optional[int] = None,
-    ) -> Speech:
+    ) -> Dict[str, Any]:
+        """Add a speech and return result with speech + round metadata.
+
+        Returns dict with: speech (Speech), round_complete (bool),
+        discussion_complete (bool), next_speaker (str|None).
+        """
         disc = self.get_discussion(conn, discussion_id)
         if not disc:
             raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
@@ -392,10 +397,12 @@ class RoundtableDB:
                     )
                     discussion_complete = True
 
+            # Determine next speaker based on the CURRENT round (post-advance)
+            disc_after = self.get_discussion(conn, discussion_id)
+            target_round = disc_after.current_round if disc_after else current_round
             next_speaker = None
             if not discussion_complete and active_names:
                 if disc.speech_order == "fixed":
-                    target_round = disc.current_round
                     speakers_next = conn.execute(
                         """SELECT DISTINCT participant FROM speeches
                            WHERE discussion_id = ? AND round = ?""",
@@ -412,7 +419,7 @@ class RoundtableDB:
             conn.execute("ROLLBACK")
             raise
 
-        return Speech(
+        speech = Speech(
             id=speech_id or 0,
             discussion_id=discussion_id,
             round=speech_round,
@@ -421,6 +428,12 @@ class RoundtableDB:
             reply_to=reply_to,
             created_at=now,
         )
+        return {
+            "speech": speech,
+            "round_complete": round_complete,
+            "discussion_complete": discussion_complete,
+            "next_speaker": next_speaker,
+        }
 
     def get_speeches(
         self,
@@ -552,6 +565,88 @@ class RoundtableDB:
             )
             for r in rows
         ]
+
+    def advance_round(
+        self, conn: sqlite3.Connection, discussion_id: str
+    ) -> Dict[str, Any]:
+        """Explicitly advance to the next round.
+
+        Returns dict with new_round, discussion_complete, max_rounds.
+        Raises DiscussionNotFoundError / DiscussionNotActiveError.
+        """
+        disc = self.get_discussion(conn, discussion_id)
+        if not disc:
+            raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
+        if disc.status != "active":
+            raise DiscussionNotActiveError(f"Discussion {discussion_id} is {disc.status}")
+
+        now = int(time.time())
+        new_round = disc.current_round + 1
+        discussion_complete = False
+
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute(
+                "UPDATE discussions SET current_round = ? WHERE id = ?",
+                (new_round, discussion_id),
+            )
+            if new_round > disc.max_rounds:
+                conn.execute(
+                    """UPDATE discussions
+                       SET status = 'concluded', concluded_at = ?
+                       WHERE id = ? AND status = 'active'""",
+                    (now, discussion_id),
+                )
+                discussion_complete = True
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+        return {
+            "new_round": new_round,
+            "max_rounds": disc.max_rounds,
+            "discussion_complete": discussion_complete,
+        }
+
+    def calculate_convergence(
+        self, conn: sqlite3.Connection, discussion_id: str, round_num: int
+    ) -> Optional[float]:
+        """Calculate convergence score for a given round from its findings.
+
+        Score = consensus_count / (consensus_count + disagreement_count).
+        Returns None if no findings exist for the round.
+        """
+        rows = conn.execute(
+            """SELECT type, COUNT(*) as cnt FROM findings
+               WHERE discussion_id = ? AND round = ?
+               GROUP BY type""",
+            (discussion_id, round_num),
+        ).fetchall()
+        counts = {r["type"]: r["cnt"] for r in rows}
+        consensus = counts.get("consensus", 0)
+        disagreement = counts.get("disagreement", 0)
+        new_points = counts.get("new_point", 0)
+
+        total = consensus + disagreement
+        if total == 0:
+            return None
+
+        score = consensus / total
+
+        # Record in convergence_history
+        self.record_convergence(
+            conn, discussion_id, round_num,
+            score, consensus, disagreement, new_points,
+        )
+
+        # Update the discussion's overall convergence_score (latest round)
+        conn.execute(
+            "UPDATE discussions SET convergence_score = ? WHERE id = ?",
+            (score, discussion_id),
+        )
+
+        return score
 
     # ------------------------------------------------------------------
     # Helpers

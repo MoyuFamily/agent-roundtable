@@ -190,7 +190,8 @@ def test_get_active_participant_names(rt_db, db_conn):
 
 def test_add_speech_in_round_0(rt_db, db_conn):
     disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS)
-    speech = rt_db.add_speech(db_conn, disc.id, "alice", "Hello everyone!")
+    result = rt_db.add_speech(db_conn, disc.id, "alice", "Hello everyone!")
+    speech = result["speech"]
     assert speech.id > 0
     assert speech.round == 0
     assert speech.participant == "alice"
@@ -238,8 +239,10 @@ def test_speech_auto_conclude_on_max_rounds(rt_db, db_conn):
 
 def test_speech_with_reply_to(rt_db, db_conn):
     disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS)
-    s1 = rt_db.add_speech(db_conn, disc.id, "alice", "Original point")
-    s2 = rt_db.add_speech(db_conn, disc.id, "bob", "Responding", reply_to=s1.id)
+    r1 = rt_db.add_speech(db_conn, disc.id, "alice", "Original point")
+    s1 = r1["speech"]
+    r2 = rt_db.add_speech(db_conn, disc.id, "bob", "Responding", reply_to=s1.id)
+    s2 = r2["speech"]
     assert s2.reply_to == s1.id
 
 

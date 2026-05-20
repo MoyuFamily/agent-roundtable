@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "roundtable"
+version = "0.1.0"
+description = "Framework-agnostic multi-agent roundtable discussion library"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+# Zero external dependencies — only stdlib
+dependencies = []
+
+[project.optional-dependencies]
+hermes = []  # Hermes adapter auto-discovers if hermes-agent is installed
+dev = ["pytest>=7.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

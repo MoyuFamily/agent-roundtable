@@ -1,0 +1,251 @@
+"""Tests for RoundtableCore — the business logic layer.
+
+Replaces tests/tools/test_roundtable_tools.py — same 17 test cases,
+now testing via RoundtableCore instead of raw handler functions.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from roundtable.core import RoundtableCore
+from roundtable.db import RoundtableDB
+
+
+@pytest.fixture
+def core(tmp_path):
+    """Isolated RoundtableCore with a fresh database."""
+    db = RoundtableDB(tmp_path / "roundtable.db")
+    return RoundtableCore(db)
+
+
+def _make_participants():
+    return [
+        {"profile": "alice", "role": "Engineer", "perspective": "Technical", "display_name": "Alice"},
+        {"profile": "bob", "role": "Designer", "perspective": "UX", "display_name": "Bob"},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Module import
+# ---------------------------------------------------------------------------
+
+
+def test_core_module_imports():
+    """Verify the roundtable core module imports cleanly."""
+    from roundtable import core
+    assert core is not None
+
+
+def test_schema_constants_available():
+    """Verify all 7 tool schemas are accessible from the Hermes adapter."""
+    from roundtable.adapters.hermes import (
+        ROUNDTABLE_INIT_SCHEMA,
+        ROUNDTABLE_SPEAK_SCHEMA,
+        ROUNDTABLE_READ_SCHEMA,
+        ROUNDTABLE_STATUS_SCHEMA,
+        ROUNDTABLE_SUMMARIZE_SCHEMA,
+        ROUNDTABLE_END_SCHEMA,
+        ROUNDTABLE_LIST_SCHEMA,
+    )
+    schemas = [
+        ROUNDTABLE_INIT_SCHEMA, ROUNDTABLE_SPEAK_SCHEMA,
+        ROUNDTABLE_READ_SCHEMA, ROUNDTABLE_STATUS_SCHEMA,
+        ROUNDTABLE_SUMMARIZE_SCHEMA, ROUNDTABLE_END_SCHEMA,
+        ROUNDTABLE_LIST_SCHEMA,
+    ]
+    for s in schemas:
+        assert "name" in s
+        assert "description" in s
+        assert "parameters" in s
+        assert s["parameters"]["type"] == "object"
+
+
+# ---------------------------------------------------------------------------
+# create_discussion
+# ---------------------------------------------------------------------------
+
+
+def test_create_discussion_success(core):
+    result = core.create_discussion(
+        topic="Test topic",
+        participants=_make_participants(),
+        context="Some context",
+        max_rounds=3,
+    )
+    assert result["ok"] is True
+    assert result["discussion_id"].startswith("rt_")
+    assert result["topic"] == "Test topic"
+    assert result["participants"] == ["alice", "bob"]
+    assert result["max_rounds"] == 3
+
+
+def test_create_discussion_missing_topic(core):
+    with pytest.raises(ValueError, match="topic"):
+        core.create_discussion(topic="", participants=_make_participants())
+
+
+def test_create_discussion_too_few_participants(core):
+    with pytest.raises(ValueError, match="2 participants"):
+        core.create_discussion(topic="Test", participants=[{"profile": "alice"}])
+
+
+# ---------------------------------------------------------------------------
+# speak
+# ---------------------------------------------------------------------------
+
+
+def test_speak_success(core):
+    disc = core.create_discussion(topic="Test", participants=_make_participants())
+    disc_id = disc["discussion_id"]
+
+    result = core.speak(disc_id, "alice", "Hello!")
+    assert result["ok"] is True
+    assert result["speech_id"] > 0
+    assert result["round"] == 0
+    assert result["participant"] == "alice"
+
+
+def test_speak_unknown_participant(core):
+    disc = core.create_discussion(topic="Test", participants=_make_participants())
+    disc_id = disc["discussion_id"]
+
+    with pytest.raises(Exception, match="not an active member"):
+        core.speak(disc_id, "eve", "Sneaky!")
+
+
+def test_speak_missing_content(core):
+    disc = core.create_discussion(topic="Test", participants=_make_participants())
+    disc_id = disc["discussion_id"]
+
+    with pytest.raises(ValueError, match="content"):
+        core.speak(disc_id, "alice", "")
+
+
+# ---------------------------------------------------------------------------
+# read
+# ---------------------------------------------------------------------------
+
+
+def test_read_success(core):
+    disc = core.create_discussion(topic="Test", participants=_make_participants())
+    disc_id = disc["discussion_id"]
+
+    core.speak(disc_id, "alice", "Hi")
+    core.speak(disc_id, "bob", "Hello")
+
+    result = core.read(disc_id)
+    assert result["ok"] is True
+    assert result["speech_count"] == 2
+    assert len(result["speeches"]) == 2
+    assert "formatted_history" in result
+
+
+def test_read_with_since_round(core):
+    disc = core.create_discussion(topic="Test", participants=_make_participants())
+    disc_id = disc["discussion_id"]
+
+    # Round 0
+    core.speak(disc_id, "alice", "r0s1")
+    core.speak(disc_id, "bob", "r0s2")
+    # Round 1
+    core.speak(disc_id, "alice", "r1s1")
+
+    result = core.read(disc_id, since_round=1)
+    assert result["speech_count"] == 1
+    assert result["speeches"][0]["content"] == "r1s1"
+
+
+# ---------------------------------------------------------------------------
+# status
+# ---------------------------------------------------------------------------
+
+
+def test_status(core):
+    disc = core.create_discussion(topic="Test", participants=_make_participants())
+    disc_id = disc["discussion_id"]
+
+    result = core.status(disc_id)
+    assert result["ok"] is True
+    assert result["status"] == "active"
+    assert result["current_round"] == 0
+    assert result["speech_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# end_discussion
+# ---------------------------------------------------------------------------
+
+
+def test_end_conclude(core):
+    disc = core.create_discussion(topic="Test", participants=_make_participants())
+    disc_id = disc["discussion_id"]
+
+    result = core.end_discussion(disc_id)
+    assert result["ok"] is True
+    assert result["action"] == "concluded"
+
+
+def test_end_force_cancel(core):
+    disc = core.create_discussion(topic="Test", participants=_make_participants())
+    disc_id = disc["discussion_id"]
+
+    result = core.end_discussion(disc_id, force=True)
+    assert result["ok"] is True
+    assert result["action"] == "cancelled"
+
+
+# ---------------------------------------------------------------------------
+# list_discussions
+# ---------------------------------------------------------------------------
+
+
+def test_list(core):
+    for i in range(3):
+        core.create_discussion(topic=f"Topic {i}", participants=_make_participants())
+
+    result = core.list_discussions()
+    assert result["ok"] is True
+    assert result["count"] == 3
+
+
+def test_list_filter_status(core):
+    disc = core.create_discussion(topic="Test", participants=_make_participants())
+    disc_id = disc["discussion_id"]
+    core.end_discussion(disc_id)
+    core.create_discussion(topic="Test2", participants=_make_participants())
+
+    result = core.list_discussions(status="active")
+    assert result["count"] == 1
+
+    result = core.list_discussions(status="concluded")
+    assert result["count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# summarize
+# ---------------------------------------------------------------------------
+
+
+def test_summarize(core):
+    disc = core.create_discussion(
+        topic="DB Selection",
+        participants=_make_participants(),
+        context="We need a new database",
+    )
+    disc_id = disc["discussion_id"]
+
+    core.speak(disc_id, "alice", "PostgreSQL")
+    core.speak(disc_id, "bob", "MySQL")
+
+    result = core.summarize(disc_id)
+    assert result["ok"] is True
+    assert result["topic"] == "DB Selection"
+    assert result["speech_count"] == 2
+    assert "rounds" in result
+    assert "participants" in result
+    assert "consensus_points" in result
+    assert "formatted_history" in result

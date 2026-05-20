@@ -1,87 +1,103 @@
-# Roundtable Discussion
+# Roundtable
 
-Multi-agent roundtable discussion system for Hermes Agent. Enable multiple AI agents to participate in structured, multi-round discussions with convergence detection and conclusion generation.
+Framework-agnostic multi-agent roundtable discussion library for Python.
+
+## Features
+
+- **Zero dependencies** — only Python stdlib (sqlite3, dataclasses, json)
+- **Framework-agnostic** — works standalone or with any agent framework
+- **Structured discussions** — multi-round, tracked convergence, findings
+- **7 operations** — init, speak, read, status, summarize, end, list
+- **Adapters** — built-in support for Hermes Agent, generic Python API
 
 ## Quick Start
 
 ```python
-# 1. Create a discussion
-roundtable_init(
-    topic="Database selection: PostgreSQL vs MySQL",
+from roundtable import RoundtableCore
+
+core = RoundtableCore()
+
+# Create a discussion
+result = core.create_discussion(
+    topic="Should we use PostgreSQL or MySQL?",
     participants=[
-        {"profile": "bingge", "role": "Product Director", "perspective": "Focus on UX"},
-        {"profile": "mafei", "role": "Tech Lead", "perspective": "Focus on feasibility"},
+        {"profile": "alice", "role": "Backend Engineer", "display_name": "Alice"},
+        {"profile": "bob", "role": "DBA", "display_name": "Bob"},
     ],
-    max_rounds=3
+    max_rounds=3,
 )
+disc_id = result["discussion_id"]
 
-# 2. Coordinator speaks first (Round 0)
-roundtable_speak(discussion_id="rt_xxxxxxxx", participant="coordinator", content="...")
+# Participants speak
+core.speak(disc_id, "alice", "PostgreSQL has better JSON support.")
+core.speak(disc_id, "bob", "MySQL is simpler to operate at scale.")
 
-# 3. Participants take turns
-roundtable_speak(discussion_id="rt_xxxxxxxx", participant="bingge", content="...")
+# Read history
+history = core.read(disc_id)
+print(history["formatted_history"])
 
-# 4. Check convergence
-roundtable_status(discussion_id="rt_xxxxxxxx")
-
-# 5. Generate conclusion data
-roundtable_summarize(discussion_id="rt_xxxxxxxx")
-
-# 6. End discussion
-roundtable_end(discussion_id="rt_xxxxxxxx")
+# End discussion
+core.end_discussion(disc_id, conclusion="We chose PostgreSQL")
 ```
+
+## Generic API (error-safe)
+
+```python
+from roundtable.adapters.generic import Roundtable
+
+rt = Roundtable(db_path="/tmp/my_discussions.db")
+result = rt.init(topic="...", participants=[...])
+# All methods return dicts — errors as {"error": "msg"}, never raise
+```
+
+## Installation
+
+```bash
+pip install roundtable
+```
+
+Or from source:
+
+```bash
+git clone https://github.com/ParsifalC/roundtable.git
+cd roundtable
+pip install -e .
+```
+
+## Hermes Agent Integration
+
+When installed alongside Hermes Agent, the adapter auto-registers all 7 tools:
+
+```yaml
+# In your Hermes profile config
+toolsets:
+  - roundtable
+```
+
+The adapter lives in `roundtable.adapters.hermes` and registers tools
+via Hermes' tool discovery system.
 
 ## Architecture
 
 ```
-src/
-├── hermes_cli/
-│   └── roundtable_db.py      # SQLite data layer (5 tables)
-├── tools/
-│   └── roundtable_tools.py   # Tool handlers (7 tools)
-├── skills/
-│   └── SKILL.md              # Coordinator flow + participant template
-└── toolsets.py               # Toolset registration
-
-tests/
-├── hermes_cli/
-│   └── test_roundtable_db.py  # DB layer tests (28 tests)
-└── tools/
-    └── test_roundtable_tools.py  # Tool layer tests (16 tests)
+src/roundtable/
+├── __init__.py       # Public API exports
+├── models.py         # Dataclasses (Discussion, Speech, Participant, etc.)
+├── exceptions.py     # Custom exceptions (all inherit ValueError)
+├── db.py             # RoundtableDB — SQLite storage layer
+├── core.py           # RoundtableCore — business logic layer
+└── adapters/
+    ├── hermes.py     # Hermes Agent tool adapter
+    └── generic.py    # Generic Python API (error-safe facade)
 ```
 
-## Tools
-
-| Tool | Purpose |
-|------|---------|
-| `roundtable_init` | Create discussion with topic + participants |
-| `roundtable_speak` | Record participant speech (auto-advances rounds) |
-| `roundtable_read` | Read discussion history (full or since round N) |
-| `roundtable_status` | Check status + convergence metrics |
-| `roundtable_summarize` | Get structured data for conclusion document |
-| `roundtable_end` | Conclude or force-cancel a discussion |
-| `roundtable_list` | List all discussions with optional status filter |
-
-## Data Model
-
-- **discussions** — Topic, status, round tracking, speech order
-- **participants** — Registered profiles with roles and perspectives
-- **speeches** — Multi-round speeches with reply-to support
-- **findings** — Consensus/disagreement/new_point categorization
-- **convergence_history** — Per-round convergence scoring
-
-## Configuration
-
-- **Database**: `~/.hermes/roundtable.db` (override with `HERMES_ROUNDTABLE_DB`)
-- **Toolset**: Enable `roundtable` in profile config or pass `enabled_toolsets: ["roundtable"]`
-
-## Testing
+## Development
 
 ```bash
-cd roundtable
-python -m pytest tests/ -v
+pip install -e ".[dev]"
+pytest tests/ -v
 ```
 
 ## License
 
-Part of [Hermes Agent](https://github.com/ParsifalC/hermes-agent).
+MIT

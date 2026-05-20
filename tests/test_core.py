@@ -41,7 +41,7 @@ def test_core_module_imports():
 
 
 def test_schema_constants_available():
-    """Verify all 8 tool schemas are accessible from the Hermes adapter."""
+    """Verify all 9 tool schemas are accessible from the Hermes adapter."""
     from roundtable.adapters.hermes import (
         ROUNDTABLE_INIT_SCHEMA,
         ROUNDTABLE_SPEAK_SCHEMA,
@@ -51,12 +51,14 @@ def test_schema_constants_available():
         ROUNDTABLE_END_SCHEMA,
         ROUNDTABLE_LIST_SCHEMA,
         ROUNDTABLE_ADVANCE_SCHEMA,
+        ROUNDTABLE_NOTIFY_SCHEMA,
     )
     schemas = [
         ROUNDTABLE_INIT_SCHEMA, ROUNDTABLE_SPEAK_SCHEMA,
         ROUNDTABLE_READ_SCHEMA, ROUNDTABLE_STATUS_SCHEMA,
         ROUNDTABLE_SUMMARIZE_SCHEMA, ROUNDTABLE_END_SCHEMA,
         ROUNDTABLE_LIST_SCHEMA, ROUNDTABLE_ADVANCE_SCHEMA,
+        ROUNDTABLE_NOTIFY_SCHEMA,
     ]
     for s in schemas:
         assert "name" in s
@@ -334,3 +336,132 @@ def test_calculate_convergence(core):
     result = core.calculate_convergence(disc_id, 0)
     assert result["ok"] is True
     assert result["convergence_score"] is None  # no findings yet
+
+
+# ---------------------------------------------------------------------------
+# notifications
+# ---------------------------------------------------------------------------
+
+
+def test_create_discussion_with_notifications(core):
+    """Creating a discussion with notifications config stores it."""
+    sent = []
+    core.set_send_fn(lambda p, c, m: sent.append((p, c, m)))
+
+    notif_config = {
+        "enabled": True,
+        "channels": [{"platform": "feishu", "chat_id": "oc_test123"}],
+        "events": ["speech", "round_end", "concluded"],
+    }
+    result = core.create_discussion(
+        topic="Notif Test",
+        participants=_make_participants(),
+        notifications=notif_config,
+    )
+    assert result["ok"] is True
+    disc_id = result["discussion_id"]
+
+    # Verify notifications persisted
+    status = core.status(disc_id)
+    assert status["ok"] is True
+
+    # Speak and verify notification sent
+    core.speak(disc_id, "alice", "Hello from Alice")
+    assert len(sent) == 1
+    assert sent[0][0] == "feishu"
+    assert sent[0][1] == "oc_test123"
+    assert "Alice" in sent[0][2]
+
+
+def test_create_discussion_without_notifications(core):
+    """Without notifications config, no notifications are sent."""
+    sent = []
+    core.set_send_fn(lambda p, c, m: sent.append((p, c, m)))
+
+    result = core.create_discussion(
+        topic="No Notif",
+        participants=_make_participants(),
+    )
+    disc_id = result["discussion_id"]
+    core.speak(disc_id, "alice", "Hello")
+    assert len(sent) == 0
+
+
+def test_notification_failure_does_not_block(core):
+    """Notification send failures must not raise or block the discussion."""
+    def bad_send(p, c, m):
+        raise RuntimeError("Network error")
+
+    core.set_send_fn(bad_send)
+    notif_config = {
+        "enabled": True,
+        "channels": [{"platform": "feishu", "chat_id": "oc_test"}],
+    }
+    result = core.create_discussion(
+        topic="Fail Test",
+        participants=_make_participants(),
+        notifications=notif_config,
+    )
+    disc_id = result["discussion_id"]
+
+    # Should not raise despite bad send_fn
+    r = core.speak(disc_id, "alice", "Still works")
+    assert r["ok"] is True
+
+
+def test_notification_events_filter(core):
+    """Only subscribed events should trigger notifications."""
+    sent = []
+    core.set_send_fn(lambda p, c, m: sent.append(m))
+
+    notif_config = {
+        "enabled": True,
+        "channels": [{"platform": "feishu", "chat_id": "oc_test"}],
+        "events": ["round_end"],  # Only round_end
+    }
+    result = core.create_discussion(
+        topic="Filter Test",
+        participants=_make_participants(),
+        notifications=notif_config,
+    )
+    disc_id = result["discussion_id"]
+
+    # Round 0 — speech should NOT trigger (not subscribed)
+    core.speak(disc_id, "alice", "Hello")
+    assert len(sent) == 0
+
+    # Complete round 0 — round_end should NOT trigger for round 0 (coordinator round)
+    core.speak(disc_id, "bob", "World")
+    assert len(sent) == 0  # round 0 doesn't fire round_end
+
+    # Round 1 — speech should NOT trigger
+    core.speak(disc_id, "alice", "R1 Alice")
+    assert len(sent) == 0
+
+    # Complete round 1 — round_end SHOULD trigger
+    core.speak(disc_id, "bob", "R1 Bob")
+    assert len(sent) == 1
+    assert "第1轮讨论结束" in sent[0]
+
+
+def test_manual_notify(core):
+    """roundtable_notify should send a manual notification."""
+    sent = []
+    core.set_send_fn(lambda p, c, m: sent.append(m))
+
+    notif_config = {
+        "enabled": True,
+        "channels": [{"platform": "feishu", "chat_id": "oc_test"}],
+    }
+    result = core.create_discussion(
+        topic="Manual Notif",
+        participants=_make_participants(),
+        notifications=notif_config,
+    )
+    disc_id = result["discussion_id"]
+
+    # Manual notify
+    r = core.notify(disc_id, "round_start", round_num=1)
+    assert r["ok"] is True
+    assert len(sent) == 1
+    assert "第1轮讨论开始" in sent[0]

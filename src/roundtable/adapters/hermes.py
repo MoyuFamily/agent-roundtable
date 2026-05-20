@@ -107,6 +107,17 @@ def _handle_advance(args: dict, **kw) -> str:
     return _handle({"discussion_id": discussion_id}, "advance")
 
 
+def _handle_notify(args: dict, **kw) -> str:
+    discussion_id = args.get("discussion_id", "").strip()
+    if not discussion_id:
+        return _err("discussion_id is required")
+    event = args.get("event", "").strip()
+    if not event:
+        return _err("event is required")
+    extra = {k: v for k, v in args.items() if k not in ("discussion_id", "event")}
+    return _handle({"discussion_id": discussion_id, "event": event, **extra}, "notify")
+
+
 # ---------------------------------------------------------------------------
 # Tool schemas (identical to original)
 # ---------------------------------------------------------------------------
@@ -146,6 +157,30 @@ ROUNDTABLE_INIT_SCHEMA = {
             },
             "output_path": {"type": "string", "description": "Path to save conclusion"},
             "created_by": {"type": "string", "description": "Creator profile name"},
+            "notifications": {
+                "type": "object",
+                "description": "Notification config for real-time push to messaging channels",
+                "properties": {
+                    "enabled": {"type": "boolean", "description": "Enable notifications"},
+                    "channels": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "platform": {"type": "string", "description": "Platform (e.g. 'feishu')"},
+                                "chat_id": {"type": "string", "description": "Chat/channel ID"},
+                            },
+                            "required": ["chat_id"],
+                        },
+                        "description": "Target channels",
+                    },
+                    "events": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["round_start", "speech", "round_end", "concluded"]},
+                        "description": "Events to subscribe (default: all)",
+                    },
+                },
+            },
         },
         "required": ["topic", "participants"],
     },
@@ -265,6 +300,30 @@ ROUNDTABLE_ADVANCE_SCHEMA = {
     },
 }
 
+ROUNDTABLE_NOTIFY_SCHEMA = {
+    "name": "roundtable_notify",
+    "description": (
+        "Manually trigger a notification for a discussion event. "
+        "Valid events: round_start, speech, round_end, concluded."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "discussion_id": {"type": "string", "description": "Discussion ID (rt_xxxxxxxx)"},
+            "event": {
+                "type": "string",
+                "enum": ["round_start", "speech", "round_end", "concluded"],
+                "description": "Event type to notify",
+            },
+            "round_num": {"type": "integer", "description": "Round number"},
+            "participant": {"type": "string", "description": "Participant name"},
+            "content": {"type": "string", "description": "Speech content"},
+            "conclusion": {"type": "string", "description": "Conclusion text"},
+        },
+        "required": ["discussion_id", "event"],
+    },
+}
+
 
 # ---------------------------------------------------------------------------
 # Registration function — called by Hermes tool discovery
@@ -287,6 +346,7 @@ def register_roundtable_tools(registry, *, check_fn=None):
         ("roundtable_end", ROUNDTABLE_END_SCHEMA, _handle_end, "🏁"),
         ("roundtable_list", ROUNDTABLE_LIST_SCHEMA, _handle_list, "📋"),
         ("roundtable_advance", ROUNDTABLE_ADVANCE_SCHEMA, _handle_advance, "⏭️"),
+        ("roundtable_notify", ROUNDTABLE_NOTIFY_SCHEMA, _handle_notify, "🔔"),
     ]
     for name, schema, handler, emoji in tools:
         registry.register(

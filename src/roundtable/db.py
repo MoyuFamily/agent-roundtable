@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS discussions (
     concluded_at INTEGER,
     conclusion TEXT,
     convergence_score REAL,
-    output_path TEXT
+    output_path TEXT,
+    notifications TEXT
 );
 
 CREATE TABLE IF NOT EXISTS participants (
@@ -162,8 +163,16 @@ class RoundtableDB:
         conn.execute("PRAGMA foreign_keys=ON")
         if not self._initialized:
             conn.executescript(SCHEMA_SQL)
+            self._migrate(conn)
             self._initialized = True
         return conn
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Apply schema migrations for existing databases."""
+        # Add notifications column if missing
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(discussions)").fetchall()}
+        if "notifications" not in cols:
+            conn.execute("ALTER TABLE discussions ADD COLUMN notifications TEXT")
 
     # ------------------------------------------------------------------
     # Discussion CRUD
@@ -180,6 +189,7 @@ class RoundtableDB:
         speech_order: str = "fixed",
         created_by: str = "unknown",
         output_path: Optional[str] = None,
+        notifications: Optional[Dict] = None,
     ) -> Discussion:
         if speech_order not in VALID_SPEECH_ORDERS:
             raise InvalidSpeechOrderError(f"Invalid speech_order: {speech_order}")
@@ -190,16 +200,17 @@ class RoundtableDB:
 
         disc_id = f"rt_{secrets.token_hex(4)}"
         now = int(time.time())
+        notif_json = json.dumps(notifications) if notifications else None
 
         conn.execute("BEGIN IMMEDIATE")
         try:
             conn.execute(
                 """INSERT INTO discussions
                    (id, topic, context, status, max_rounds, current_round,
-                    speech_order, created_by, created_at, output_path)
-                   VALUES (?, ?, ?, 'active', ?, 0, ?, ?, ?, ?)""",
+                    speech_order, created_by, created_at, output_path, notifications)
+                   VALUES (?, ?, ?, 'active', ?, 0, ?, ?, ?, ?, ?)""",
                 (disc_id, topic, context, max_rounds, speech_order,
-                 created_by, now, output_path),
+                 created_by, now, output_path, notif_json),
             )
             for p in participants:
                 profile = p.get("profile", "").strip()
@@ -223,6 +234,7 @@ class RoundtableDB:
             max_rounds=max_rounds, current_round=0, speech_order=speech_order,
             created_by=created_by, created_at=now, concluded_at=None,
             conclusion=None, convergence_score=None, output_path=output_path,
+            notifications=notifications,
         )
 
     def get_discussion(
@@ -654,6 +666,8 @@ class RoundtableDB:
 
     @staticmethod
     def _row_to_discussion(row) -> Discussion:
+        notif_raw = row["notifications"]
+        notif = json.loads(notif_raw) if notif_raw else None
         return Discussion(
             id=row["id"], topic=row["topic"], context=row["context"],
             status=row["status"], max_rounds=row["max_rounds"],
@@ -662,4 +676,5 @@ class RoundtableDB:
             concluded_at=row["concluded_at"], conclusion=row["conclusion"],
             convergence_score=row["convergence_score"],
             output_path=row["output_path"],
+            notifications=notif,
         )

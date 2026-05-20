@@ -48,6 +48,7 @@ class Discussion:
     conclusion: Optional[str]
     convergence_score: Optional[float]
     output_path: Optional[str]
+    notifications: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -115,7 +116,8 @@ CREATE TABLE IF NOT EXISTS discussions (
     concluded_at INTEGER,
     conclusion TEXT,
     convergence_score REAL,
-    output_path TEXT
+    output_path TEXT,
+    notifications TEXT
 );
 
 CREATE TABLE IF NOT EXISTS participants (
@@ -212,8 +214,16 @@ def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     if needs_init:
         conn.executescript(SCHEMA_SQL)
+        _migrate(conn)
         _INITIALIZED_PATHS.add(resolved)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Apply schema migrations for existing databases."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(discussions)").fetchall()}
+    if "notifications" not in cols:
+        conn.execute("ALTER TABLE discussions ADD COLUMN notifications TEXT")
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +251,7 @@ def create_discussion(
     speech_order: str = "fixed",
     created_by: str = "unknown",
     output_path: Optional[str] = None,
+    notifications: Optional[Dict[str, Any]] = None,
 ) -> Discussion:
     """Create a new discussion and register participants.
 
@@ -255,16 +266,17 @@ def create_discussion(
 
     disc_id = _generate_discussion_id()
     now = int(time.time())
+    notif_json = json.dumps(notifications) if notifications else None
 
     conn.execute("BEGIN IMMEDIATE")
     try:
         conn.execute(
             """INSERT INTO discussions
                (id, topic, context, status, max_rounds, current_round,
-                speech_order, created_by, created_at, output_path)
-               VALUES (?, ?, ?, 'active', ?, 0, ?, ?, ?, ?)""",
+                speech_order, created_by, created_at, output_path, notifications)
+               VALUES (?, ?, ?, 'active', ?, 0, ?, ?, ?, ?, ?)""",
             (disc_id, topic, context, max_rounds, speech_order,
-             created_by, now, output_path),
+             created_by, now, output_path, notif_json),
         )
         for p in participants:
             profile = p.get("profile", "").strip()
@@ -303,6 +315,7 @@ def create_discussion(
         conclusion=None,
         convergence_score=None,
         output_path=output_path,
+        notifications=notifications,
     )
 
 
@@ -329,6 +342,7 @@ def get_discussion(
         conclusion=row["conclusion"],
         convergence_score=row["convergence_score"],
         output_path=row["output_path"],
+        notifications=json.loads(row["notifications"]) if row["notifications"] else None,
     )
 
 
@@ -358,6 +372,7 @@ def list_discussions(
             concluded_at=r["concluded_at"], conclusion=r["conclusion"],
             convergence_score=r["convergence_score"],
             output_path=r["output_path"],
+            notifications=json.loads(r["notifications"]) if r["notifications"] else None,
         )
         for r in rows
     ]

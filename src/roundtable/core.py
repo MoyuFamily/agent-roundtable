@@ -17,6 +17,7 @@ from roundtable.exceptions import (
     InvalidParticipantError,
     RoundtableError,
 )
+from roundtable.notify import Notifier
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +30,12 @@ class RoundtableCore:
 
     Args:
         db: A RoundtableDB instance (uses default if None).
+        send_fn: Optional callback(platform, chat_id, message) for notifications.
     """
 
-    def __init__(self, db: Optional[RoundtableDB] = None):
+    def __init__(self, db: Optional[RoundtableDB] = None, send_fn=None):
         self.db = db or RoundtableDB()
+        self._send_fn = send_fn
 
     # ------------------------------------------------------------------
     # Public API
@@ -48,6 +51,7 @@ class RoundtableCore:
         speech_order: str = "fixed",
         created_by: str = "coordinator",
         output_path: Optional[str] = None,
+        notifications: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Create a new roundtable discussion.
 
@@ -77,6 +81,7 @@ class RoundtableCore:
                 speech_order=speech_order,
                 created_by=created_by,
                 output_path=output_path,
+                notifications=notifications,
             )
             return {
                 "ok": True,
@@ -150,6 +155,59 @@ class RoundtableCore:
                 convergence_score = self.db.calculate_convergence(
                     conn, discussion_id, speech.round
                 )
+
+            # --- Notifications ---
+            notifier = self._make_notifier(disc.notifications)
+            participants = self.db.get_participants(conn, discussion_id)
+            p_map = {p.participant: p for p in participants}
+
+            # Speech notification
+            p_info = p_map.get(speech.participant)
+            notifier.notify(
+                "speech",
+                discussion_id=discussion_id,
+                topic=disc.topic,
+                participant=speech.participant,
+                display_name=p_info.display_name if p_info else speech.participant,
+                role=p_info.role if p_info else "",
+                round_num=speech.round,
+                content=speech.content,
+            )
+
+            # Check if this is the first speech in a new round (round_start)
+            if speech.round > 0 and not round_complete:
+                speeches_this_round = self.db.get_speeches(
+                    conn, discussion_id, since_round=speech.round
+                )
+                # Filter to current round only
+                round_speeches = [s for s in speeches_this_round if s.round == speech.round]
+                if len(round_speeches) == 1:
+                    # First speech in this round — fire round_start
+                    notifier.notify(
+                        "round_start",
+                        discussion_id=discussion_id,
+                        topic=disc.topic,
+                        round_num=speech.round,
+                    )
+
+            # Round complete notification
+            if round_complete and speech.round > 0:
+                # Get key points from this round
+                findings = self.db.get_findings(conn, discussion_id)
+                round_findings = [f for f in findings if f.round == speech.round]
+                key_points = [f.content for f in round_findings]
+                notifier.notify(
+                    "round_end",
+                    discussion_id=discussion_id,
+                    topic=disc.topic,
+                    round_num=speech.round,
+                    convergence=convergence_score,
+                    key_points=key_points,
+                )
+
+            # Discussion auto-concluded notification
+            if discussion_complete:
+                self._notify_concluded(conn, disc, notifier)
 
             return {
                 "ok": True,
@@ -408,6 +466,13 @@ class RoundtableCore:
                 ok = self.db.conclude_discussion(conn, discussion_id, conclusion=conclusion)
                 action = "concluded"
 
+            # Fire concluded notification (only on conclude, not cancel)
+            if action == "concluded":
+                disc_after = self.db.get_discussion(conn, discussion_id)
+                if disc_after:
+                    notifier = self._make_notifier(disc.notifications)
+                    self._notify_concluded(conn, disc_after, notifier)
+
             return {
                 "ok": True,
                 "discussion_id": discussion_id,
@@ -469,6 +534,36 @@ class RoundtableCore:
         finally:
             conn.close()
 
+    def notify(
+        self,
+        discussion_id: str,
+        event: str,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Manually trigger a notification for a discussion.
+
+        Useful for custom notification flows or re-sending missed events.
+        """
+        if not discussion_id:
+            raise ValueError("discussion_id is required")
+
+        conn = self.db.connect()
+        try:
+            disc = self.db.get_discussion(conn, discussion_id)
+            if not disc:
+                raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
+
+            notifier = self._make_notifier(disc.notifications)
+            notifier.notify(
+                event,
+                discussion_id=discussion_id,
+                topic=disc.topic,
+                **kwargs,
+            )
+            return {"ok": True, "discussion_id": discussion_id, "event": event}
+        finally:
+            conn.close()
+
     def calculate_convergence(
         self, discussion_id: str, round_num: int
     ) -> Dict[str, Any]:
@@ -495,6 +590,29 @@ class RoundtableCore:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _make_notifier(self, config: Optional[Dict[str, Any]]) -> Notifier:
+        """Create a Notifier from a discussion's notification config."""
+        return Notifier(config, send_fn=self._send_fn)
+
+    def _notify_concluded(self, conn, disc, notifier: Notifier) -> None:
+        """Fire the concluded notification with summary data."""
+        findings = self.db.get_findings(conn, disc.id)
+        consensus = [f.content for f in findings if f.type == "consensus"]
+        disagreements = [f.content for f in findings if f.type == "disagreement"]
+        notifier.notify(
+            "concluded",
+            discussion_id=disc.id,
+            topic=disc.topic,
+            conclusion=disc.conclusion or "",
+            convergence=disc.convergence_score,
+            consensus_points=consensus,
+            disagreement_points=disagreements,
+        )
+
+    def set_send_fn(self, send_fn) -> None:
+        """Set or replace the notification send callback."""
+        self._send_fn = send_fn
 
     @staticmethod
     def _format_history(speeches, participants_map: dict) -> str:

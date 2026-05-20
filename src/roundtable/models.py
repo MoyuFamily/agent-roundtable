@@ -6,7 +6,7 @@ Pure dataclasses with zero external dependencies — only stdlib.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -24,6 +24,7 @@ class Discussion:
     conclusion: Optional[str]
     convergence_score: Optional[float]
     output_path: Optional[str]
+    notifications: Optional[Dict[str, Any]] = None
 
 
 @dataclass

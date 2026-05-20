@@ -83,11 +83,19 @@ def _handle_init(args: dict, **kw) -> str:
     speech_order = args.get("speech_order", "fixed")
     output_path = args.get("output_path")
     created_by = args.get("created_by", "coordinator")
+    notifications = args.get("notifications")
 
     try:
         max_rounds = int(max_rounds)
     except (TypeError, ValueError):
         return tool_error("max_rounds must be an integer")
+
+    # Validate notifications config if provided
+    if notifications:
+        from roundtable.notify import validate_notification_config
+        errors = validate_notification_config(notifications)
+        if errors:
+            return tool_error(f"Invalid notifications config: {'; '.join(errors)}")
 
     try:
         rdb, conn = _connect()
@@ -101,6 +109,7 @@ def _handle_init(args: dict, **kw) -> str:
                 speech_order=speech_order,
                 created_by=created_by,
                 output_path=output_path,
+                notifications=notifications,
             )
             return _ok(
                 discussion_id=disc.id,
@@ -109,6 +118,7 @@ def _handle_init(args: dict, **kw) -> str:
                 max_rounds=disc.max_rounds,
                 speech_order=disc.speech_order,
                 status=disc.status,
+                notifications_enabled=bool(notifications and notifications.get("enabled")),
             )
         finally:
             conn.close()
@@ -540,6 +550,46 @@ def _handle_advance(args: dict, **kw) -> str:
         return tool_error(f"roundtable_advance: {e}")
 
 
+def _handle_notify(args: dict, **kw) -> str:
+    """Manually trigger a notification for a discussion."""
+    discussion_id = args.get("discussion_id", "").strip()
+    if not discussion_id:
+        return tool_error("discussion_id is required")
+
+    event = args.get("event", "").strip()
+    if not event:
+        return tool_error("event is required")
+
+    try:
+        rdb, conn = _connect()
+        try:
+            disc = rdb.get_discussion(conn, discussion_id)
+            if not disc:
+                return tool_error(f"Discussion {discussion_id} not found")
+
+            from roundtable.notify import Notifier, ALL_EVENTS
+            if event not in ALL_EVENTS:
+                return tool_error(f"Unknown event: {event}. Valid: {', '.join(sorted(ALL_EVENTS))}")
+
+            # For notify tool, send_fn comes from kw (injected by Hermes adapter)
+            send_fn = kw.get("send_fn")
+            notifier = Notifier(disc.notifications, send_fn=send_fn)
+            extra = {k: v for k, v in args.items()
+                     if k not in ("discussion_id", "event")}
+            notifier.notify(
+                event,
+                discussion_id=discussion_id,
+                topic=disc.topic,
+                **extra,
+            )
+            return _ok(discussion_id=discussion_id, event=event)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.exception("roundtable_notify failed")
+        return tool_error(f"roundtable_notify: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Tool schemas
 # ---------------------------------------------------------------------------
@@ -606,6 +656,30 @@ ROUNDTABLE_INIT_SCHEMA = {
             "created_by": {
                 "type": "string",
                 "description": "Profile name of the discussion creator",
+            },
+            "notifications": {
+                "type": "object",
+                "description": "Notification config for real-time push to messaging channels",
+                "properties": {
+                    "enabled": {"type": "boolean", "description": "Enable notifications"},
+                    "channels": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "platform": {"type": "string", "description": "Platform name (e.g. 'feishu')"},
+                                "chat_id": {"type": "string", "description": "Chat/channel ID"},
+                            },
+                            "required": ["chat_id"],
+                        },
+                        "description": "Target channels for notifications",
+                    },
+                    "events": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["round_start", "speech", "round_end", "concluded"]},
+                        "description": "Events to subscribe to (default: all)",
+                    },
+                },
             },
         },
         "required": ["topic", "participants"],
@@ -772,6 +846,46 @@ ROUNDTABLE_ADVANCE_SCHEMA = {
     },
 }
 
+ROUNDTABLE_NOTIFY_SCHEMA = {
+    "name": "roundtable_notify",
+    "description": (
+        "Manually trigger a notification for a discussion event. "
+        "Useful for custom notification flows or re-sending events. "
+        "Valid events: round_start, speech, round_end, concluded."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "discussion_id": {
+                "type": "string",
+                "description": "Discussion ID (rt_xxxxxxxx)",
+            },
+            "event": {
+                "type": "string",
+                "enum": ["round_start", "speech", "round_end", "concluded"],
+                "description": "Event type to notify",
+            },
+            "round_num": {
+                "type": "integer",
+                "description": "Round number (for round_start/round_end/speech events)",
+            },
+            "participant": {
+                "type": "string",
+                "description": "Participant name (for speech event)",
+            },
+            "content": {
+                "type": "string",
+                "description": "Speech content (for speech event)",
+            },
+            "conclusion": {
+                "type": "string",
+                "description": "Conclusion text (for concluded event)",
+            },
+        },
+        "required": ["discussion_id", "event"],
+    },
+}
+
 
 # ---------------------------------------------------------------------------
 # Registration
@@ -847,4 +961,13 @@ registry.register(
     handler=_handle_advance,
     check_fn=_check_roundtable_enabled,
     emoji="⏭️",
+)
+
+registry.register(
+    name="roundtable_notify",
+    toolset="roundtable",
+    schema=ROUNDTABLE_NOTIFY_SCHEMA,
+    handler=_handle_notify,
+    check_fn=_check_roundtable_enabled,
+    emoji="🔔",
 )

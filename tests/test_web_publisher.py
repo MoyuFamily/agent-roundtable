@@ -8,15 +8,12 @@ File I/O uses real tmp_path for integration confidence.
 from __future__ import annotations
 
 import json
-import os
-import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from roundtable.web_publisher import WebPublisher, _generate_token
-
 
 # ---------------------------------------------------------------------------
 # Token generation
@@ -42,7 +39,8 @@ class TestTokenGeneration:
         token = _generate_token()
         # nanoid uses A-Za-z0-9_- by default
         import re
-        assert re.match(r'^[A-Za-z0-9_-]+$', token)
+
+        assert re.match(r"^[A-Za-z0-9_-]+$", token)
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +52,7 @@ class TestWebPublisherInit:
     def test_creates_discussion_dir(self, tmp_path):
         d = tmp_path / "new_dir"
         assert not d.exists()
-        pub = WebPublisher(str(d))
+        WebPublisher(str(d))
         assert d.exists()
 
     def test_defaults(self, tmp_path):
@@ -82,6 +80,7 @@ class TestPortFinding:
     def test_skips_busy_port(self, tmp_path):
         """If the preferred port is busy, finds the next one."""
         import socket
+
         pub = WebPublisher(str(tmp_path), port=18299)
 
         # Block the first port
@@ -96,6 +95,7 @@ class TestPortFinding:
     def test_raises_if_no_port_available(self, tmp_path):
         """Raises RuntimeError when all 10 ports are busy."""
         import socket
+
         pub = WebPublisher(str(tmp_path), port=18399)
 
         blockers = []
@@ -229,12 +229,14 @@ class TestWebPublisherLifecycle:
         with patch.object(pub, "_start_pm2"):
             pub.start("rt_speech", topic="Test")
 
-        pub.on_speech({
-            "participant": "alice",
-            "display_name": "Alice",
-            "content": "Hello everyone!",
-            "round": 1,
-        })
+        pub.on_speech(
+            {
+                "participant": "alice",
+                "display_name": "Alice",
+                "content": "Hello everyone!",
+                "round": 1,
+            }
+        )
 
         data = pub._read_discussion_json()
         assert len(data["speeches"]) == 1
@@ -248,10 +250,12 @@ class TestWebPublisherLifecycle:
             pub.start("rt_multi", topic="Test")
 
         for i in range(5):
-            pub.on_speech({
-                "participant": f"speaker_{i}",
-                "content": f"Speech {i}",
-            })
+            pub.on_speech(
+                {
+                    "participant": f"speaker_{i}",
+                    "content": f"Speech {i}",
+                }
+            )
 
         data = pub._read_discussion_json()
         assert len(data["speeches"]) == 5
@@ -412,18 +416,22 @@ class TestIntegration:
         assert data["speeches"] == []
 
         # Speeches
-        pub.on_speech({
-            "participant": "tech_lead",
-            "display_name": "Tech Lead",
-            "content": "SSE is simpler for one-way push.",
-            "round": 1,
-        })
-        pub.on_speech({
-            "participant": "pm",
-            "display_name": "PM",
-            "content": "What about WeChat browser compatibility?",
-            "round": 1,
-        })
+        pub.on_speech(
+            {
+                "participant": "tech_lead",
+                "display_name": "Tech Lead",
+                "content": "SSE is simpler for one-way push.",
+                "round": 1,
+            }
+        )
+        pub.on_speech(
+            {
+                "participant": "pm",
+                "display_name": "PM",
+                "content": "What about WeChat browser compatibility?",
+                "round": 1,
+            }
+        )
 
         data = pub._read_discussion_json()
         assert len(data["speeches"]) == 2

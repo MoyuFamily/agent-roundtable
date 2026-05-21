@@ -25,10 +25,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 try:
-    from nanoid import generate as _nanoid_generate
+    from nanoid import generate as _nanoid_generate  # type: ignore[import-untyped]
 
     def _generate_token(size: int = 21) -> str:
-        return _nanoid_generate(size=size)
+        return str(_nanoid_generate(size=size))
 except ImportError:
     logger.debug("nanoid not installed, falling back to secrets.token_urlsafe")
 
@@ -39,6 +39,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # WebPublisher
 # ---------------------------------------------------------------------------
+
 
 class WebPublisher:
     """Manages a live web viewer for a single roundtable discussion.
@@ -210,9 +211,7 @@ class WebPublisher:
                     return port
                 except OSError:
                     continue
-        raise RuntimeError(
-            f"No available port in range {preferred}-{preferred + 9}"
-        )
+        raise RuntimeError(f"No available port in range {preferred}-{preferred + 9}")
 
     def _start_pm2(self, port: int) -> None:
         """Start the Express server via PM2."""
@@ -223,22 +222,25 @@ class WebPublisher:
         self._pm2_process_name = f"roundtable-web-{self._discussion_id}"
 
         cmd = [
-            "pm2", "start",
+            "pm2",
+            "start",
             str(server_path),
-            "--name", self._pm2_process_name,
-            "--interpreter", "node",
+            "--name",
+            self._pm2_process_name,
+            "--interpreter",
+            "node",
             "--",
-            "--port", str(port),
-            "--discussion-dir", str(self._discussion_dir),
+            "--port",
+            str(port),
+            "--discussion-dir",
+            str(self._discussion_dir),
         ]
 
         logger.info("Starting PM2: %s", " ".join(cmd))
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
         if result.returncode != 0:
-            raise RuntimeError(
-                f"PM2 start failed (exit {result.returncode}): {result.stderr}"
-            )
+            raise RuntimeError(f"PM2 start failed (exit {result.returncode}): {result.stderr}")
 
         # Wait for Express to be ready (probe the port)
         for _ in range(20):  # up to 10 seconds
@@ -294,10 +296,11 @@ class WebPublisher:
         if not target.exists():
             return None
 
-        with open(target, "r") as f:
+        with open(target) as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_SH)
             try:
-                return json.load(f)
+                result: dict[str, Any] | None = json.load(f)
+                return result
             except json.JSONDecodeError:
                 return None
             finally:

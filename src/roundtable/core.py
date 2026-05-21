@@ -741,15 +741,21 @@ class RoundtableCore:
         # 1b. Optionally start web viewer
         publisher = None
         if web:
-            from roundtable.web_publisher import WebPublisher
             import os
+
+            from roundtable.web_publisher import WebPublisher
+
             output_dir = os.path.join("/tmp", "roundtable_web", disc_id)
             publisher = WebPublisher(output_dir, port=web_port)
             url = publisher.start(
                 disc_id,
                 topic=topic,
                 participants=[
-                    {"profile": p["profile"], "display_name": p.get("display_name", p["profile"]), "role": p.get("role", "")}
+                    {
+                        "profile": p["profile"],
+                        "display_name": p.get("display_name", p["profile"]),
+                        "role": p.get("role", ""),
+                    }
                     for p in participants
                 ],
             )
@@ -772,12 +778,14 @@ class RoundtableCore:
 
                 # Publish to web viewer
                 if publisher:
-                    publisher.on_speech({
-                        "participant": name,
-                        "display_name": p_map.get(name, {}).get("display_name", name),
-                        "content": content,
-                        "round": round_num,
-                    })
+                    publisher.on_speech(
+                        {
+                            "participant": name,
+                            "display_name": p_map.get(name, {}).get("display_name", name),
+                            "content": content,
+                            "round": round_num,
+                        }
+                    )
 
                 if verbose:
                     p_info = p_map.get(name, {})

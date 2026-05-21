@@ -36,7 +36,7 @@ def _hermes_send_fn(platform: str, chat_id: str, message: str) -> None:
     """
     try:
         if platform == "feishu":
-            profile = os.environ.get("HERMES_PROFILE", "mafei")
+            profile = os.environ.get("HERMES_PROFILE", "default")
             script = os.path.expanduser("~/.hermes/scripts/feishu-send.py")
             subprocess.run(
                 ["python3", script, profile, chat_id, message],

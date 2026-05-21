@@ -1,31 +1,24 @@
-# 🏛️ Roundtable
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ParsifalC/roundtable/main/docs/design/assets/svg/roundtable-logo.svg" alt="Roundtable" width="128" height="128">
+</p>
 
-> **让多个 AI 坐下来开会讨论，自动追踪共识与分歧，得出结论。**
+<h1 align="center">Roundtable</h1>
 
-[![PyPI version](https://img.shields.io/pypi/v/roundtable.svg)](https://pypi.org/project/roundtable/)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](#development)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](#installation)
+<p align="center">
+  <strong>让多个 AI 坐下来开会讨论，自动追踪共识与分歧，得出结论。</strong>
+</p>
 
-<!-- Demo GIF — replace with actual recording -->
-<!-- ![Roundtable Demo](docs/demo.gif) -->
+<p align="center">
+  <a href="https://pypi.org/project/roundtable-ai/"><img src="https://img.shields.io/pypi/v/roundtable-ai.svg" alt="PyPI version"></a>
+  <a href="#development"><img src="https://img.shields.io/badge/tests-passing-brightgreen.svg" alt="Tests"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
+  <a href="#installation"><img src="https://img.shields.io/badge/dependencies-zero-brightgreen.svg" alt="Zero Dependencies"></a>
+</p>
 
-```
-╭─────────────── Roundtable Discussion ───────────────╮
-│ Topic: PostgreSQL vs MySQL for our new service       │
-│                                                      │
-│ Round 1/3                                            │
-│                                                      │
-│ 👩 Alice (Backend Engineer):                         │
-│   "PostgreSQL has better JSON support and..."        │
-│                                                      │
-│ 👨 Bob (DBA):                                        │
-│   "MySQL is simpler to operate at scale..."          │
-│                                                      │
-│ 📊 Convergence: 0.35 → Consensus forming...          │
-╰──────────────────────────────────────────────────────╯
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ParsifalC/roundtable/main/docs/design/assets/demo.gif" alt="Roundtable Demo" width="600">
+</p>
 
 ---
 

@@ -33,6 +33,7 @@ from roundtable.models import (
     Speech,
 )
 from roundtable.notify import Notifier
+from roundtable.web_publisher import WebPublisher
 
 __version__ = "0.1.0"
 
@@ -53,4 +54,5 @@ __all__ = [
     "RoundtableDB",
     "RoundtableError",
     "Speech",
+    "WebPublisher",
 ]

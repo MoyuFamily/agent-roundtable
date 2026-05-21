@@ -1,0 +1,60 @@
+/* Roundtable Web Viewer — CSS Custom Properties
+ * Brand color: #4F46E5 (Indigo-600)
+ * Mobile-first, responsive design
+ */
+
+:root {
+  /* Brand */
+  --rt-primary: #4F46E5;
+  --rt-primary-light: #818CF8;
+  --rt-primary-dark: #3730A3;
+  --rt-primary-50: #EEF2FF;
+  --rt-primary-100: #E0E7FF;
+
+  /* Status */
+  --rt-status-waiting: #F59E0B;
+  --rt-status-active: #10B981;
+  --rt-status-concluded: #6366F1;
+
+  /* Text */
+  --rt-text-primary: #1E293B;
+  --rt-text-secondary: #64748B;
+  --rt-text-muted: #94A3B8;
+
+  /* Background */
+  --rt-bg: #FFFFFF;
+  --rt-bg-surface: #F8FAFC;
+  --rt-bg-card: #FFFFFF;
+
+  /* Border */
+  --rt-border: #E2E8F0;
+  --rt-border-light: #F1F5F9;
+
+  /* Shadow */
+  --rt-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --rt-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --rt-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  --rt-shadow-glow: 0 0 20px rgba(79, 70, 229, 0.3);
+
+  /* Typography */
+  --rt-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --rt-font-mono: "SF Mono", Monaco, "Cascadia Code", monospace;
+
+  /* Spacing */
+  --rt-space-xs: 4px;
+  --rt-space-sm: 8px;
+  --rt-space-md: 16px;
+  --rt-space-lg: 24px;
+  --rt-space-xl: 32px;
+  --rt-space-2xl: 48px;
+
+  /* Radius */
+  --rt-radius-sm: 6px;
+  --rt-radius-md: 8px;
+  --rt-radius-lg: 12px;
+  --rt-radius-xl: 16px;
+
+  /* Transitions */
+  --rt-transition: 0.2s ease;
+  --rt-transition-slow: 0.3s ease;
+}

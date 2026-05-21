@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>圆桌讨论 — Roundtable</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/theme.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--rt-font-sans); background: var(--rt-bg-surface); color: var(--rt-text-primary); min-height: 100vh; }
+
+    /* Status indicator */
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .status-dot.waiting { background: var(--rt-status-waiting); animation: pulse 2s infinite; }
+    .status-dot.active { background: var(--rt-status-active); animation: pulse 1.5s infinite; }
+    .status-dot.concluded { background: var(--rt-status-concluded); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.2); }
+    }
+
+    /* Speech card */
+    .speech-card {
+      background: var(--rt-bg-card);
+      border: 1px solid var(--rt-border);
+      border-radius: var(--rt-radius-lg);
+      padding: var(--rt-space-md) var(--rt-space-lg);
+      margin-bottom: var(--rt-space-md);
+      box-shadow: var(--rt-shadow-sm);
+      transition: all var(--rt-transition);
+    }
+    .speech-card:hover { box-shadow: var(--rt-shadow-md); }
+
+    /* New speech animation */
+    .speech-card.new {
+      animation: fadeSlideIn 0.5s ease-out;
+    }
+    .speech-card.highlight {
+      border-color: var(--rt-primary-light);
+      box-shadow: var(--rt-shadow-glow);
+    }
+
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Conclusion card */
+    .conclusion-card {
+      background: linear-gradient(135deg, var(--rt-primary-50), var(--rt-bg-card));
+      border: 2px solid var(--rt-primary);
+      border-radius: var(--rt-radius-xl);
+      padding: var(--rt-space-xl);
+      box-shadow: var(--rt-shadow-glow);
+      position: relative;
+      overflow: hidden;
+    }
+    .conclusion-card::before {
+      content: "";
+      position: absolute;
+      inset: -2px;
+      border-radius: inherit;
+      background: linear-gradient(135deg, var(--rt-primary), var(--rt-primary-light));
+      opacity: 0.1;
+      z-index: 0;
+    }
+
+    /* Header */
+    .header {
+      background: var(--rt-bg-card);
+      border-bottom: 1px solid var(--rt-border);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(8px);
+    }
+
+    /* Container */
+    .container {
+      max-width: 768px;
+      margin: 0 auto;
+      padding: var(--rt-space-md);
+    }
+
+    /* Revoked state */
+    .revoked-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    /* Waiting spinner */
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid var(--rt-border);
+      border-top-color: var(--rt-primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Participant avatar */
+    .avatar {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: var(--rt-primary-100);
+      color: var(--rt-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    /* Round badge */
+    .round-badge {
+      background: var(--rt-primary-50);
+      color: var(--rt-primary);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: var(--rt-radius-sm);
+    }
+
+    /* Connection status */
+    .conn-status {
+      font-size: 12px;
+      color: var(--rt-text-muted);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .conn-dot { width: 6px; height: 6px; border-radius: 50%; }
+    .conn-dot.connected { background: #10B981; }
+    .conn-dot.disconnected { background: #EF4444; }
+    .conn-dot.reconnecting { background: #F59E0B; animation: pulse 1s infinite; }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="container flex items-center justify-between py-3">
+      <div class="flex items-center gap-2">
+        <span class="status-dot waiting" id="statusDot"></span>
+        <h1 class="text-lg font-semibold" id="topicTitle">圆桌讨论</h1>
+      </div>
+      <div class="conn-status">
+        <span class="conn-dot connected" id="connDot"></span>
+        <span id="connText">已连接</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main content -->
+  <main class="container py-4" id="mainContent">
+    <!-- Waiting state -->
+    <div id="waitingState" class="flex flex-col items-center justify-center py-20">
+      <div class="spinner mb-4"></div>
+      <p class="text-gray-500 text-lg">讨论即将开始…</p>
+      <p class="text-gray-400 text-sm mt-2">发言将会实时显示在这里</p>
+    </div>
+
+    <!-- Active state (hidden initially) -->
+    <div id="activeState" class="hidden">
+      <!-- Participants bar -->
+      <div id="participantsBar" class="flex gap-2 mb-4 overflow-x-auto pb-2"></div>
+
+      <!-- Speeches container -->
+      <div id="speechesContainer"></div>
+
+      <!-- Conclusion card (hidden until concluded) -->
+      <div id="conclusionCard" class="hidden conclusion-card mt-6">
+        <h3 class="text-lg font-semibold mb-2" style="position:relative;z-index:1">📌 讨论结论</h3>
+        <div id="conclusionContent" class="text-gray-700 leading-relaxed" style="position:relative;z-index:1"></div>
+      </div>
+    </div>
+
+    <!-- Revoked state (hidden) -->
+    <div id="revokedState" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-xl p-8 max-w-sm mx-4 text-center shadow-xl">
+        <div class="text-4xl mb-4">🔒</div>
+        <h2 class="text-xl font-semibold mb-2">链接已失效</h2>
+        <p class="text-gray-500">此讨论页面的访问权限已被创作者撤销</p>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Config injected by server
+    const CONFIG = window.__RT_CONFIG__ || { token: '', port: 8199, host: '0.0.0.0' };
+    const API_BASE = `${location.protocol}//${CONFIG.host}:${CONFIG.port}`;
+
+    // State
+    let state = {
+      status: 'waiting',
+      speeches: [],
+      participants: [],
+      topic: '',
+      conclusion: null,
+      currentRound: 0,
+      speechIdSet: new Set(),
+    };
+
+    // DOM refs
+    const $statusDot = document.getElementById('statusDot');
+    const $topicTitle = document.getElementById('topicTitle');
+    const $connDot = document.getElementById('connDot');
+    const $connText = document.getElementById('connText');
+    const $waitingState = document.getElementById('waitingState');
+    const $activeState = document.getElementById('activeState');
+    const $speechesContainer = document.getElementById('speechesContainer');
+    const $participantsBar = document.getElementById('participantsBar');
+    const $conclusionCard = document.getElementById('conclusionCard');
+    const $conclusionContent = document.getElementById('conclusionContent');
+    const $revokedState = document.getElementById('revokedState');
+
+    // ---- SSE Connection ----
+    let eventSource = null;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_DELAY = 30000;
+
+    function connectSSE() {
+      const url = `${API_BASE}/api/${CONFIG.token}/events`;
+
+      if (typeof EventSource !== 'undefined') {
+        // SSE (primary)
+        eventSource = new EventSource(url);
+
+        eventSource.addEventListener('init', (e) => {
+          const data = JSON.parse(e.data);
+          handleData(data);
+          setConnection('connected');
+          reconnectAttempts = 0;
+        });
+
+        eventSource.addEventListener('update', (e) => {
+          const data = JSON.parse(e.data);
+          handleData(data);
+        });
+
+        eventSource.addEventListener('revoked', () => {
+          showRevoked();
+        });
+
+        eventSource.onerror = () => {
+          setConnection('reconnecting');
+          eventSource.close();
+          reconnectAttempts++;
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
+          setTimeout(connectSSE, delay);
+        };
+      } else {
+        // Long-polling fallback (WeChat)
+        startLongPolling();
+      }
+    }
+
+    function startLongPolling() {
+      let since = 0;
+
+      async function poll() {
+        try {
+          const resp = await fetch(`${API_BASE}/api/${CONFIG.token}/poll?since=${since}`);
+          if (resp.status === 403) { showRevoked(); return; }
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+          const data = await resp.json();
+          if (data.updated_at > since) {
+            since = data.updated_at;
+            handleData(data);
+          }
+          setConnection('connected');
+        } catch (err) {
+          setConnection('disconnected');
+          await new Promise(r => setTimeout(r, 3000));
+        }
+
+        poll(); // continue polling
+      }
+
+      poll();
+    }
+
+    // ---- Data handling ----
+    function handleData(data) {
+      if (data.status === 'revoked' || (data.revoked_tokens && data.revoked_tokens.includes(CONFIG.token))) {
+        showRevoked();
+        return;
+      }
+
+      // Update topic
+      if (data.topic && data.topic !== state.topic) {
+        state.topic = data.topic;
+        $topicTitle.textContent = data.topic;
+        document.title = `${data.topic} — 圆桌讨论`;
+      }
+
+      // Update participants
+      if (data.participants) {
+        state.participants = data.participants;
+        renderParticipants();
+      }
+
+      // Update speeches
+      if (data.speeches) {
+        const newSpeeches = data.speeches.filter(s => !state.speechIdSet.has(s.id));
+        for (const s of newSpeeches) {
+          state.speechIdSet.add(s.id);
+          state.speeches.push(s);
+          renderSpeech(s, true);
+        }
+      }
+
+      // Update status
+      if (data.status !== state.status) {
+        state.status = data.status;
+        updateStatusUI();
+      }
+
+      // Conclusion
+      if (data.conclusion && !state.conclusion) {
+        state.conclusion = data.conclusion;
+        renderConclusion(data.conclusion);
+      }
+
+      // Show active state if we have speeches
+      if (state.speeches.length > 0 && state.status !== 'waiting') {
+        $waitingState.classList.add('hidden');
+        $activeState.classList.remove('hidden');
+      }
+    }
+
+    // ---- Rendering ----
+    function renderParticipants() {
+      $participantsBar.innerHTML = state.participants.map(p => `
+        <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-full px-3 py-1.5 text-sm whitespace-nowrap">
+          <div class="avatar" style="width:24px;height:24px;font-size:11px">${(p.display_name || p.profile || '?')[0]}</div>
+          <span class="font-medium">${p.display_name || p.profile}</span>
+          ${p.role ? `<span class="text-gray-400 text-xs">${p.role}</span>` : ''}
+        </div>
+      `).join('');
+    }
+
+    function renderSpeech(speech, isNew = false) {
+      const div = document.createElement('div');
+      div.className = `speech-card${isNew ? ' new highlight' : ''}`;
+      div.id = `speech-${speech.id}`;
+
+      const initial = (speech.display_name || speech.participant || '?')[0];
+      const round = speech.round > 0 ? `<span class="round-badge">R${speech.round}</span>` : '';
+
+      div.innerHTML = `
+        <div class="flex items-start gap-3">
+          <div class="avatar">${initial}</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="font-semibold text-sm">${speech.display_name || speech.participant}</span>
+              ${round}
+              <span class="text-xs text-gray-400 ml-auto">${formatTime(speech.created_at)}</span>
+            </div>
+            <div class="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(speech.content)}</div>
+          </div>
+        </div>
+      `;
+
+      $speechesContainer.appendChild(div);
+
+      // Remove highlight after 3s
+      if (isNew) {
+        setTimeout(() => div.classList.remove('highlight'), 3000);
+        // Auto-scroll
+        div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    }
+
+    function renderConclusion(content) {
+      $conclusionContent.textContent = content;
+      $conclusionCard.classList.remove('hidden');
+      setTimeout(() => {
+        $conclusionCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 300);
+    }
+
+    function updateStatusUI() {
+      $statusDot.className = `status-dot ${state.status}`;
+      if (state.status === 'concluded') {
+        $waitingState.classList.add('hidden');
+        $activeState.classList.remove('hidden');
+      }
+    }
+
+    function showRevoked() {
+      $revokedState.classList.remove('hidden');
+      if (eventSource) eventSource.close();
+    }
+
+    function setConnection(status) {
+      $connDot.className = `conn-dot ${status}`;
+      const labels = { connected: '已连接', disconnected: '已断开', reconnecting: '重连中…' };
+      $connText.textContent = labels[status] || status;
+    }
+
+    // ---- Utils ----
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function formatTime(ts) {
+      if (!ts) return '';
+      const d = new Date(ts * 1000);
+      return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+    }
+
+    // ---- Init ----
+    connectSSE();
+  </script>
+</body>
+</html>

@@ -76,7 +76,7 @@ def _err(msg: str) -> str:
     return json.dumps({"error": msg})
 
 
-def _handle(args: dict, method: str, **extra) -> str:
+def _handle(args: dict[str, Any], method: str, **extra: Any) -> str:
     """Generic handler: call a RoundtableCore method, catch errors."""
     try:
         core = _get_core()
@@ -95,26 +95,26 @@ def _handle(args: dict, method: str, **extra) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _handle_init(args: dict, **kw) -> str:
+def _handle_init(args: dict[str, Any], **kw: Any) -> str:
     return _handle(args, "create_discussion")
 
 
-def _handle_speak(args: dict, **kw) -> str:
+def _handle_speak(args: dict[str, Any], **kw: Any) -> str:
     return _handle(args, "speak")
 
 
-def _handle_read(args: dict, **kw) -> str:
+def _handle_read(args: dict[str, Any], **kw: Any) -> str:
     return _handle(args, "read")
 
 
-def _handle_status(args: dict, **kw) -> str:
+def _handle_status(args: dict[str, Any], **kw: Any) -> str:
     discussion_id = args.get("discussion_id", "").strip()
     if not discussion_id:
         return _err("discussion_id is required")
     return _handle({"discussion_id": discussion_id}, "status")
 
 
-def _handle_summarize(args: dict, **kw) -> str:
+def _handle_summarize(args: dict[str, Any], **kw: Any) -> str:
     discussion_id = args.get("discussion_id", "").strip()
     if not discussion_id:
         return _err("discussion_id is required")
@@ -122,22 +122,22 @@ def _handle_summarize(args: dict, **kw) -> str:
     return _handle({"discussion_id": discussion_id, "compact": compact}, "summarize")
 
 
-def _handle_end(args: dict, **kw) -> str:
+def _handle_end(args: dict[str, Any], **kw: Any) -> str:
     return _handle(args, "end_discussion")
 
 
-def _handle_list(args: dict, **kw) -> str:
+def _handle_list(args: dict[str, Any], **kw: Any) -> str:
     return _handle(args, "list_discussions")
 
 
-def _handle_advance(args: dict, **kw) -> str:
+def _handle_advance(args: dict[str, Any], **kw: Any) -> str:
     discussion_id = args.get("discussion_id", "").strip()
     if not discussion_id:
         return _err("discussion_id is required")
     return _handle({"discussion_id": discussion_id}, "advance")
 
 
-def _handle_notify(args: dict, **kw) -> str:
+def _handle_notify(args: dict[str, Any], **kw: Any) -> str:
     discussion_id = args.get("discussion_id", "").strip()
     if not discussion_id:
         return _err("discussion_id is required")
@@ -364,7 +364,7 @@ ROUNDTABLE_NOTIFY_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 
-def register_roundtable_tools(registry, *, check_fn=None):
+def register_roundtable_tools(registry: Any, *, check_fn: Any = None) -> None:
     """Register all 8 roundtable tools with a Hermes tool registry.
 
     Args:
@@ -398,7 +398,7 @@ def register_roundtable_tools(registry, *, check_fn=None):
 # ---------------------------------------------------------------------------
 
 
-def _auto_register():
+def _auto_register() -> None:
     """Try to auto-register with Hermes if available."""
     try:
         from tools.registry import registry

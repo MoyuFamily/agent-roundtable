@@ -182,14 +182,14 @@ class RoundtableDB:
         self,
         conn: sqlite3.Connection,
         topic: str,
-        participants: list[dict],
+        participants: list[dict[str, Any]],
         *,
         context: str | None = None,
         max_rounds: int = 5,
         speech_order: str = "fixed",
         created_by: str = "unknown",
         output_path: str | None = None,
-        notifications: dict | None = None,
+        notifications: dict[str, Any] | None = None,
     ) -> Discussion:
         if speech_order not in VALID_SPEECH_ORDERS:
             raise InvalidSpeechOrderError(f"Invalid speech_order: {speech_order}")
@@ -453,7 +453,7 @@ class RoundtableDB:
         participant: str | None = None,
     ) -> list[Speech]:
         query = "SELECT * FROM speeches WHERE discussion_id = ?"
-        params: list = [discussion_id]
+        params: list[Any] = [discussion_id]
         if since_round is not None:
             query += " AND round >= ?"
             params.append(since_round)
@@ -631,8 +631,8 @@ class RoundtableDB:
             (discussion_id, round_num),
         ).fetchall()
         counts = {r["type"]: r["cnt"] for r in rows}
-        consensus = counts.get("consensus", 0)
-        disagreement = counts.get("disagreement", 0)
+        consensus = int(counts.get("consensus", 0))
+        disagreement = int(counts.get("disagreement", 0))
         new_points = counts.get("new_point", 0)
 
         total = consensus + disagreement
@@ -665,7 +665,7 @@ class RoundtableDB:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _row_to_discussion(row) -> Discussion:
+    def _row_to_discussion(row: sqlite3.Row) -> Discussion:
         notif_raw = row["notifications"]
         notif = json.loads(notif_raw) if notif_raw else None
         return Discussion(

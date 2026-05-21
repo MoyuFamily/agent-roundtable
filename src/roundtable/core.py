@@ -7,6 +7,8 @@ imports. All handlers return plain dicts (JSON-serializable).
 from __future__ import annotations
 
 import logging
+import sqlite3
+from collections.abc import Callable
 from typing import Any, ClassVar
 
 from roundtable.db import RoundtableDB
@@ -15,6 +17,7 @@ from roundtable.exceptions import (
     DiscussionNotFoundError,
     InvalidParticipantError,
 )
+from roundtable.models import ConvergenceRecord, Discussion, Participant, Speech
 from roundtable.notify import Notifier
 
 logger = logging.getLogger(__name__)
@@ -31,7 +34,7 @@ class RoundtableCore:
         send_fn: Optional callback(platform, chat_id, message) for notifications.
     """
 
-    def __init__(self, db: RoundtableDB | None = None, send_fn=None):
+    def __init__(self, db: RoundtableDB | None = None, send_fn: Any = None):
         self.db = db or RoundtableDB()
         self._send_fn = send_fn
 
@@ -377,7 +380,7 @@ class RoundtableCore:
             disagreement_pts = [f.content for f in findings if f.type == "disagreement"]
             new_points = [f.content for f in findings if f.type == "new_point"]
 
-            rounds_dict: dict = {}
+            rounds_dict: dict[int, list[dict[str, Any]]] = {}
             for s in speeches:
                 rounds_dict.setdefault(s.round, []).append(
                     {
@@ -804,7 +807,7 @@ class RoundtableCore:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _demo_print_header(topic, participants, max_rounds):
+    def _demo_print_header(topic: str, participants: list[dict[str, Any]], max_rounds: int) -> None:
         width = 58
         print()
         print("╭" + "─" * width + "╮")
@@ -825,13 +828,13 @@ class RoundtableCore:
         print()
 
     @staticmethod
-    def _demo_print_round_start(round_num, max_rounds):
+    def _demo_print_round_start(round_num: int, max_rounds: int) -> None:
         print(f"{'━' * 60}")
         print(f"  📍 Round {round_num}/{max_rounds}")
         print(f"{'━' * 60}")
 
     @staticmethod
-    def _demo_print_speech(name, display_name, role, content):
+    def _demo_print_speech(name: str, display_name: str, role: str, content: str) -> None:
         icon = {"全栈工程师": "👩‍💻", "架构师": "👨‍💻", "产品经理": "👩‍💼"}.get(role, "👤")
         print(f"\n  {icon} {display_name} ({role}):")
         # Word wrap content
@@ -841,7 +844,7 @@ class RoundtableCore:
             print(f"     {line}")
 
     @staticmethod
-    def _demo_print_round_end(findings, conv_score):
+    def _demo_print_round_end(findings: list[tuple[str, str]], conv_score: float | None) -> None:
         print()
         print(f"  {'─' * 52}")
         score_str = f"{conv_score:.2f}" if conv_score is not None else "N/A"
@@ -852,7 +855,7 @@ class RoundtableCore:
         print()
 
     @staticmethod
-    def _demo_print_conclusion(conclusion, summary):
+    def _demo_print_conclusion(conclusion: str, summary: dict[str, Any]) -> None:
         width = 58
         print()
         print("╭" + "─" * width + "╮")
@@ -899,7 +902,7 @@ class RoundtableCore:
         """Create a Notifier from a discussion's notification config."""
         return Notifier(config, send_fn=self._send_fn)
 
-    def _notify_concluded(self, conn, disc, notifier: Notifier) -> None:
+    def _notify_concluded(self, conn: sqlite3.Connection, disc: Discussion, notifier: Notifier) -> None:
         """Fire the concluded notification with summary data."""
         findings = self.db.get_findings(conn, disc.id)
         consensus = [f.content for f in findings if f.type == "consensus"]
@@ -914,12 +917,12 @@ class RoundtableCore:
             disagreement_points=disagreements,
         )
 
-    def set_send_fn(self, send_fn) -> None:
+    def set_send_fn(self, send_fn: Callable[..., None] | None) -> None:
         """Set or replace the notification send callback."""
         self._send_fn = send_fn
 
     @staticmethod
-    def _format_history(speeches, participants_map: dict) -> str:
+    def _format_history(speeches: list[Speech], participants_map: dict[str, Any]) -> str:
         """Format speech history into a human-readable string."""
         lines = []
         for s in speeches:
@@ -933,15 +936,15 @@ class RoundtableCore:
 
     @staticmethod
     def _build_structured_summary(
-        disc,
-        participants,
-        speeches,
-        p_map,
-        consensus_pts,
-        disagreement_pts,
-        new_points,
-        final_score,
-        conv_history,
+        disc: Discussion,
+        participants: list[Participant],
+        speeches: list[Speech],
+        p_map: dict[str, Any],
+        consensus_pts: list[str],
+        disagreement_pts: list[str],
+        new_points: list[str],
+        final_score: float | None,
+        conv_history: list[ConvergenceRecord],
     ) -> str:
         """Build a compact structured summary for LLM consumption.
 
@@ -965,7 +968,7 @@ class RoundtableCore:
 
         # Per-round summary (key points only, truncate content)
         lines.append(f"\n## 讨论轮次 (共 {disc.current_round} 轮)")
-        rounds_dict: dict = {}
+        rounds_dict: dict[int, list[Speech]] = {}
         for s in speeches:
             rounds_dict.setdefault(s.round, []).append(s)
 

@@ -63,7 +63,7 @@ class Roundtable:
         participants: builtins.list[dict[str, Any]],
         *,
         notifications: dict[str, Any] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """Create a new discussion.
 
@@ -83,7 +83,7 @@ class Roundtable:
         discussion_id: str,
         participant: str,
         content: str,
-        **kwargs,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """Record a speech."""
         try:
@@ -91,7 +91,7 @@ class Roundtable:
         except Exception as e:
             return {"error": str(e)}
 
-    def read(self, discussion_id: str, **kwargs) -> dict[str, Any]:
+    def read(self, discussion_id: str, **kwargs: Any) -> dict[str, Any]:
         """Read discussion history."""
         try:
             return self._core.read(discussion_id, **kwargs)
@@ -125,7 +125,7 @@ class Roundtable:
         except Exception as e:
             return {"error": str(e)}
 
-    def list(self, **kwargs) -> dict[str, Any]:
+    def list(self, **kwargs: Any) -> dict[str, Any]:
         """List discussions."""
         try:
             return self._core.list_discussions(**kwargs)
@@ -176,7 +176,7 @@ class Roundtable:
         self,
         discussion_id: str,
         event: str,
-        **kwargs,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """Manually trigger a notification for a discussion event.
 

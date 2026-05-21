@@ -44,7 +44,7 @@ class Notifier:
         self._config = config or {}
         self._enabled = self._config.get("enabled", False)
         self._channels: list[dict[str, str]] = self._config.get("channels", [])
-        self._events: set = set(self._config.get("events", list(ALL_EVENTS)))
+        self._events: set[str] = set(self._config.get("events", list(ALL_EVENTS)))
         self._send_fn = send_fn
 
     @property

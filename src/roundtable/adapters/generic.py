@@ -144,6 +144,35 @@ class Roundtable:
         except Exception as e:
             return {"error": str(e)}
 
+    def run_demo(
+        self,
+        *,
+        topic: Optional[str] = None,
+        participants: Optional[List[Dict[str, Any]]] = None,
+        max_rounds: int = 3,
+        verbose: bool = True,
+    ) -> Dict[str, Any]:
+        """Run a complete demo discussion with pre-scripted content.
+
+        Simulates a realistic multi-round discussion. Prints formatted
+        output to terminal when verbose=True.
+
+        Args:
+            topic: Custom topic (uses default demo topic if None).
+            participants: Custom participants (uses default if None).
+            max_rounds: Number of rounds (default 3).
+            verbose: Print formatted output to stdout.
+        """
+        try:
+            return self._core.run_demo(
+                topic=topic,
+                participants=participants,
+                max_rounds=max_rounds,
+                verbose=verbose,
+            )
+        except Exception as e:
+            return {"error": str(e)}
+
     def notify(
         self,
         discussion_id: str,

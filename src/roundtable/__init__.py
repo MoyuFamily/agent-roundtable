@@ -22,6 +22,7 @@ from roundtable.models import (
 )
 from roundtable.db import RoundtableDB
 from roundtable.core import RoundtableCore
+from roundtable.adapters.generic import Roundtable
 from roundtable.notify import Notifier
 from roundtable.exceptions import (
     RoundtableError,
@@ -38,6 +39,7 @@ __version__ = "0.1.0"
 __all__ = [
     "RoundtableDB",
     "RoundtableCore",
+    "Roundtable",
     "Notifier",
     "Discussion",
     "Participant",

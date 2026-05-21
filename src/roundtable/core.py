@@ -598,6 +598,301 @@ class RoundtableCore:
             conn.close()
 
     # ------------------------------------------------------------------
+    # Demo mode
+    # ------------------------------------------------------------------
+
+    # Default demo scenario — topic, participants, speeches, findings
+    _DEMO_TOPIC = "选择后端框架：FastAPI vs Go Gin vs Node Express"
+    _DEMO_PARTICIPANTS = [
+        {
+            "profile": "alice",
+            "role": "全栈工程师",
+            "display_name": "Alice",
+            "perspective": "重视开发效率和生态",
+        },
+        {
+            "profile": "bob",
+            "role": "架构师",
+            "display_name": "Bob",
+            "perspective": "重视性能和可维护性",
+        },
+        {
+            "profile": "carol",
+            "role": "产品经理",
+            "display_name": "Carol",
+            "perspective": "重视交付速度和团队学习成本",
+        },
+    ]
+    _DEMO_SPEECHES = {
+        1: {
+            "alice": (
+                "FastAPI 的类型提示和自动生成 OpenAPI 文档太香了，"
+                "开发效率至少提升 30%。而且 async 原生支持，"
+                "性能也不差。"
+            ),
+            "bob": (
+                "Go Gin 编译后是原生二进制，内存占用只有 Python 的 1/10。"
+                "对于我们这种高并发场景，性能优势明显。"
+                "而且 Go 的 goroutine 天然适合并发。"
+            ),
+            "carol": (
+                "从产品角度看，团队 80% 是 Python 背景。"
+                "切 Go 需要 3 个月学习周期，这段时间功能迭代会停滞。"
+                "FastAPI 能让我们更快交付 MVP。"
+            ),
+        },
+        2: {
+            "alice": (
+                "同意 Carol 的观点。而且 FastAPI + Pydantic 的数据校验"
+                "几乎是零成本的，Go 里要写大量 struct tag 和 binding 代码。"
+                "维护成本 FastAPI 更低。"
+            ),
+            "bob": (
+                "性能不能只看 hello world。FastAPI 在 CPU 密集型任务上"
+                "还是有 GIL 瓶颈。不过我承认，如果用 asyncio + uvicorn，"
+                "IO 密集场景差距没那么大。可以考虑 FastAPI + 分层架构。"
+            ),
+            "carol": (
+                "Bob 说的分层架构我支持。先用 FastAPI 快速上线，"
+                "性能瓶颈模块后续可以用 Go 重写微服务。"
+                "这才是务实的技术选型策略。"
+            ),
+        },
+        3: {
+            "alice": (
+                "最终方案：FastAPI 作为主力框架，搭配 Celery 处理异步任务。"
+                "性能关键路径预留 Go 微服务接口。这样既保证了开发效率，"
+                "又不堵死性能优化的路。"
+            ),
+            "bob": (
+                "我同意这个折中方案。但需要在架构设计阶段就定义好"
+                "服务边界和 API 契约，避免后面拆分时返工。"
+                "建议第一周就定好领域模型。"
+            ),
+            "carol": (
+                "完美！这样我们两周内就能出 MVP。"
+                "技术风险可控，团队也不需要额外学习成本。"
+                "我会把这个方案同步给管理层。"
+            ),
+        },
+    }
+    _DEMO_FINDINGS = {
+        1: [
+            ("consensus", "团队熟悉 Python，学习成本是关键考量因素"),
+            ("disagreement", "Go 性能优势 vs FastAPI 开发效率，优先级不同"),
+            ("new_point", "需要评估 IO 密集 vs CPU 密集的实际占比"),
+        ],
+        2: [
+            ("consensus", "IO 密集场景下 FastAPI 性能差距可接受"),
+            ("consensus", "分层架构是合理的折中方案"),
+            ("disagreement", "是否需要在第一阶段就引入 Go 微服务"),
+        ],
+        3: [
+            ("consensus", "采用 FastAPI 主框架 + 预留 Go 微服务扩展"),
+            ("consensus", "第一周完成领域模型和 API 契约设计"),
+            ("consensus", "两周内交付 MVP，性能瓶颈模块后续迭代"),
+        ],
+    }
+
+    def run_demo(
+        self,
+        *,
+        topic: Optional[str] = None,
+        participants: Optional[List[Dict[str, Any]]] = None,
+        max_rounds: int = 3,
+        verbose: bool = True,
+    ) -> Dict[str, Any]:
+        """Run a complete demo discussion with pre-scripted content.
+
+        Simulates a realistic multi-round discussion with participants,
+        speeches, findings, and convergence tracking. Prints formatted
+        output to terminal when verbose=True.
+
+        Args:
+            topic: Custom topic (uses default demo topic if None).
+            participants: Custom participants (uses default if None).
+            max_rounds: Number of rounds (default 3).
+            verbose: Print formatted output to stdout.
+
+        Returns:
+            Dict with discussion result, summary, and convergence data.
+        """
+        topic = topic or self._DEMO_TOPIC
+        participants = participants or self._DEMO_PARTICIPANTS
+        p_map = {p["profile"]: p for p in participants}
+        p_names = [p["profile"] for p in participants]
+
+        if verbose:
+            self._demo_print_header(topic, participants, max_rounds)
+
+        # 1. Create discussion
+        result = self.create_discussion(
+            topic=topic,
+            participants=participants,
+            max_rounds=max_rounds,
+        )
+        disc_id = result["discussion_id"]
+
+        # 2. Run rounds
+        for round_num in range(1, max_rounds + 1):
+            if verbose:
+                self._demo_print_round_start(round_num, max_rounds)
+
+            # Use scripted speeches or generate simple defaults
+            round_speeches = self._DEMO_SPEECHES.get(round_num, {})
+            for name in p_names:
+                content = round_speeches.get(
+                    name,
+                    f"Round {round_num} 发言：{name} 对本议题的看法（demo 默认内容）。",
+                )
+                self.speak(disc_id, name, content)
+                if verbose:
+                    p_info = p_map.get(name, {})
+                    self._demo_print_speech(
+                        name,
+                        p_info.get("display_name", name),
+                        p_info.get("role", ""),
+                        content,
+                    )
+
+            # Add findings for this round
+            round_findings = self._DEMO_FINDINGS.get(round_num, [
+                ("consensus", f"Round {round_num} 达成的共识"),
+                ("disagreement", f"Round {round_num} 存在的分歧"),
+            ])
+            conn = self.db.connect()
+            try:
+                for ftype, content in round_findings:
+                    self.db.add_finding(conn, disc_id, ftype, content, round_num)
+                # Calculate convergence
+                conv_score = self.db.calculate_convergence(conn, disc_id, round_num)
+            finally:
+                conn.close()
+
+            if verbose:
+                self._demo_print_round_end(round_findings, conv_score)
+
+        # 3. Generate conclusion
+        conclusion = (
+            f"经过 {max_rounds} 轮讨论，团队达成一致："
+            f"采用 FastAPI 作为主力框架，预留 Go 微服务扩展接口，"
+            f"两周内交付 MVP。"
+        )
+        self.end_discussion(disc_id, conclusion=conclusion)
+
+        # 4. Get final summary
+        summary = self.summarize(disc_id, compact=True)
+
+        if verbose:
+            self._demo_print_conclusion(conclusion, summary)
+
+        return {
+            "ok": True,
+            "discussion_id": disc_id,
+            "topic": topic,
+            "rounds_completed": max_rounds,
+            "conclusion": conclusion,
+            "convergence_score": summary.get("final_convergence_score"),
+            "consensus_points": summary.get("consensus_points", []),
+            "disagreement_points": summary.get("disagreement_points", []),
+            "summary": summary,
+        }
+
+    # ------------------------------------------------------------------
+    # Demo output formatters
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _demo_print_header(topic, participants, max_rounds):
+        width = 58
+        print()
+        print("╭" + "─" * width + "╮")
+        print("│" + " Roundtable Demo Discussion ".center(width) + "│")
+        print("├" + "─" * width + "┤")
+        topic_line = f" Topic: {topic}"
+        if len(topic_line) > width - 1:
+            topic_line = topic_line[: width - 2] + "…"
+        print("│" + topic_line.ljust(width) + "│")
+        print("│" + f" Rounds: {max_rounds}".ljust(width) + "│")
+        print("│" + "".ljust(width) + "│")
+        print("│" + " Participants:".ljust(width) + "│")
+        for p in participants:
+            icon = {"全栈工程师": "👩‍💻", "架构师": "👨‍💻", "产品经理": "👩‍💼"}.get(
+                p.get("role", ""), "👤"
+            )
+            line = f"   {icon} {p.get('display_name', p['profile'])} ({p.get('role', '')})"
+            print("│" + line.ljust(width) + "│")
+        print("╰" + "─" * width + "╯")
+        print()
+
+    @staticmethod
+    def _demo_print_round_start(round_num, max_rounds):
+        print(f"{'━' * 60}")
+        print(f"  📍 Round {round_num}/{max_rounds}")
+        print(f"{'━' * 60}")
+
+    @staticmethod
+    def _demo_print_speech(name, display_name, role, content):
+        icon = {"全栈工程师": "👩‍💻", "架构师": "👨‍💻", "产品经理": "👩‍💼"}.get(role, "👤")
+        print(f"\n  {icon} {display_name} ({role}):")
+        # Word wrap content
+        import textwrap
+        for line in textwrap.wrap(content, width=52):
+            print(f"     {line}")
+
+    @staticmethod
+    def _demo_print_round_end(findings, conv_score):
+        print()
+        print(f"  {'─' * 52}")
+        score_str = f"{conv_score:.2f}" if conv_score is not None else "N/A"
+        print(f"  📊 Convergence: {score_str}")
+        for ftype, content in findings:
+            icon = {"consensus": "✅", "disagreement": "⚡", "new_point": "💡"}.get(
+                ftype, "•"
+            )
+            print(f"     {icon} [{ftype}] {content}")
+        print()
+
+    @staticmethod
+    def _demo_print_conclusion(conclusion, summary):
+        width = 58
+        print()
+        print("╭" + "─" * width + "╮")
+        print("│" + " 📋 Discussion Conclusion ".center(width) + "│")
+        print("├" + "─" * width + "┤")
+
+        # Conclusion text
+        import textwrap
+        for line in textwrap.wrap(conclusion, width=width - 4):
+            print("│  " + line.ljust(width - 2) + "│")
+        print("│" + "".ljust(width) + "│")
+
+        # Convergence
+        final_score = summary.get("final_convergence_score")
+        if final_score is not None:
+            score_line = f"  🎯 Final Convergence: {final_score:.2f}"
+            print("│" + score_line.ljust(width) + "│")
+
+        # Consensus points
+        consensus = summary.get("consensus_points", [])
+        if consensus:
+            print("│" + "  ✅ Consensus:".ljust(width) + "│")
+            for pt in consensus:
+                for line in textwrap.wrap(pt, width=width - 8):
+                    print("│    • " + line.ljust(width - 6) + "│")
+
+        # Disagreement points
+        disagreements = summary.get("disagreement_points", [])
+        if disagreements:
+            print("│" + "  ⚡ Disagreements:".ljust(width) + "│")
+            for pt in disagreements:
+                for line in textwrap.wrap(pt, width=width - 8):
+                    print("│    • " + line.ljust(width - 6) + "│")
+
+        print("╰" + "─" * width + "╯")
+        print()
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 

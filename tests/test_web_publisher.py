@@ -8,6 +8,7 @@ File I/O uses real tmp_path for integration confidence.
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -25,11 +26,12 @@ from roundtable.web_publisher import WebPublisher, _generate_token
 class TestTokenGeneration:
     def test_generate_token_default_length(self):
         token = _generate_token()
-        assert len(token) == 21
+        # nanoid returns exact size; secrets.token_urlsafe returns ~ceil(size*4/3)
+        assert len(token) >= 21
 
     def test_generate_token_custom_length(self):
         token = _generate_token(size=10)
-        assert len(token) == 10
+        assert len(token) >= 10
 
     def test_generate_token_unique(self):
         tokens = {_generate_token() for _ in range(100)}
@@ -313,6 +315,8 @@ class TestStop:
         with patch.object(pub, "_start_pm2"):
             pub.start("rt_stop")
 
+        # _start_pm2 is mocked, so _pm2_process_name wasn't set — set it manually
+        pub._pm2_process_name = "roundtable-web-rt_stop"
         pub.stop()
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
@@ -437,3 +441,44 @@ class TestIntegration:
         pub.revoke()
         data = pub._read_discussion_json()
         assert pub.token in data["revoked_tokens"]
+
+
+class TestRunDemoWebIntegration:
+    """Test run_demo(web=True) integration with WebPublisher."""
+
+    def test_run_demo_web_starts_publisher(self, tmp_path):
+        """run_demo(web=True) should create a WebPublisher and write JSON."""
+        from roundtable.adapters.generic import Roundtable
+
+        db_path = str(tmp_path / "test.db")
+        rt = Roundtable(db_path=db_path)
+
+        # Mock _start_pm2 to set _actual_port without launching anything
+        def fake_start_pm2(self_wp, port):
+            self_wp._actual_port = port
+            self_wp._pm2_process_name = f"roundtable-web-{self_wp._discussion_id}"
+
+        with patch.object(WebPublisher, "_start_pm2", fake_start_pm2):
+            result = rt.run_demo(
+                max_rounds=2,
+                verbose=False,
+                web=True,
+                web_port=18199,
+            )
+
+        assert result["ok"] is True
+        assert result["web_url"] is not None
+        assert "/r/" in result["web_url"]
+
+        # Check that the JSON file was written
+        disc_dir = Path("/tmp") / "roundtable_web" / result["discussion_id"]
+        json_file = disc_dir / "discussion.json"
+        assert json_file.exists()
+
+        data = json.loads(json_file.read_text())
+        assert data["topic"] == "选择后端框架：FastAPI vs Go Gin vs Node Express"
+        assert data["status"] == "concluded"
+        assert len(data["speeches"]) == 6  # 2 rounds x 3 participants
+        assert data["speeches"][0]["round"] == 1
+        assert data["speeches"][-1]["round"] == 2
+        assert "MVP" in data["conclusion"]

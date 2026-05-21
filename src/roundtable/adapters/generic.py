@@ -150,6 +150,8 @@ class Roundtable:
         participants: builtins.list[dict[str, Any]] | None = None,
         max_rounds: int = 3,
         verbose: bool = True,
+        web: bool = False,
+        web_port: int = 8199,
     ) -> dict[str, Any]:
         """Run a complete demo discussion with pre-scripted content.
 
@@ -161,6 +163,8 @@ class Roundtable:
             participants: Custom participants (uses default if None).
             max_rounds: Number of rounds (default 3).
             verbose: Print formatted output to stdout.
+            web: If True, start a web viewer and publish speeches live.
+            web_port: Preferred port for the web viewer (default 8199).
         """
         try:
             return self._core.run_demo(
@@ -168,6 +172,8 @@ class Roundtable:
                 participants=participants,
                 max_rounds=max_rounds,
                 verbose=verbose,
+                web=web,
+                web_port=web_port,
             )
         except Exception as e:
             return {"error": str(e)}

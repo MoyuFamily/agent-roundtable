@@ -702,6 +702,8 @@ class RoundtableCore:
         participants: list[dict[str, Any]] | None = None,
         max_rounds: int = 3,
         verbose: bool = True,
+        web: bool = False,
+        web_port: int = 8199,
     ) -> dict[str, Any]:
         """Run a complete demo discussion with pre-scripted content.
 
@@ -714,6 +716,8 @@ class RoundtableCore:
             participants: Custom participants (uses default if None).
             max_rounds: Number of rounds (default 3).
             verbose: Print formatted output to stdout.
+            web: If True, start a web viewer and publish speeches live.
+            web_port: Preferred port for the web viewer (default 8199).
 
         Returns:
             Dict with discussion result, summary, and convergence data.
@@ -734,6 +738,24 @@ class RoundtableCore:
         )
         disc_id = result["discussion_id"]
 
+        # 1b. Optionally start web viewer
+        publisher = None
+        if web:
+            from roundtable.web_publisher import WebPublisher
+            import os
+            output_dir = os.path.join("/tmp", "roundtable_web", disc_id)
+            publisher = WebPublisher(output_dir, port=web_port)
+            url = publisher.start(
+                disc_id,
+                topic=topic,
+                participants=[
+                    {"profile": p["profile"], "display_name": p.get("display_name", p["profile"]), "role": p.get("role", "")}
+                    for p in participants
+                ],
+            )
+            if verbose:
+                print(f"\n  🌐 Web viewer: {url}\n")
+
         # 2. Run rounds
         for round_num in range(1, max_rounds + 1):
             if verbose:
@@ -747,6 +769,16 @@ class RoundtableCore:
                     f"Round {round_num} 发言：{name} 对本议题的看法（demo 默认内容）。",
                 )
                 self.speak(disc_id, name, content)
+
+                # Publish to web viewer
+                if publisher:
+                    publisher.on_speech({
+                        "participant": name,
+                        "display_name": p_map.get(name, {}).get("display_name", name),
+                        "content": content,
+                        "round": round_num,
+                    })
+
                 if verbose:
                     p_info = p_map.get(name, {})
                     self._demo_print_speech(
@@ -784,6 +816,10 @@ class RoundtableCore:
         )
         self.end_discussion(disc_id, conclusion=conclusion)
 
+        # 3b. Conclude web viewer
+        if publisher:
+            publisher.conclude(conclusion)
+
         # 4. Get final summary
         summary = self.summarize(disc_id, compact=True)
 
@@ -800,6 +836,7 @@ class RoundtableCore:
             "consensus_points": summary.get("consensus_points", []),
             "disagreement_points": summary.get("disagreement_points", []),
             "summary": summary,
+            "web_url": publisher.url if publisher else None,
         }
 
     # ------------------------------------------------------------------

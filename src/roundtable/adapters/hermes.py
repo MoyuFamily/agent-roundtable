@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import subprocess
 from typing import Any
 
 from roundtable.core import RoundtableCore
@@ -20,6 +22,30 @@ from roundtable.db import RoundtableDB
 from roundtable.exceptions import RoundtableError
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Notification send callback
+# ---------------------------------------------------------------------------
+
+def _hermes_send_fn(platform: str, chat_id: str, message: str) -> None:
+    """Deliver a notification message to a messaging platform.
+
+    Called by the Notifier when a discussion event fires.
+    Must never raise — exceptions are caught and logged.
+    """
+    try:
+        if platform == "feishu":
+            profile = os.environ.get("HERMES_PROFILE", "mafei")
+            script = os.path.expanduser("~/.hermes/scripts/feishu-send.py")
+            subprocess.run(
+                ["python3", script, profile, chat_id, message],
+                capture_output=True, timeout=15,
+            )
+        else:
+            logger.warning("Unsupported notification platform: %s", platform)
+    except Exception as e:
+        logger.warning("Notification send failed (platform=%s, chat=%s): %s", platform, chat_id, e)
 
 
 # ---------------------------------------------------------------------------
@@ -32,7 +58,7 @@ _core: RoundtableCore | None = None
 def _get_core() -> RoundtableCore:
     global _core
     if _core is None:
-        _core = RoundtableCore()
+        _core = RoundtableCore(send_fn=_hermes_send_fn)
     return _core
 
 

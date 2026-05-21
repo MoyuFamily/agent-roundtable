@@ -10,9 +10,8 @@ import pytest
 from roundtable.core import RoundtableCore
 from roundtable.db import RoundtableDB
 from roundtable.exceptions import (
-    DiscussionNotFoundError,
     DiscussionNotActiveError,
-    InvalidParticipantError,
+    DiscussionNotFoundError,
 )
 
 
@@ -34,6 +33,7 @@ def _p():
 # create_discussion validation
 # ---------------------------------------------------------------------------
 
+
 def test_create_discussion_participants_not_list(core):
     with pytest.raises(ValueError, match="non-empty array"):
         core.create_discussion(topic="T", participants="not-a-list")
@@ -47,6 +47,7 @@ def test_create_discussion_bad_max_rounds(core):
 # ---------------------------------------------------------------------------
 # speak validation & error paths
 # ---------------------------------------------------------------------------
+
 
 def test_speak_empty_discussion_id(core):
     with pytest.raises(ValueError, match="discussion_id"):
@@ -82,6 +83,7 @@ def test_speak_discussion_not_active(core):
 # read validation & error paths
 # ---------------------------------------------------------------------------
 
+
 def test_read_empty_discussion_id(core):
     with pytest.raises(ValueError, match="discussion_id"):
         core.read("")
@@ -102,6 +104,7 @@ def test_read_discussion_not_found(core):
 # status validation & error paths
 # ---------------------------------------------------------------------------
 
+
 def test_status_empty_discussion_id(core):
     with pytest.raises(ValueError, match="discussion_id"):
         core.status("")
@@ -116,6 +119,7 @@ def test_status_discussion_not_found(core):
 # summarize validation & error paths
 # ---------------------------------------------------------------------------
 
+
 def test_summarize_empty_discussion_id(core):
     with pytest.raises(ValueError, match="discussion_id"):
         core.summarize("")
@@ -129,7 +133,10 @@ def test_summarize_discussion_not_found(core):
 def test_summarize_with_findings_and_convergence(core):
     """Summarize with findings and convergence — covers structured summary branches."""
     d = core.create_discussion(
-        topic="T", participants=_p(), context="ctx", max_rounds=2,
+        topic="T",
+        participants=_p(),
+        context="ctx",
+        max_rounds=2,
     )
     did = d["discussion_id"]
 
@@ -191,6 +198,7 @@ def test_summarize_convergence_from_history(core):
 # end_discussion validation & error paths
 # ---------------------------------------------------------------------------
 
+
 def test_end_empty_discussion_id(core):
     with pytest.raises(ValueError, match="discussion_id"):
         core.end_discussion("")
@@ -213,6 +221,7 @@ def test_end_discussion_already_concluded(core):
 # list_discussions validation
 # ---------------------------------------------------------------------------
 
+
 def test_list_bad_limit(core):
     with pytest.raises(ValueError, match="limit"):
         core.list_discussions(limit="abc")
@@ -222,6 +231,7 @@ def test_list_bad_limit(core):
 # advance validation
 # ---------------------------------------------------------------------------
 
+
 def test_advance_empty_discussion_id(core):
     with pytest.raises(ValueError, match="discussion_id"):
         core.advance("")
@@ -230,6 +240,7 @@ def test_advance_empty_discussion_id(core):
 # ---------------------------------------------------------------------------
 # notify validation & error paths
 # ---------------------------------------------------------------------------
+
 
 def test_notify_empty_discussion_id(core):
     with pytest.raises(ValueError, match="discussion_id"):
@@ -245,6 +256,7 @@ def test_notify_discussion_not_found(core):
 # calculate_convergence validation
 # ---------------------------------------------------------------------------
 
+
 def test_calculate_convergence_empty_id(core):
     with pytest.raises(ValueError, match="discussion_id"):
         core.calculate_convergence("", 1)
@@ -253,6 +265,7 @@ def test_calculate_convergence_empty_id(core):
 # ---------------------------------------------------------------------------
 # run_demo
 # ---------------------------------------------------------------------------
+
 
 def test_run_demo_default(core, capsys):
     """run_demo with verbose=True exercises the demo formatters."""
@@ -295,11 +308,13 @@ def test_run_demo_custom_participants(core):
 # set_send_fn
 # ---------------------------------------------------------------------------
 
+
 def test_set_send_fn(core):
     sent = []
     core.set_send_fn(lambda p, c, m: sent.append(m))
     d = core.create_discussion(
-        topic="T", participants=_p(),
+        topic="T",
+        participants=_p(),
         notifications={"enabled": True, "channels": [{"platform": "feishu", "chat_id": "oc_x"}]},
     )
     core.speak(d["discussion_id"], "alice", "hi")
@@ -309,6 +324,7 @@ def test_set_send_fn(core):
 # ---------------------------------------------------------------------------
 # End-to-end: multi-round with notifications covering round_start
 # ---------------------------------------------------------------------------
+
 
 def test_round_start_notification(core):
     """First speech in a new round triggers round_start notification."""
@@ -360,6 +376,7 @@ def test_concluded_notification(core):
 # read with participant filter
 # ---------------------------------------------------------------------------
 
+
 def test_read_participant_filter(core):
     d = core.create_discussion(topic="T", participants=_p())
     did = d["discussion_id"]
@@ -375,6 +392,7 @@ def test_read_participant_filter(core):
 # ---------------------------------------------------------------------------
 # status with findings and next_speaker
 # ---------------------------------------------------------------------------
+
 
 def test_status_with_findings_and_next_speaker(core):
     d = core.create_discussion(topic="T", participants=_p())

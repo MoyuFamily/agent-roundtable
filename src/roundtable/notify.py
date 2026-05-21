@@ -14,9 +14,9 @@ The send_fn signature:
 
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +38,12 @@ class Notifier:
 
     def __init__(
         self,
-        config: Optional[Dict[str, Any]],
-        send_fn: Optional[Callable[[str, str, str], None]] = None,
+        config: dict[str, Any] | None,
+        send_fn: Callable[[str, str, str], None] | None = None,
     ):
         self._config = config or {}
         self._enabled = self._config.get("enabled", False)
-        self._channels: List[Dict[str, str]] = self._config.get("channels", [])
+        self._channels: list[dict[str, str]] = self._config.get("channels", [])
         self._events: set = set(self._config.get("events", list(ALL_EVENTS)))
         self._send_fn = send_fn
 
@@ -92,7 +92,9 @@ class Notifier:
             except Exception as e:
                 logger.warning(
                     "Failed to send notification to %s:%s: %s",
-                    platform, chat_id, e,
+                    platform,
+                    chat_id,
+                    e,
                 )
 
     def _format_message(
@@ -102,7 +104,7 @@ class Notifier:
         discussion_id: str,
         topic: str = "",
         **kwargs: Any,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Format a human-readable message for the event.
 
         Returns None if the event type is unknown.
@@ -173,7 +175,7 @@ class Notifier:
         return None
 
 
-def validate_notification_config(config: Any) -> List[str]:
+def validate_notification_config(config: Any) -> list[str]:
     """Validate notification config and return list of error messages.
 
     Returns empty list if valid.

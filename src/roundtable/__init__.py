@@ -13,6 +13,18 @@ Usage::
     disc = core.create_discussion(topic="...", participants=[...])
 """
 
+from roundtable.adapters.generic import Roundtable
+from roundtable.core import RoundtableCore
+from roundtable.db import RoundtableDB
+from roundtable.exceptions import (
+    DiscussionNotActiveError,
+    DiscussionNotFoundError,
+    InvalidFindingTypeError,
+    InvalidParticipantError,
+    InvalidReplyToError,
+    InvalidSpeechOrderError,
+    RoundtableError,
+)
 from roundtable.models import (
     ConvergenceRecord,
     Discussion,
@@ -20,37 +32,25 @@ from roundtable.models import (
     Participant,
     Speech,
 )
-from roundtable.db import RoundtableDB
-from roundtable.core import RoundtableCore
-from roundtable.adapters.generic import Roundtable
 from roundtable.notify import Notifier
-from roundtable.exceptions import (
-    RoundtableError,
-    DiscussionNotFoundError,
-    DiscussionNotActiveError,
-    InvalidParticipantError,
-    InvalidSpeechOrderError,
-    InvalidFindingTypeError,
-    InvalidReplyToError,
-)
 
 __version__ = "0.1.0"
 
 __all__ = [
-    "RoundtableDB",
-    "RoundtableCore",
-    "Roundtable",
-    "Notifier",
-    "Discussion",
-    "Participant",
-    "Speech",
-    "Finding",
     "ConvergenceRecord",
-    "RoundtableError",
-    "DiscussionNotFoundError",
+    "Discussion",
     "DiscussionNotActiveError",
-    "InvalidParticipantError",
-    "InvalidSpeechOrderError",
+    "DiscussionNotFoundError",
+    "Finding",
     "InvalidFindingTypeError",
+    "InvalidParticipantError",
     "InvalidReplyToError",
+    "InvalidSpeechOrderError",
+    "Notifier",
+    "Participant",
+    "Roundtable",
+    "RoundtableCore",
+    "RoundtableDB",
+    "RoundtableError",
+    "Speech",
 ]

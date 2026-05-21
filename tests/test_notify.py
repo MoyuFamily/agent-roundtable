@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-from roundtable.notify import Notifier, validate_notification_config, ALL_EVENTS
-
+from roundtable.notify import Notifier, validate_notification_config
 
 # ---------------------------------------------------------------------------
 # Notifier basics
@@ -192,8 +190,7 @@ def test_multi_channel_dispatch():
         },
         send_fn=lambda p, c, m: sent.append((c, m)),
     )
-    n.notify("speech", discussion_id="rt_x", topic="T", participant="a",
-             display_name="A", round_num=1, content="hi")
+    n.notify("speech", discussion_id="rt_x", topic="T", participant="a", display_name="A", round_num=1, content="hi")
     assert len(sent) == 2
     assert sent[0][0] == "oc_1"
     assert sent[1][0] == "oc_2"
@@ -221,15 +218,16 @@ def test_channel_send_failure_isolated():
     )
     # Use a wrapper to also track ok sends
     original_send = n._send_fn
+
     def tracking_send(p, c, m):
         if original_send:
             original_send(p, c, m)
         if c == "oc_ok":
             sent.append(m)
+
     n._send_fn = tracking_send
 
-    n.notify("speech", discussion_id="rt_x", topic="T", participant="a",
-             display_name="A", round_num=1, content="hi")
+    n.notify("speech", discussion_id="rt_x", topic="T", participant="a", display_name="A", round_num=1, content="hi")
     assert len(sent) == 1  # oc_ok received the message
 
 
@@ -239,11 +237,13 @@ def test_channel_send_failure_isolated():
 
 
 def test_validate_valid_config():
-    errors = validate_notification_config({
-        "enabled": True,
-        "channels": [{"platform": "feishu", "chat_id": "oc_123"}],
-        "events": ["speech", "round_end"],
-    })
+    errors = validate_notification_config(
+        {
+            "enabled": True,
+            "channels": [{"platform": "feishu", "chat_id": "oc_123"}],
+            "events": ["speech", "round_end"],
+        }
+    )
     assert errors == []
 
 
@@ -253,16 +253,20 @@ def test_validate_invalid_channels():
 
 
 def test_validate_missing_chat_id():
-    errors = validate_notification_config({
-        "channels": [{"platform": "feishu"}],
-    })
+    errors = validate_notification_config(
+        {
+            "channels": [{"platform": "feishu"}],
+        }
+    )
     assert any("chat_id" in e for e in errors)
 
 
 def test_validate_unknown_events():
-    errors = validate_notification_config({
-        "events": ["speech", "bogus_event"],
-    })
+    errors = validate_notification_config(
+        {
+            "events": ["speech", "bogus_event"],
+        }
+    )
     assert any("bogus_event" in e for e in errors)
 
 

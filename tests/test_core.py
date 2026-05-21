@@ -7,7 +7,6 @@ now testing via RoundtableCore instead of raw handler functions.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -37,6 +36,7 @@ def _make_participants():
 def test_core_module_imports():
     """Verify the roundtable core module imports cleanly."""
     from roundtable import core
+
     assert core is not None
 
 
@@ -44,24 +44,28 @@ def test_schema_constants_available():
     """Verify all 9 tool schemas are accessible from the Hermes adapter."""
     try:
         from roundtable.adapters.hermes import (
+            ROUNDTABLE_ADVANCE_SCHEMA,
+            ROUNDTABLE_END_SCHEMA,
             ROUNDTABLE_INIT_SCHEMA,
-            ROUNDTABLE_SPEAK_SCHEMA,
+            ROUNDTABLE_LIST_SCHEMA,
+            ROUNDTABLE_NOTIFY_SCHEMA,
             ROUNDTABLE_READ_SCHEMA,
+            ROUNDTABLE_SPEAK_SCHEMA,
             ROUNDTABLE_STATUS_SCHEMA,
             ROUNDTABLE_SUMMARIZE_SCHEMA,
-            ROUNDTABLE_END_SCHEMA,
-            ROUNDTABLE_LIST_SCHEMA,
-            ROUNDTABLE_ADVANCE_SCHEMA,
-            ROUNDTABLE_NOTIFY_SCHEMA,
         )
     except ImportError:
         pytest.skip("Hermes adapter not available (hermes-agent not installed)")
         return
     schemas = [
-        ROUNDTABLE_INIT_SCHEMA, ROUNDTABLE_SPEAK_SCHEMA,
-        ROUNDTABLE_READ_SCHEMA, ROUNDTABLE_STATUS_SCHEMA,
-        ROUNDTABLE_SUMMARIZE_SCHEMA, ROUNDTABLE_END_SCHEMA,
-        ROUNDTABLE_LIST_SCHEMA, ROUNDTABLE_ADVANCE_SCHEMA,
+        ROUNDTABLE_INIT_SCHEMA,
+        ROUNDTABLE_SPEAK_SCHEMA,
+        ROUNDTABLE_READ_SCHEMA,
+        ROUNDTABLE_STATUS_SCHEMA,
+        ROUNDTABLE_SUMMARIZE_SCHEMA,
+        ROUNDTABLE_END_SCHEMA,
+        ROUNDTABLE_LIST_SCHEMA,
+        ROUNDTABLE_ADVANCE_SCHEMA,
         ROUNDTABLE_NOTIFY_SCHEMA,
     ]
     for s in schemas:
@@ -287,12 +291,9 @@ def test_summarize_compact(core):
     assert compact["ok"] is True
 
     # Compact should be significantly smaller
-    import json
     full_size = len(json.dumps(full))
     compact_size = len(json.dumps(compact))
-    assert compact_size < full_size, (
-        f"compact ({compact_size}B) should be smaller than full ({full_size}B)"
-    )
+    assert compact_size < full_size, f"compact ({compact_size}B) should be smaller than full ({full_size}B)"
 
 
 # ---------------------------------------------------------------------------
@@ -320,9 +321,7 @@ def test_advance_round(core):
 
 
 def test_advance_exceeds_max_rounds(core):
-    disc = core.create_discussion(
-        topic="Test", participants=_make_participants(), max_rounds=2
-    )
+    disc = core.create_discussion(topic="Test", participants=_make_participants(), max_rounds=2)
     disc_id = disc["discussion_id"]
 
     # Advance past max
@@ -427,6 +426,7 @@ def test_create_discussion_without_notifications(core):
 
 def test_notification_failure_does_not_block(core):
     """Notification send failures must not raise or block the discussion."""
+
     def bad_send(p, c, m):
         raise RuntimeError("Network error")
 
@@ -537,9 +537,7 @@ def test_coordinator_speech_uses_current_round(core):
 
     # Coordinator speaks again in round 1 — should NOT be round 0!
     r_coord2 = core.speak(disc_id, "coordinator", "Round 1 summary")
-    assert r_coord2["round"] == 1, (
-        f"Coordinator's second speech should be round 1, got {r_coord2['round']}"
-    )
+    assert r_coord2["round"] == 1, f"Coordinator's second speech should be round 1, got {r_coord2['round']}"
 
     # Round 2: participants speak
     r_alice2 = core.speak(disc_id, "alice", "Alice R2")
@@ -550,9 +548,7 @@ def test_coordinator_speech_uses_current_round(core):
 
     # Coordinator in round 2
     r_coord3 = core.speak(disc_id, "coordinator", "Round 2 summary")
-    assert r_coord3["round"] == 2, (
-        f"Coordinator's third speech should be round 2, got {r_coord3['round']}"
-    )
+    assert r_coord3["round"] == 2, f"Coordinator's third speech should be round 2, got {r_coord3['round']}"
 
 
 def test_round_advances_after_all_participants_speak(core):
@@ -611,6 +607,4 @@ def test_read_shows_correct_rounds(core):
     read = core.read(disc_id)
     speeches = read["speeches"]
     rounds = [s["round"] for s in speeches]
-    assert rounds == [0, 0, 0, 1, 1], (
-        f"Expected rounds [0, 0, 0, 1, 1], got {rounds}"
-    )
+    assert rounds == [0, 0, 0, 1, 1], f"Expected rounds [0, 0, 0, 1, 1], got {rounds}"

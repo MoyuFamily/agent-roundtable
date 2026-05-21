@@ -12,11 +12,11 @@ import secrets
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from roundtable.exceptions import (
-    DiscussionNotFoundError,
     DiscussionNotActiveError,
+    DiscussionNotFoundError,
     InvalidFindingTypeError,
     InvalidReplyToError,
     InvalidSpeechOrderError,
@@ -135,7 +135,7 @@ class RoundtableDB:
             then ``~/.roundtable/roundtable.db``.
     """
 
-    def __init__(self, db_path: Optional[str | Path] = None):
+    def __init__(self, db_path: str | Path | None = None):
         if db_path:
             self._path = Path(db_path)
         else:
@@ -182,14 +182,14 @@ class RoundtableDB:
         self,
         conn: sqlite3.Connection,
         topic: str,
-        participants: List[Dict],
+        participants: list[dict],
         *,
-        context: Optional[str] = None,
+        context: str | None = None,
         max_rounds: int = 5,
         speech_order: str = "fixed",
         created_by: str = "unknown",
-        output_path: Optional[str] = None,
-        notifications: Optional[Dict] = None,
+        output_path: str | None = None,
+        notifications: dict | None = None,
     ) -> Discussion:
         if speech_order not in VALID_SPEECH_ORDERS:
             raise InvalidSpeechOrderError(f"Invalid speech_order: {speech_order}")
@@ -209,8 +209,7 @@ class RoundtableDB:
                    (id, topic, context, status, max_rounds, current_round,
                     speech_order, created_by, created_at, output_path, notifications)
                    VALUES (?, ?, ?, 'active', ?, 0, ?, ?, ?, ?, ?)""",
-                (disc_id, topic, context, max_rounds, speech_order,
-                 created_by, now, output_path, notif_json),
+                (disc_id, topic, context, max_rounds, speech_order, created_by, now, output_path, notif_json),
             )
             for p in participants:
                 profile = p.get("profile", "").strip()
@@ -221,8 +220,7 @@ class RoundtableDB:
                        (discussion_id, participant, role, perspective,
                         display_name, joined_at, is_active)
                        VALUES (?, ?, ?, ?, ?, ?, 1)""",
-                    (disc_id, profile, p.get("role"), p.get("perspective"),
-                     p.get("display_name"), now),
+                    (disc_id, profile, p.get("role"), p.get("perspective"), p.get("display_name"), now),
                 )
             conn.execute("COMMIT")
         except Exception:
@@ -230,19 +228,24 @@ class RoundtableDB:
             raise
 
         return Discussion(
-            id=disc_id, topic=topic, context=context, status="active",
-            max_rounds=max_rounds, current_round=0, speech_order=speech_order,
-            created_by=created_by, created_at=now, concluded_at=None,
-            conclusion=None, convergence_score=None, output_path=output_path,
+            id=disc_id,
+            topic=topic,
+            context=context,
+            status="active",
+            max_rounds=max_rounds,
+            current_round=0,
+            speech_order=speech_order,
+            created_by=created_by,
+            created_at=now,
+            concluded_at=None,
+            conclusion=None,
+            convergence_score=None,
+            output_path=output_path,
             notifications=notifications,
         )
 
-    def get_discussion(
-        self, conn: sqlite3.Connection, discussion_id: str
-    ) -> Optional[Discussion]:
-        row = conn.execute(
-            "SELECT * FROM discussions WHERE id = ?", (discussion_id,)
-        ).fetchone()
+    def get_discussion(self, conn: sqlite3.Connection, discussion_id: str) -> Discussion | None:
+        row = conn.execute("SELECT * FROM discussions WHERE id = ?", (discussion_id,)).fetchone()
         if not row:
             return None
         return self._row_to_discussion(row)
@@ -251,9 +254,9 @@ class RoundtableDB:
         self,
         conn: sqlite3.Connection,
         *,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
-    ) -> List[Discussion]:
+    ) -> list[Discussion]:
         if status:
             rows = conn.execute(
                 "SELECT * FROM discussions WHERE status = ? ORDER BY created_at DESC LIMIT ?",
@@ -271,8 +274,8 @@ class RoundtableDB:
         conn: sqlite3.Connection,
         discussion_id: str,
         *,
-        conclusion: Optional[str] = None,
-        convergence_score: Optional[float] = None,
+        conclusion: str | None = None,
+        convergence_score: float | None = None,
     ) -> bool:
         now = int(time.time())
         cur = conn.execute(
@@ -285,9 +288,7 @@ class RoundtableDB:
         )
         return cur.rowcount > 0
 
-    def cancel_discussion(
-        self, conn: sqlite3.Connection, discussion_id: str
-    ) -> bool:
+    def cancel_discussion(self, conn: sqlite3.Connection, discussion_id: str) -> bool:
         now = int(time.time())
         cur = conn.execute(
             """UPDATE discussions
@@ -301,9 +302,7 @@ class RoundtableDB:
     # Participants
     # ------------------------------------------------------------------
 
-    def get_participants(
-        self, conn: sqlite3.Connection, discussion_id: str
-    ) -> List[Participant]:
+    def get_participants(self, conn: sqlite3.Connection, discussion_id: str) -> list[Participant]:
         rows = conn.execute(
             "SELECT * FROM participants WHERE discussion_id = ? ORDER BY joined_at",
             (discussion_id,),
@@ -321,9 +320,7 @@ class RoundtableDB:
             for r in rows
         ]
 
-    def get_active_participant_names(
-        self, conn: sqlite3.Connection, discussion_id: str
-    ) -> List[str]:
+    def get_active_participant_names(self, conn: sqlite3.Connection, discussion_id: str) -> list[str]:
         rows = conn.execute(
             """SELECT participant FROM participants
                WHERE discussion_id = ? AND is_active = 1
@@ -343,8 +340,8 @@ class RoundtableDB:
         participant: str,
         content: str,
         *,
-        reply_to: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        reply_to: int | None = None,
+    ) -> dict[str, Any]:
         """Add a speech and return result with speech + round metadata.
 
         All speeches use the current round — including the coordinator's
@@ -370,9 +367,7 @@ class RoundtableDB:
                 (reply_to, discussion_id),
             ).fetchone()
             if not ref:
-                raise InvalidReplyToError(
-                    f"reply_to speech {reply_to} not found in discussion {discussion_id}"
-                )
+                raise InvalidReplyToError(f"reply_to speech {reply_to} not found in discussion {discussion_id}")
 
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -416,18 +411,17 @@ class RoundtableDB:
             disc_after = self.get_discussion(conn, discussion_id)
             target_round = disc_after.current_round if disc_after else current_round
             next_speaker = None
-            if not discussion_complete and active_names:
-                if disc.speech_order == "fixed":
-                    speakers_next = conn.execute(
-                        """SELECT DISTINCT participant FROM speeches
-                           WHERE discussion_id = ? AND round = ?""",
-                        (discussion_id, target_round),
-                    ).fetchall()
-                    spoke_next = {r["participant"] for r in speakers_next}
-                    for name in active_names:
-                        if name not in spoke_next:
-                            next_speaker = name
-                            break
+            if not discussion_complete and active_names and disc.speech_order == "fixed":
+                speakers_next = conn.execute(
+                    """SELECT DISTINCT participant FROM speeches
+                       WHERE discussion_id = ? AND round = ?""",
+                    (discussion_id, target_round),
+                ).fetchall()
+                spoke_next = {r["participant"] for r in speakers_next}
+                for name in active_names:
+                    if name not in spoke_next:
+                        next_speaker = name
+                        break
 
             conn.execute("COMMIT")
         except Exception:
@@ -455,9 +449,9 @@ class RoundtableDB:
         conn: sqlite3.Connection,
         discussion_id: str,
         *,
-        since_round: Optional[int] = None,
-        participant: Optional[str] = None,
-    ) -> List[Speech]:
+        since_round: int | None = None,
+        participant: str | None = None,
+    ) -> list[Speech]:
         query = "SELECT * FROM speeches WHERE discussion_id = ?"
         params: list = [discussion_id]
         if since_round is not None:
@@ -470,17 +464,18 @@ class RoundtableDB:
         rows = conn.execute(query, params).fetchall()
         return [
             Speech(
-                id=r["id"], discussion_id=r["discussion_id"],
-                round=r["round"], participant=r["participant"],
-                content=r["content"], reply_to=r["reply_to"],
+                id=r["id"],
+                discussion_id=r["discussion_id"],
+                round=r["round"],
+                participant=r["participant"],
+                content=r["content"],
+                reply_to=r["reply_to"],
                 created_at=r["created_at"],
             )
             for r in rows
         ]
 
-    def get_speech_count(
-        self, conn: sqlite3.Connection, discussion_id: str
-    ) -> int:
+    def get_speech_count(self, conn: sqlite3.Connection, discussion_id: str) -> int:
         row = conn.execute(
             "SELECT COUNT(*) as cnt FROM speeches WHERE discussion_id = ?",
             (discussion_id,),
@@ -498,7 +493,7 @@ class RoundtableDB:
         finding_type: str,
         content: str,
         round_num: int,
-        related_speeches: Optional[List[int]] = None,
+        related_speeches: list[int] | None = None,
     ) -> int:
         if finding_type not in VALID_FINDING_TYPES:
             raise InvalidFindingTypeError(f"Invalid finding type: {finding_type}")
@@ -516,8 +511,8 @@ class RoundtableDB:
         conn: sqlite3.Connection,
         discussion_id: str,
         *,
-        finding_type: Optional[str] = None,
-    ) -> List[Finding]:
+        finding_type: str | None = None,
+    ) -> list[Finding]:
         if finding_type:
             rows = conn.execute(
                 """SELECT * FROM findings
@@ -532,10 +527,12 @@ class RoundtableDB:
             ).fetchall()
         return [
             Finding(
-                id=r["id"], discussion_id=r["discussion_id"],
-                type=r["type"], content=r["content"], round=r["round"],
-                related_speeches=json.loads(r["related_speeches"])
-                if r["related_speeches"] else None,
+                id=r["id"],
+                discussion_id=r["discussion_id"],
+                type=r["type"],
+                content=r["content"],
+                round=r["round"],
+                related_speeches=json.loads(r["related_speeches"]) if r["related_speeches"] else None,
             )
             for r in rows
         ]
@@ -559,13 +556,10 @@ class RoundtableDB:
                (discussion_id, round, score, consensus_count,
                 disagreement_count, new_point_count)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (discussion_id, round_num, score, consensus_count,
-             disagreement_count, new_point_count),
+            (discussion_id, round_num, score, consensus_count, disagreement_count, new_point_count),
         )
 
-    def get_convergence_history(
-        self, conn: sqlite3.Connection, discussion_id: str
-    ) -> List[ConvergenceRecord]:
+    def get_convergence_history(self, conn: sqlite3.Connection, discussion_id: str) -> list[ConvergenceRecord]:
         rows = conn.execute(
             """SELECT * FROM convergence_history
                WHERE discussion_id = ? ORDER BY round ASC""",
@@ -573,17 +567,17 @@ class RoundtableDB:
         ).fetchall()
         return [
             ConvergenceRecord(
-                discussion_id=r["discussion_id"], round=r["round"],
-                score=r["score"], consensus_count=r["consensus_count"],
+                discussion_id=r["discussion_id"],
+                round=r["round"],
+                score=r["score"],
+                consensus_count=r["consensus_count"],
                 disagreement_count=r["disagreement_count"],
                 new_point_count=r["new_point_count"],
             )
             for r in rows
         ]
 
-    def advance_round(
-        self, conn: sqlite3.Connection, discussion_id: str
-    ) -> Dict[str, Any]:
+    def advance_round(self, conn: sqlite3.Connection, discussion_id: str) -> dict[str, Any]:
         """Explicitly advance to the next round.
 
         Returns dict with new_round, discussion_complete, max_rounds.
@@ -624,9 +618,7 @@ class RoundtableDB:
             "discussion_complete": discussion_complete,
         }
 
-    def calculate_convergence(
-        self, conn: sqlite3.Connection, discussion_id: str, round_num: int
-    ) -> Optional[float]:
+    def calculate_convergence(self, conn: sqlite3.Connection, discussion_id: str, round_num: int) -> float | None:
         """Calculate convergence score for a given round from its findings.
 
         Score = consensus_count / (consensus_count + disagreement_count).
@@ -651,8 +643,13 @@ class RoundtableDB:
 
         # Record in convergence_history
         self.record_convergence(
-            conn, discussion_id, round_num,
-            score, consensus, disagreement, new_points,
+            conn,
+            discussion_id,
+            round_num,
+            score,
+            consensus,
+            disagreement,
+            new_points,
         )
 
         # Update the discussion's overall convergence_score (latest round)
@@ -672,11 +669,17 @@ class RoundtableDB:
         notif_raw = row["notifications"]
         notif = json.loads(notif_raw) if notif_raw else None
         return Discussion(
-            id=row["id"], topic=row["topic"], context=row["context"],
-            status=row["status"], max_rounds=row["max_rounds"],
-            current_round=row["current_round"], speech_order=row["speech_order"],
-            created_by=row["created_by"], created_at=row["created_at"],
-            concluded_at=row["concluded_at"], conclusion=row["conclusion"],
+            id=row["id"],
+            topic=row["topic"],
+            context=row["context"],
+            status=row["status"],
+            max_rounds=row["max_rounds"],
+            current_round=row["current_round"],
+            speech_order=row["speech_order"],
+            created_by=row["created_by"],
+            created_at=row["created_at"],
+            concluded_at=row["concluded_at"],
+            conclusion=row["conclusion"],
             convergence_score=row["convergence_score"],
             output_path=row["output_path"],
             notifications=notif,

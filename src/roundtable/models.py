@@ -6,34 +6,34 @@ Pure dataclasses with zero external dependencies — only stdlib.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
 class Discussion:
     id: str
     topic: str
-    context: Optional[str]
+    context: str | None
     status: str  # "active" | "concluded" | "cancelled"
     max_rounds: int
     current_round: int
     speech_order: str  # "fixed" | "random" | "priority" | "free"
     created_by: str
     created_at: int
-    concluded_at: Optional[int]
-    conclusion: Optional[str]
-    convergence_score: Optional[float]
-    output_path: Optional[str]
-    notifications: Optional[Dict[str, Any]] = None
+    concluded_at: int | None
+    conclusion: str | None
+    convergence_score: float | None
+    output_path: str | None
+    notifications: dict[str, Any] | None = None
 
 
 @dataclass
 class Participant:
     discussion_id: str
     participant: str
-    role: Optional[str]
-    perspective: Optional[str]
-    display_name: Optional[str]
+    role: str | None
+    perspective: str | None
+    display_name: str | None
     joined_at: int
     is_active: bool
 
@@ -45,7 +45,7 @@ class Speech:
     round: int
     participant: str
     content: str
-    reply_to: Optional[int]
+    reply_to: int | None
     created_at: int
 
 
@@ -56,7 +56,7 @@ class Finding:
     type: str  # "consensus" | "disagreement" | "new_point"
     content: str
     round: int
-    related_speeches: Optional[List[int]]
+    related_speeches: list[int] | None
 
 
 @dataclass

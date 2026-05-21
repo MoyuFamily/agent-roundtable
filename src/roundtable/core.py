@@ -6,16 +6,14 @@ imports. All handlers return plain dicts (JSON-serializable).
 
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar
 
 from roundtable.db import RoundtableDB
 from roundtable.exceptions import (
-    DiscussionNotFoundError,
     DiscussionNotActiveError,
+    DiscussionNotFoundError,
     InvalidParticipantError,
-    RoundtableError,
 )
 from roundtable.notify import Notifier
 
@@ -33,7 +31,7 @@ class RoundtableCore:
         send_fn: Optional callback(platform, chat_id, message) for notifications.
     """
 
-    def __init__(self, db: Optional[RoundtableDB] = None, send_fn=None):
+    def __init__(self, db: RoundtableDB | None = None, send_fn=None):
         self.db = db or RoundtableDB()
         self._send_fn = send_fn
 
@@ -44,15 +42,15 @@ class RoundtableCore:
     def create_discussion(
         self,
         topic: str,
-        participants: List[Dict[str, Any]],
+        participants: list[dict[str, Any]],
         *,
-        context: Optional[str] = None,
+        context: str | None = None,
         max_rounds: int = 5,
         speech_order: str = "fixed",
         created_by: str = "coordinator",
-        output_path: Optional[str] = None,
-        notifications: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        output_path: str | None = None,
+        notifications: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Create a new roundtable discussion.
 
         Returns dict with discussion_id, topic, participants, etc.
@@ -67,8 +65,8 @@ class RoundtableCore:
 
         try:
             max_rounds = int(max_rounds)
-        except (TypeError, ValueError):
-            raise ValueError("max_rounds must be an integer")
+        except (TypeError, ValueError) as err:
+            raise ValueError("max_rounds must be an integer") from err
 
         conn = self.db.connect()
         try:
@@ -101,8 +99,8 @@ class RoundtableCore:
         participant: str,
         content: str,
         *,
-        reply_to: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        reply_to: int | None = None,
+    ) -> dict[str, Any]:
         """Record a participant's speech.
 
         Returns dict with speech_id, round, next_speaker, etc.
@@ -117,8 +115,8 @@ class RoundtableCore:
         if reply_to is not None:
             try:
                 reply_to = int(reply_to)
-            except (TypeError, ValueError):
-                raise ValueError("reply_to must be an integer")
+            except (TypeError, ValueError) as err:
+                raise ValueError("reply_to must be an integer") from err
 
         conn = self.db.connect()
         try:
@@ -151,9 +149,7 @@ class RoundtableCore:
             # Auto-calculate convergence when a round completes
             convergence_score = None
             if round_complete and speech.round > 0:
-                convergence_score = self.db.calculate_convergence(
-                    conn, discussion_id, speech.round
-                )
+                convergence_score = self.db.calculate_convergence(conn, discussion_id, speech.round)
 
             # --- Notifications ---
             notifier = self._make_notifier(disc.notifications)
@@ -175,9 +171,7 @@ class RoundtableCore:
 
             # Check if this is the first speech in a new round (round_start)
             if speech.round > 0 and not round_complete:
-                speeches_this_round = self.db.get_speeches(
-                    conn, discussion_id, since_round=speech.round
-                )
+                speeches_this_round = self.db.get_speeches(conn, discussion_id, since_round=speech.round)
                 # Filter to current round only
                 round_speeches = [s for s in speeches_this_round if s.round == speech.round]
                 if len(round_speeches) == 1:
@@ -225,9 +219,9 @@ class RoundtableCore:
         self,
         discussion_id: str,
         *,
-        since_round: Optional[int] = None,
-        participant: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        since_round: int | None = None,
+        participant: str | None = None,
+    ) -> dict[str, Any]:
         """Read discussion history (speeches)."""
         if not discussion_id:
             raise ValueError("discussion_id is required")
@@ -235,8 +229,8 @@ class RoundtableCore:
         if since_round is not None:
             try:
                 since_round = int(since_round)
-            except (TypeError, ValueError):
-                raise ValueError("since_round must be an integer")
+            except (TypeError, ValueError) as err:
+                raise ValueError("since_round must be an integer") from err
 
         conn = self.db.connect()
         try:
@@ -245,8 +239,10 @@ class RoundtableCore:
                 raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
 
             speeches = self.db.get_speeches(
-                conn, discussion_id,
-                since_round=since_round, participant=participant,
+                conn,
+                discussion_id,
+                since_round=since_round,
+                participant=participant,
             )
             participants = self.db.get_participants(conn, discussion_id)
             p_map = {
@@ -283,7 +279,7 @@ class RoundtableCore:
         finally:
             conn.close()
 
-    def status(self, discussion_id: str) -> Dict[str, Any]:
+    def status(self, discussion_id: str) -> dict[str, Any]:
         """Get discussion status including convergence metrics."""
         if not discussion_id:
             raise ValueError("discussion_id is required")
@@ -346,7 +342,7 @@ class RoundtableCore:
         finally:
             conn.close()
 
-    def summarize(self, discussion_id: str, *, compact: bool = False) -> Dict[str, Any]:
+    def summarize(self, discussion_id: str, *, compact: bool = False) -> dict[str, Any]:
         """Generate summary data for a conclusion document.
 
         Args:
@@ -383,14 +379,16 @@ class RoundtableCore:
 
             rounds_dict: dict = {}
             for s in speeches:
-                rounds_dict.setdefault(s.round, []).append({
-                    "id": s.id,
-                    "participant": s.participant,
-                    "display_name": p_map.get(s.participant, {}).get("display_name"),
-                    "role": p_map.get(s.participant, {}).get("role"),
-                    "content": s.content,
-                    "reply_to": s.reply_to,
-                })
+                rounds_dict.setdefault(s.round, []).append(
+                    {
+                        "id": s.id,
+                        "participant": s.participant,
+                        "display_name": p_map.get(s.participant, {}).get("display_name"),
+                        "role": p_map.get(s.participant, {}).get("role"),
+                        "content": s.content,
+                        "reply_to": s.reply_to,
+                    }
+                )
 
             final_score = disc.convergence_score
             if not final_score and conv_history:
@@ -399,9 +397,15 @@ class RoundtableCore:
             # Build a structured summary — compact enough for LLM context,
             # rich enough to write a conclusion without re-reading raw speeches.
             structured_summary = self._build_structured_summary(
-                disc, participants, speeches, p_map,
-                consensus_pts, disagreement_pts, new_points,
-                final_score, conv_history,
+                disc,
+                participants,
+                speeches,
+                p_map,
+                consensus_pts,
+                disagreement_pts,
+                new_points,
+                final_score,
+                conv_history,
             )
 
             result = {
@@ -453,8 +457,8 @@ class RoundtableCore:
         discussion_id: str,
         *,
         force: bool = False,
-        conclusion: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        conclusion: str | None = None,
+    ) -> dict[str, Any]:
         """End a discussion (conclude or cancel)."""
         if not discussion_id:
             raise ValueError("discussion_id is required")
@@ -465,9 +469,7 @@ class RoundtableCore:
             if not disc:
                 raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
             if disc.status != "active":
-                raise DiscussionNotActiveError(
-                    f"Discussion {discussion_id} is already {disc.status}"
-                )
+                raise DiscussionNotActiveError(f"Discussion {discussion_id} is already {disc.status}")
 
             if force:
                 ok = self.db.cancel_discussion(conn, discussion_id)
@@ -495,14 +497,14 @@ class RoundtableCore:
     def list_discussions(
         self,
         *,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """List all discussions with optional status filter."""
         try:
             limit = int(limit)
-        except (TypeError, ValueError):
-            raise ValueError("limit must be an integer")
+        except (TypeError, ValueError) as err:
+            raise ValueError("limit must be an integer") from err
 
         conn = self.db.connect()
         try:
@@ -529,7 +531,7 @@ class RoundtableCore:
         finally:
             conn.close()
 
-    def advance(self, discussion_id: str) -> Dict[str, Any]:
+    def advance(self, discussion_id: str) -> dict[str, Any]:
         """Explicitly advance to the next round.
 
         Returns dict with new_round, max_rounds, discussion_complete.
@@ -549,7 +551,7 @@ class RoundtableCore:
         discussion_id: str,
         event: str,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Manually trigger a notification for a discussion.
 
         Useful for custom notification flows or re-sending missed events.
@@ -574,9 +576,7 @@ class RoundtableCore:
         finally:
             conn.close()
 
-    def calculate_convergence(
-        self, discussion_id: str, round_num: int
-    ) -> Dict[str, Any]:
+    def calculate_convergence(self, discussion_id: str, round_num: int) -> dict[str, Any]:
         """Calculate convergence score for a round from its findings.
 
         Score = consensus / (consensus + disagreement).
@@ -602,8 +602,8 @@ class RoundtableCore:
     # ------------------------------------------------------------------
 
     # Default demo scenario — topic, participants, speeches, findings
-    _DEMO_TOPIC = "选择后端框架：FastAPI vs Go Gin vs Node Express"
-    _DEMO_PARTICIPANTS = [
+    _DEMO_TOPIC: ClassVar[str] = "选择后端框架：FastAPI vs Go Gin vs Node Express"
+    _DEMO_PARTICIPANTS: ClassVar[list[dict[str, Any]]] = [
         {
             "profile": "alice",
             "role": "全栈工程师",
@@ -623,7 +623,7 @@ class RoundtableCore:
             "perspective": "重视交付速度和团队学习成本",
         },
     ]
-    _DEMO_SPEECHES = {
+    _DEMO_SPEECHES: ClassVar[dict[int, dict[str, str]]] = {
         1: {
             "alice": (
                 "FastAPI 的类型提示和自动生成 OpenAPI 文档太香了，"
@@ -670,13 +670,11 @@ class RoundtableCore:
                 "建议第一周就定好领域模型。"
             ),
             "carol": (
-                "完美！这样我们两周内就能出 MVP。"
-                "技术风险可控，团队也不需要额外学习成本。"
-                "我会把这个方案同步给管理层。"
+                "完美！这样我们两周内就能出 MVP。技术风险可控，团队也不需要额外学习成本。我会把这个方案同步给管理层。"
             ),
         },
     }
-    _DEMO_FINDINGS = {
+    _DEMO_FINDINGS: ClassVar[dict[int, list[tuple[str, str]]]] = {
         1: [
             ("consensus", "团队熟悉 Python，学习成本是关键考量因素"),
             ("disagreement", "Go 性能优势 vs FastAPI 开发效率，优先级不同"),
@@ -697,11 +695,11 @@ class RoundtableCore:
     def run_demo(
         self,
         *,
-        topic: Optional[str] = None,
-        participants: Optional[List[Dict[str, Any]]] = None,
+        topic: str | None = None,
+        participants: list[dict[str, Any]] | None = None,
         max_rounds: int = 3,
         verbose: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run a complete demo discussion with pre-scripted content.
 
         Simulates a realistic multi-round discussion with participants,
@@ -756,10 +754,13 @@ class RoundtableCore:
                     )
 
             # Add findings for this round
-            round_findings = self._DEMO_FINDINGS.get(round_num, [
-                ("consensus", f"Round {round_num} 达成的共识"),
-                ("disagreement", f"Round {round_num} 存在的分歧"),
-            ])
+            round_findings = self._DEMO_FINDINGS.get(
+                round_num,
+                [
+                    ("consensus", f"Round {round_num} 达成的共识"),
+                    ("disagreement", f"Round {round_num} 存在的分歧"),
+                ],
+            )
             conn = self.db.connect()
             try:
                 for ftype, content in round_findings:
@@ -817,9 +818,7 @@ class RoundtableCore:
         print("│" + "".ljust(width) + "│")
         print("│" + " Participants:".ljust(width) + "│")
         for p in participants:
-            icon = {"全栈工程师": "👩‍💻", "架构师": "👨‍💻", "产品经理": "👩‍💼"}.get(
-                p.get("role", ""), "👤"
-            )
+            icon = {"全栈工程师": "👩‍💻", "架构师": "👨‍💻", "产品经理": "👩‍💼"}.get(p.get("role", ""), "👤")
             line = f"   {icon} {p.get('display_name', p['profile'])} ({p.get('role', '')})"
             print("│" + line.ljust(width) + "│")
         print("╰" + "─" * width + "╯")
@@ -837,6 +836,7 @@ class RoundtableCore:
         print(f"\n  {icon} {display_name} ({role}):")
         # Word wrap content
         import textwrap
+
         for line in textwrap.wrap(content, width=52):
             print(f"     {line}")
 
@@ -847,9 +847,7 @@ class RoundtableCore:
         score_str = f"{conv_score:.2f}" if conv_score is not None else "N/A"
         print(f"  📊 Convergence: {score_str}")
         for ftype, content in findings:
-            icon = {"consensus": "✅", "disagreement": "⚡", "new_point": "💡"}.get(
-                ftype, "•"
-            )
+            icon = {"consensus": "✅", "disagreement": "⚡", "new_point": "💡"}.get(ftype, "•")
             print(f"     {icon} [{ftype}] {content}")
         print()
 
@@ -863,6 +861,7 @@ class RoundtableCore:
 
         # Conclusion text
         import textwrap
+
         for line in textwrap.wrap(conclusion, width=width - 4):
             print("│  " + line.ljust(width - 2) + "│")
         print("│" + "".ljust(width) + "│")
@@ -896,7 +895,7 @@ class RoundtableCore:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _make_notifier(self, config: Optional[Dict[str, Any]]) -> Notifier:
+    def _make_notifier(self, config: dict[str, Any] | None) -> Notifier:
         """Create a Notifier from a discussion's notification config."""
         return Notifier(config, send_fn=self._send_fn)
 
@@ -929,16 +928,20 @@ class RoundtableCore:
             role = p_info.get("role", "")
             role_str = f"({role})" if role else ""
             ref_str = f" [引用 #{s.reply_to}]" if s.reply_to else ""
-            lines.append(
-                f"[#{s.id}] Round {s.round} | {display}{role_str}{ref_str}:\n  {s.content}"
-            )
+            lines.append(f"[#{s.id}] Round {s.round} | {display}{role_str}{ref_str}:\n  {s.content}")
         return "\n\n".join(lines) if lines else "(暂无发言)"
 
     @staticmethod
     def _build_structured_summary(
-        disc, participants, speeches, p_map,
-        consensus_pts, disagreement_pts, new_points,
-        final_score, conv_history,
+        disc,
+        participants,
+        speeches,
+        p_map,
+        consensus_pts,
+        disagreement_pts,
+        new_points,
+        final_score,
+        conv_history,
     ) -> str:
         """Build a compact structured summary for LLM consumption.
 

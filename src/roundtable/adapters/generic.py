@@ -29,8 +29,9 @@ With notifications::
 
 from __future__ import annotations
 
-import json
-from typing import Any, Callable, Dict, List, Optional
+import builtins
+from collections.abc import Callable
+from typing import Any
 
 from roundtable.core import RoundtableCore
 from roundtable.db import RoundtableDB
@@ -50,8 +51,8 @@ class Roundtable:
 
     def __init__(
         self,
-        db_path: Optional[str] = None,
-        send_fn: Optional[Callable[[str, str, str], None]] = None,
+        db_path: str | None = None,
+        send_fn: Callable[[str, str, str], None] | None = None,
     ):
         db = RoundtableDB(db_path) if db_path else RoundtableDB()
         self._core = RoundtableCore(db, send_fn=send_fn)
@@ -59,11 +60,11 @@ class Roundtable:
     def init(
         self,
         topic: str,
-        participants: List[Dict[str, Any]],
+        participants: builtins.list[dict[str, Any]],
         *,
-        notifications: Optional[Dict[str, Any]] = None,
+        notifications: dict[str, Any] | None = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a new discussion.
 
         Args:
@@ -73,9 +74,7 @@ class Roundtable:
             **kwargs: Additional arguments passed to create_discussion.
         """
         try:
-            return self._core.create_discussion(
-                topic, participants, notifications=notifications, **kwargs
-            )
+            return self._core.create_discussion(topic, participants, notifications=notifications, **kwargs)
         except (ValueError, Exception) as e:
             return {"error": str(e)}
 
@@ -85,28 +84,28 @@ class Roundtable:
         participant: str,
         content: str,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Record a speech."""
         try:
             return self._core.speak(discussion_id, participant, content, **kwargs)
         except Exception as e:
             return {"error": str(e)}
 
-    def read(self, discussion_id: str, **kwargs) -> Dict[str, Any]:
+    def read(self, discussion_id: str, **kwargs) -> dict[str, Any]:
         """Read discussion history."""
         try:
             return self._core.read(discussion_id, **kwargs)
         except Exception as e:
             return {"error": str(e)}
 
-    def get_status(self, discussion_id: str) -> Dict[str, Any]:
+    def get_status(self, discussion_id: str) -> dict[str, Any]:
         """Get discussion status."""
         try:
             return self._core.status(discussion_id)
         except Exception as e:
             return {"error": str(e)}
 
-    def summarize(self, discussion_id: str, *, compact: bool = False) -> Dict[str, Any]:
+    def summarize(self, discussion_id: str, *, compact: bool = False) -> dict[str, Any]:
         """Get summary data."""
         try:
             return self._core.summarize(discussion_id, compact=compact)
@@ -118,22 +117,22 @@ class Roundtable:
         discussion_id: str,
         *,
         force: bool = False,
-        conclusion: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        conclusion: str | None = None,
+    ) -> dict[str, Any]:
         """End a discussion."""
         try:
             return self._core.end_discussion(discussion_id, force=force, conclusion=conclusion)
         except Exception as e:
             return {"error": str(e)}
 
-    def list(self, **kwargs) -> Dict[str, Any]:
+    def list(self, **kwargs) -> dict[str, Any]:
         """List discussions."""
         try:
             return self._core.list_discussions(**kwargs)
         except Exception as e:
             return {"error": str(e)}
 
-    def advance(self, discussion_id: str) -> Dict[str, Any]:
+    def advance(self, discussion_id: str) -> dict[str, Any]:
         """Explicitly advance to the next round.
 
         Use when auto-advance doesn't trigger. If max_rounds is exceeded,
@@ -147,11 +146,11 @@ class Roundtable:
     def run_demo(
         self,
         *,
-        topic: Optional[str] = None,
-        participants: Optional[List[Dict[str, Any]]] = None,
+        topic: str | None = None,
+        participants: builtins.list[dict[str, Any]] | None = None,
         max_rounds: int = 3,
         verbose: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run a complete demo discussion with pre-scripted content.
 
         Simulates a realistic multi-round discussion. Prints formatted
@@ -178,7 +177,7 @@ class Roundtable:
         discussion_id: str,
         event: str,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Manually trigger a notification for a discussion event.
 
         Valid events: round_start, speech, round_end, concluded.

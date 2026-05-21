@@ -6,9 +6,6 @@ now testing the independent library.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
 from roundtable.db import RoundtableDB
@@ -42,9 +39,7 @@ PARTICIPANTS = [
 
 
 def test_connect_creates_tables(db_conn):
-    rows = db_conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-    ).fetchall()
+    rows = db_conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
     names = {r["name"] for r in rows}
     assert {"discussions", "participants", "speeches", "findings", "convergence_history"} <= names
 
@@ -96,10 +91,7 @@ def test_create_discussion_registers_participants(rt_db, db_conn):
 
 def test_create_discussion_validates_speech_order(rt_db, db_conn):
     with pytest.raises(ValueError, match="Invalid speech_order"):
-        rt_db.create_discussion(
-            db_conn, topic="test", participants=PARTICIPANTS,
-            speech_order="invalid"
-        )
+        rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS, speech_order="invalid")
 
 
 def test_create_discussion_requires_participants(rt_db, db_conn):
@@ -109,9 +101,7 @@ def test_create_discussion_requires_participants(rt_db, db_conn):
 
 def test_create_discussion_validates_max_rounds(rt_db, db_conn):
     with pytest.raises(ValueError, match="max_rounds"):
-        rt_db.create_discussion(
-            db_conn, topic="test", participants=PARTICIPANTS, max_rounds=0
-        )
+        rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS, max_rounds=0)
 
 
 def test_get_discussion(rt_db, db_conn):
@@ -146,9 +136,7 @@ def test_list_discussions_filter_status(rt_db, db_conn):
 
 def test_conclude_discussion(rt_db, db_conn):
     disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS)
-    ok = rt_db.conclude_discussion(
-        db_conn, disc.id, conclusion="We chose PostgreSQL", convergence_score=0.9
-    )
+    ok = rt_db.conclude_discussion(db_conn, disc.id, conclusion="We chose PostgreSQL", convergence_score=0.9)
     assert ok is True
     fetched = rt_db.get_discussion(db_conn, disc.id)
     assert fetched.status == "concluded"
@@ -216,9 +204,7 @@ def test_speech_round_advances_when_all_spoke(rt_db, db_conn):
 
 
 def test_speech_auto_conclude_on_max_rounds(rt_db, db_conn):
-    disc = rt_db.create_discussion(
-        db_conn, topic="test", participants=PARTICIPANTS, max_rounds=1
-    )
+    disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS, max_rounds=1)
 
     # Round 0
     rt_db.add_speech(db_conn, disc.id, "alice", "s1")
@@ -293,9 +279,7 @@ def test_get_speech_count(rt_db, db_conn):
 
 def test_add_finding(rt_db, db_conn):
     disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS)
-    fid = rt_db.add_finding(
-        db_conn, disc.id, "consensus", "We all agree on X", 1, [1, 2]
-    )
+    fid = rt_db.add_finding(db_conn, disc.id, "consensus", "We all agree on X", 1, [1, 2])
     assert fid > 0
 
     findings = rt_db.get_findings(db_conn, disc.id)

@@ -18,7 +18,6 @@ import subprocess
 from typing import Any
 
 from roundtable.core import RoundtableCore
-from roundtable.db import RoundtableDB
 from roundtable.exceptions import RoundtableError
 
 logger = logging.getLogger(__name__)
@@ -27,6 +26,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Notification send callback
 # ---------------------------------------------------------------------------
+
 
 def _hermes_send_fn(platform: str, chat_id: str, message: str) -> None:
     """Deliver a notification message to a messaging platform.
@@ -40,7 +40,8 @@ def _hermes_send_fn(platform: str, chat_id: str, message: str) -> None:
             script = os.path.expanduser("~/.hermes/scripts/feishu-send.py")
             subprocess.run(
                 ["python3", script, profile, chat_id, message],
-                capture_output=True, timeout=15,
+                capture_output=True,
+                timeout=15,
             )
         else:
             logger.warning("Unsupported notification platform: %s", platform)
@@ -65,6 +66,7 @@ def _get_core() -> RoundtableCore:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _ok(**fields: Any) -> str:
     return json.dumps({"ok": True, **fields})
@@ -91,6 +93,7 @@ def _handle(args: dict, method: str, **extra) -> str:
 # ---------------------------------------------------------------------------
 # Handlers
 # ---------------------------------------------------------------------------
+
 
 def _handle_init(args: dict, **kw) -> str:
     return _handle(args, "create_discussion")
@@ -286,8 +289,7 @@ ROUNDTABLE_SUMMARIZE_SCHEMA = {
 ROUNDTABLE_END_SCHEMA = {
     "name": "roundtable_end",
     "description": (
-        "End a roundtable discussion. By default, marks it as concluded. "
-        "Use force=true to cancel instead."
+        "End a roundtable discussion. By default, marks it as concluded. Use force=true to cancel instead."
     ),
     "parameters": {
         "type": "object",
@@ -395,6 +397,7 @@ def register_roundtable_tools(registry, *, check_fn=None):
 # Auto-registration when imported by Hermes tool discovery
 # ---------------------------------------------------------------------------
 
+
 def _auto_register():
     """Try to auto-register with Hermes if available."""
     try:
@@ -403,6 +406,7 @@ def _auto_register():
         def _check_roundtable_enabled() -> bool:
             try:
                 from hermes_cli.config import load_config
+
                 cfg = load_config()
                 return "roundtable" in cfg.get("toolsets", [])
             except Exception:

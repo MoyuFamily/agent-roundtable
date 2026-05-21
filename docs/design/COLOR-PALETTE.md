@@ -234,4 +234,4 @@ selection  #44475a
 - [x] 2 种配色方案（Tokyo Night + Dracula Night）
 - [x] 终端 16 色配置
 - [x] 对比度/可读性验证
-- [ ] HTML 预览文件（待输出）
+- [x] HTML 预览文件（`color-palette-preview.html`）

@@ -344,9 +344,12 @@ class RoundtableDB:
         content: str,
         *,
         reply_to: Optional[int] = None,
-        round_override: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Add a speech and return result with speech + round metadata.
+
+        All speeches use the current round — including the coordinator's
+        opening statement (which is naturally round 0 since discussions
+        start at current_round=0).
 
         Returns dict with: speech (Speech), round_complete (bool),
         discussion_complete (bool), next_speaker (str|None).
@@ -359,7 +362,7 @@ class RoundtableDB:
 
         now = int(time.time())
         current_round = disc.current_round
-        speech_round = round_override if round_override is not None else current_round
+        speech_round = current_round
 
         if reply_to is not None:
             ref = conn.execute(
@@ -385,14 +388,14 @@ class RoundtableDB:
             round_complete = False
             discussion_complete = False
 
-            if round_override is None:
-                speakers_this_round = conn.execute(
-                    """SELECT DISTINCT participant FROM speeches
-                       WHERE discussion_id = ? AND round = ?""",
-                    (discussion_id, current_round),
-                ).fetchall()
-                spoke_names = {r["participant"] for r in speakers_this_round}
-                round_complete = all(name in spoke_names for name in active_names)
+            # Check if all active participants have spoken in this round
+            speakers_this_round = conn.execute(
+                """SELECT DISTINCT participant FROM speeches
+                   WHERE discussion_id = ? AND round = ?""",
+                (discussion_id, current_round),
+            ).fetchall()
+            spoke_names = {r["participant"] for r in speakers_this_round}
+            round_complete = all(name in spoke_names for name in active_names)
 
             if round_complete and current_round >= 0:
                 new_round = current_round + 1

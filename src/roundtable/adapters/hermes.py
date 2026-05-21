@@ -115,7 +115,8 @@ def _handle_summarize(args: dict, **kw) -> str:
     discussion_id = args.get("discussion_id", "").strip()
     if not discussion_id:
         return _err("discussion_id is required")
-    return _handle({"discussion_id": discussion_id}, "summarize")
+    compact = args.get("compact", False)
+    return _handle({"discussion_id": discussion_id, "compact": compact}, "summarize")
 
 
 def _handle_end(args: dict, **kw) -> str:
@@ -265,13 +266,18 @@ ROUNDTABLE_STATUS_SCHEMA = {
 ROUNDTABLE_SUMMARIZE_SCHEMA = {
     "name": "roundtable_summarize",
     "description": (
-        "Generate summary data for a conclusion document. Returns all discussion "
-        "data organized by round, with consensus/disagreement points extracted."
+        "Generate summary data for a conclusion document. Returns structured_summary "
+        "(compact Markdown, <5KB) plus metadata. Use compact=true to omit raw speech data."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "discussion_id": {"type": "string", "description": "Discussion ID (rt_xxxxxxxx)"},
+            "compact": {
+                "type": "boolean",
+                "description": "If true, return only structured_summary without raw rounds data (default: false)",
+                "default": False,
+            },
         },
         "required": ["discussion_id"],
     },

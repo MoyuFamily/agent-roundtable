@@ -72,10 +72,10 @@ class Roundtable:
         except Exception as e:
             return {"error": str(e)}
 
-    def summarize(self, discussion_id: str) -> Dict[str, Any]:
+    def summarize(self, discussion_id: str, *, compact: bool = False) -> Dict[str, Any]:
         """Get summary data."""
         try:
-            return self._core.summarize(discussion_id)
+            return self._core.summarize(discussion_id, compact=compact)
         except Exception as e:
             return {"error": str(e)}
 

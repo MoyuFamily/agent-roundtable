@@ -168,15 +168,14 @@ def _handle_speak(args: dict, **kw) -> str:
                     f"Active: {', '.join(active_names)}"
                 )
 
-            # Coordinator speech is always recorded in round 0 and does not
-            # participate in round progression logic.
+            # Coordinator speech uses current round like all participants.
+            # Opening statement is naturally round 0 (discussion starts there).
             add_result = rdb.add_speech(
                 conn,
                 discussion_id=discussion_id,
                 participant=participant,
                 content=content,
                 reply_to=reply_to,
-                round_override=0 if is_coordinator else None,
             )
             speech = add_result["speech"]
             round_complete = add_result["round_complete"]

@@ -142,7 +142,6 @@ class RoundtableCore:
                 participant=participant,
                 content=content.strip(),
                 reply_to=reply_to,
-                round_override=0 if is_coordinator else None,
             )
             speech = result["speech"]
             round_complete = result["round_complete"]
@@ -347,8 +346,14 @@ class RoundtableCore:
         finally:
             conn.close()
 
-    def summarize(self, discussion_id: str) -> Dict[str, Any]:
-        """Generate summary data for a conclusion document."""
+    def summarize(self, discussion_id: str, *, compact: bool = False) -> Dict[str, Any]:
+        """Generate summary data for a conclusion document.
+
+        Args:
+            discussion_id: The discussion to summarize.
+            compact: If True, omit raw rounds data and formatted_history
+                to keep output small (<5KB). Use structured_summary instead.
+        """
         if not discussion_id:
             raise ValueError("discussion_id is required")
 
@@ -399,7 +404,7 @@ class RoundtableCore:
                 final_score, conv_history,
             )
 
-            return {
+            result = {
                 "ok": True,
                 "discussion_id": disc.id,
                 "topic": disc.topic,
@@ -421,7 +426,6 @@ class RoundtableCore:
                 "disagreement_points": disagreement_pts,
                 "new_points": new_points,
                 "speech_count": len(speeches),
-                "rounds": rounds_dict,
                 "convergence_history": [
                     {
                         "round": c.round,
@@ -432,9 +436,15 @@ class RoundtableCore:
                     for c in conv_history
                 ],
                 "output_path": disc.output_path,
-                "formatted_history": self._format_history(speeches, p_map),
                 "structured_summary": structured_summary,
             }
+
+            if not compact:
+                # Full data — includes all raw speech content
+                result["rounds"] = rounds_dict
+                result["formatted_history"] = self._format_history(speeches, p_map)
+
+            return result
         finally:
             conn.close()
 

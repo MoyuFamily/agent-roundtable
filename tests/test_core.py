@@ -257,6 +257,40 @@ def test_summarize(core):
     assert len(result["structured_summary"]) > 0
 
 
+def test_summarize_compact(core):
+    """compact=True should omit raw rounds and formatted_history."""
+    disc = core.create_discussion(
+        topic="Compact Test",
+        participants=_make_participants(),
+    )
+    disc_id = disc["discussion_id"]
+
+    core.speak(disc_id, "coordinator", "Opening")
+    core.speak(disc_id, "alice", "Alice says something long " * 100)
+    core.speak(disc_id, "bob", "Bob also says something long " * 100)
+
+    # Full (default)
+    full = core.summarize(disc_id)
+    assert "rounds" in full
+    assert "formatted_history" in full
+
+    # Compact
+    compact = core.summarize(disc_id, compact=True)
+    assert "rounds" not in compact, "compact mode should omit rounds"
+    assert "formatted_history" not in compact, "compact mode should omit formatted_history"
+    assert "structured_summary" in compact
+    assert compact["speech_count"] == 3
+    assert compact["ok"] is True
+
+    # Compact should be significantly smaller
+    import json
+    full_size = len(json.dumps(full))
+    compact_size = len(json.dumps(compact))
+    assert compact_size < full_size, (
+        f"compact ({compact_size}B) should be smaller than full ({full_size}B)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # advance
 # ---------------------------------------------------------------------------
@@ -465,3 +499,114 @@ def test_manual_notify(core):
     assert r["ok"] is True
     assert len(sent) == 1
     assert "第1轮讨论开始" in sent[0]
+
+
+# ---------------------------------------------------------------------------
+# P0 fix: Round tracking regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_coordinator_speech_uses_current_round(core):
+    """Coordinator's speeches should track the current round, not always 0.
+
+    Before the fix, coordinator always got round_override=0.
+    After the fix, coordinator uses disc.current_round like everyone else.
+    """
+    result = core.create_discussion(
+        topic="Round tracking test",
+        participants=_make_participants(),
+        max_rounds=3,
+    )
+    disc_id = result["discussion_id"]
+
+    # Coordinator opening (round 0 — natural, since current_round=0)
+    r = core.speak(disc_id, "coordinator", "Opening statement")
+    assert r["round"] == 0, "Opening should be round 0"
+
+    # Round 1: all participants speak
+    r_alice = core.speak(disc_id, "alice", "Alice R1")
+    assert r_alice["round"] == 0, "Alice R1 should be round 0"
+    r_bob = core.speak(disc_id, "bob", "Bob R1")
+    assert r_bob["round"] == 0, "Bob R1 should be round 0"
+    assert r_bob["round_complete"] is True, "Round 0 should be complete"
+    # After round 0 completes, current_round advances to 1
+
+    # Coordinator speaks again in round 1 — should NOT be round 0!
+    r_coord2 = core.speak(disc_id, "coordinator", "Round 1 summary")
+    assert r_coord2["round"] == 1, (
+        f"Coordinator's second speech should be round 1, got {r_coord2['round']}"
+    )
+
+    # Round 2: participants speak
+    r_alice2 = core.speak(disc_id, "alice", "Alice R2")
+    assert r_alice2["round"] == 1
+    r_bob2 = core.speak(disc_id, "bob", "Bob R2")
+    assert r_bob2["round"] == 1
+    assert r_bob2["round_complete"] is True
+
+    # Coordinator in round 2
+    r_coord3 = core.speak(disc_id, "coordinator", "Round 2 summary")
+    assert r_coord3["round"] == 2, (
+        f"Coordinator's third speech should be round 2, got {r_coord3['round']}"
+    )
+
+
+def test_round_advances_after_all_participants_speak(core):
+    """Round should auto-advance when all active participants have spoken."""
+    result = core.create_discussion(
+        topic="Auto-advance test",
+        participants=_make_participants(),
+        max_rounds=2,
+    )
+    disc_id = result["discussion_id"]
+
+    # Round 0 (opening)
+    r = core.speak(disc_id, "coordinator", "Opening")
+    assert r["round"] == 0
+    r = core.speak(disc_id, "alice", "A0")
+    assert r["round"] == 0
+    assert r["round_complete"] is False
+    r = core.speak(disc_id, "bob", "B0")
+    assert r["round"] == 0
+    assert r["round_complete"] is True
+
+    # Round 1
+    r = core.speak(disc_id, "alice", "A1")
+    assert r["round"] == 1
+    r = core.speak(disc_id, "bob", "B1")
+    assert r["round"] == 1
+    assert r["round_complete"] is True
+    # new_round=2, max_rounds=2, 2 > 2 is False → not yet
+    assert r["discussion_complete"] is False
+
+    # Round 2 — exceeds max_rounds → auto-conclude
+    r = core.speak(disc_id, "alice", "A2")
+    assert r["round"] == 2
+    r = core.speak(disc_id, "bob", "B2")
+    assert r["round"] == 2
+    assert r["round_complete"] is True
+    # new_round=3 > max_rounds=2 → conclude
+    assert r["discussion_complete"] is True
+
+
+def test_read_shows_correct_rounds(core):
+    """roundtable_read should show correct round numbers for all speeches."""
+    result = core.create_discussion(
+        topic="Read round test",
+        participants=_make_participants(),
+        max_rounds=2,
+    )
+    disc_id = result["discussion_id"]
+
+    core.speak(disc_id, "coordinator", "Opening")
+    core.speak(disc_id, "alice", "A0")
+    core.speak(disc_id, "bob", "B0")
+    core.speak(disc_id, "coordinator", "R1 summary")
+    core.speak(disc_id, "alice", "A1")
+
+    read = core.read(disc_id)
+    speeches = read["speeches"]
+    rounds = [s["round"] for s in speeches]
+    assert rounds == [0, 0, 0, 1, 1], (
+        f"Expected rounds [0, 0, 0, 1, 1], got {rounds}"
+    )

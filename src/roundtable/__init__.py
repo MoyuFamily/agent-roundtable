@@ -22,6 +22,7 @@ from roundtable.models import (
 )
 from roundtable.db import RoundtableDB
 from roundtable.core import RoundtableCore
+from roundtable.notify import Notifier
 from roundtable.exceptions import (
     RoundtableError,
     DiscussionNotFoundError,
@@ -29,6 +30,7 @@ from roundtable.exceptions import (
     InvalidParticipantError,
     InvalidSpeechOrderError,
     InvalidFindingTypeError,
+    InvalidReplyToError,
 )
 
 __version__ = "0.1.0"
@@ -36,6 +38,7 @@ __version__ = "0.1.0"
 __all__ = [
     "RoundtableDB",
     "RoundtableCore",
+    "Notifier",
     "Discussion",
     "Participant",
     "Speech",
@@ -47,4 +50,5 @@ __all__ = [
     "InvalidParticipantError",
     "InvalidSpeechOrderError",
     "InvalidFindingTypeError",
+    "InvalidReplyToError",
 ]

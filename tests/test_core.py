@@ -42,17 +42,21 @@ def test_core_module_imports():
 
 def test_schema_constants_available():
     """Verify all 9 tool schemas are accessible from the Hermes adapter."""
-    from roundtable.adapters.hermes import (
-        ROUNDTABLE_INIT_SCHEMA,
-        ROUNDTABLE_SPEAK_SCHEMA,
-        ROUNDTABLE_READ_SCHEMA,
-        ROUNDTABLE_STATUS_SCHEMA,
-        ROUNDTABLE_SUMMARIZE_SCHEMA,
-        ROUNDTABLE_END_SCHEMA,
-        ROUNDTABLE_LIST_SCHEMA,
-        ROUNDTABLE_ADVANCE_SCHEMA,
-        ROUNDTABLE_NOTIFY_SCHEMA,
-    )
+    try:
+        from roundtable.adapters.hermes import (
+            ROUNDTABLE_INIT_SCHEMA,
+            ROUNDTABLE_SPEAK_SCHEMA,
+            ROUNDTABLE_READ_SCHEMA,
+            ROUNDTABLE_STATUS_SCHEMA,
+            ROUNDTABLE_SUMMARIZE_SCHEMA,
+            ROUNDTABLE_END_SCHEMA,
+            ROUNDTABLE_LIST_SCHEMA,
+            ROUNDTABLE_ADVANCE_SCHEMA,
+            ROUNDTABLE_NOTIFY_SCHEMA,
+        )
+    except ImportError:
+        pytest.skip("Hermes adapter not available (hermes-agent not installed)")
+        return
     schemas = [
         ROUNDTABLE_INIT_SCHEMA, ROUNDTABLE_SPEAK_SCHEMA,
         ROUNDTABLE_READ_SCHEMA, ROUNDTABLE_STATUS_SCHEMA,

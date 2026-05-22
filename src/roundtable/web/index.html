@@ -38,8 +38,56 @@
       animation: fadeSlideIn 0.5s ease-out;
     }
     .speech-card.highlight {
-      border-color: var(--rt-primary-light);
-      box-shadow: var(--rt-shadow-glow);
+      border-left: 3px solid var(--rt-brand);
+      box-shadow: -4px 0 12px var(--rt-brand-glow), var(--rt-shadow-sm);
+    }
+
+    /* Status badge in header */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .status-badge .badge-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-badge.live {
+      background: var(--rt-error-bg);
+      color: var(--rt-error);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .status-badge.live .badge-dot {
+      background: var(--rt-error);
+      animation: blink 1.5s ease-in-out infinite;
+    }
+    .status-badge.waiting {
+      background: var(--rt-bg-badge);
+      color: var(--rt-brand);
+      border: 1px solid rgba(79, 70, 229, 0.3);
+    }
+    .status-badge.waiting .badge-dot {
+      background: var(--rt-brand);
+      animation: pulse 2s infinite;
+    }
+    .status-badge.ended {
+      background: var(--rt-success-bg);
+      color: var(--rt-success);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    .status-badge.ended .badge-dot {
+      background: var(--rt-success);
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
     }
 
     @keyframes fadeSlideIn {
@@ -50,21 +98,27 @@
     /* Conclusion card */
     .conclusion-card {
       background: linear-gradient(135deg, var(--rt-primary-50), var(--rt-bg-card));
-      border: 2px solid var(--rt-primary);
-      border-radius: var(--rt-radius-xl);
+      border: 1.5px solid var(--rt-brand);
+      border-radius: var(--rt-radius-lg);
       padding: var(--rt-space-xl);
-      box-shadow: var(--rt-shadow-glow);
+      box-shadow: 0 0 20px var(--rt-brand-glow), 0 0 60px rgba(79, 70, 229, 0.1);
       position: relative;
       overflow: hidden;
+      animation: fadeSlideIn 0.6s ease-out, glow-pulse 3s ease-in-out infinite;
     }
     .conclusion-card::before {
       content: "";
       position: absolute;
       inset: -2px;
       border-radius: inherit;
-      background: linear-gradient(135deg, var(--rt-primary), var(--rt-primary-light));
-      opacity: 0.1;
+      background: linear-gradient(135deg, var(--rt-brand), var(--rt-brand-light));
+      opacity: 0.08;
+      filter: blur(8px);
       z-index: 0;
+    }
+    @keyframes glow-pulse {
+      0%, 100% { box-shadow: 0 0 20px var(--rt-brand-glow), 0 0 60px rgba(79, 70, 229, 0.1); }
+      50% { box-shadow: 0 0 30px var(--rt-brand-glow-strong), 0 0 80px rgba(79, 70, 229, 0.15); }
     }
 
     /* Header */
@@ -141,6 +195,333 @@
     .conn-dot.connected { background: #10B981; }
     .conn-dot.disconnected { background: #EF4444; }
     .conn-dot.reconnecting { background: #F59E0B; animation: pulse 1s infinite; }
+
+    /* ═══════════════════════════════════════
+       Share Button
+       ═══════════════════════════════════════ */
+    .share-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: var(--rt-bg-card);
+      border: 1px solid var(--rt-border);
+      border-radius: var(--rt-radius-sm);
+      color: var(--rt-text-secondary);
+      font-size: var(--rt-font-size-sm);
+      cursor: pointer;
+      transition: all 200ms ease-out;
+      white-space: nowrap;
+    }
+    .share-btn:hover {
+      border-color: var(--rt-brand);
+      color: var(--rt-brand);
+      background: var(--rt-bg-badge);
+    }
+    .share-btn svg { width: 16px; height: 16px; }
+
+    /* ═══════════════════════════════════════
+       Popover (Desktop)
+       ═══════════════════════════════════════ */
+    .share-popover {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      width: 360px;
+      background: var(--rt-bg-card);
+      border: 1px solid var(--rt-border);
+      border-radius: var(--rt-radius-lg);
+      box-shadow: var(--rt-shadow-lg);
+      padding: var(--rt-space-5);
+      z-index: 50;
+      transform-origin: top right;
+      opacity: 0;
+      transform: scale(0.95) translateY(-4px);
+      pointer-events: none;
+      transition: opacity 200ms ease-out, transform 200ms ease-out;
+    }
+    .share-popover.visible {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+      pointer-events: auto;
+    }
+    .share-popover-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: var(--rt-font-size-sm);
+      font-weight: 600;
+      color: var(--rt-text-primary);
+      margin-bottom: var(--rt-space-3);
+    }
+    .share-link-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: var(--rt-space-3);
+    }
+    .share-link-input {
+      flex: 1;
+      background: var(--rt-bg-input);
+      border: 1px solid var(--rt-border);
+      border-radius: var(--rt-radius-sm);
+      padding: 8px 12px;
+      color: var(--rt-text-primary);
+      font-size: var(--rt-font-size-xs);
+      font-family: var(--rt-font-mono);
+      outline: none;
+      min-width: 0;
+      text-overflow: ellipsis;
+    }
+    .share-link-input:focus {
+      border-color: var(--rt-brand);
+    }
+    .copy-btn {
+      padding: 8px 16px;
+      background: var(--rt-brand);
+      color: #fff;
+      border: none;
+      border-radius: var(--rt-radius-sm);
+      font-size: var(--rt-font-size-xs);
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 200ms ease-out;
+      white-space: nowrap;
+    }
+    .copy-btn:hover { background: var(--rt-brand-hover); }
+    .copy-btn.copied {
+      background: var(--rt-success);
+    }
+    .share-hint {
+      font-size: var(--rt-font-size-xs);
+      color: var(--rt-text-muted);
+      margin-bottom: var(--rt-space-3);
+    }
+    .revoke-link-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0;
+      background: none;
+      border: none;
+      border-top: 1px solid var(--rt-border);
+      padding-top: var(--rt-space-3);
+      color: var(--rt-warning);
+      font-size: var(--rt-font-size-xs);
+      cursor: pointer;
+      transition: color 200ms ease-out;
+      width: 100%;
+    }
+    .revoke-link-btn:hover { color: var(--rt-error); }
+
+    /* ═══════════════════════════════════════
+       Bottom Sheet (Mobile)
+       ═══════════════════════════════════════ */
+    .share-sheet-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      z-index: 60;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 200ms ease-out;
+    }
+    .share-sheet-overlay.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .share-sheet {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--rt-bg-card);
+      border-top-left-radius: var(--rt-radius-lg);
+      border-top-right-radius: var(--rt-radius-lg);
+      padding: var(--rt-space-4) var(--rt-space-5) var(--rt-space-6);
+      max-height: 60vh;
+      z-index: 61;
+      transform: translateY(100%);
+      transition: transform 200ms ease-out;
+    }
+    .share-sheet.visible {
+      transform: translateY(0);
+    }
+    .share-sheet-handle {
+      width: 40px;
+      height: 4px;
+      background: var(--rt-border);
+      border-radius: 2px;
+      margin: 0 auto var(--rt-space-4);
+    }
+    .share-sheet .share-popover-title { margin-bottom: var(--rt-space-4); }
+    .share-sheet .share-link-input {
+      width: 100%;
+      margin-bottom: var(--rt-space-3);
+    }
+    .share-sheet .copy-btn {
+      width: 100%;
+      padding: 12px;
+      font-size: var(--rt-font-size-base);
+      margin-bottom: var(--rt-space-3);
+    }
+    .share-sheet .share-hint { margin-bottom: var(--rt-space-4); }
+    .share-sheet .revoke-link-btn {
+      justify-content: center;
+      padding-top: var(--rt-space-4);
+    }
+
+    /* ═══════════════════════════════════════
+       Revoke Confirmation Modal
+       ═══════════════════════════════════════ */
+    .revoke-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      z-index: 70;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 200ms ease-out;
+    }
+    .revoke-modal-overlay.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .revoke-modal {
+      background: var(--rt-bg-card);
+      border-radius: var(--rt-radius-lg);
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+      padding: var(--rt-space-6);
+      max-width: 380px;
+      width: calc(100% - 32px);
+      text-align: center;
+      transform: scale(0.95);
+      transition: transform 200ms ease-out;
+    }
+    .revoke-modal-overlay.visible .revoke-modal {
+      transform: scale(1);
+    }
+    .revoke-modal-icon {
+      font-size: 40px;
+      margin-bottom: var(--rt-space-3);
+    }
+    .revoke-modal-title {
+      font-size: var(--rt-font-size-lg);
+      font-weight: 700;
+      color: var(--rt-text-primary);
+      margin-bottom: var(--rt-space-2);
+    }
+    .revoke-modal-desc {
+      font-size: var(--rt-font-size-sm);
+      color: var(--rt-text-muted);
+      margin-bottom: var(--rt-space-6);
+      line-height: 1.5;
+    }
+    .revoke-modal-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+      padding-top: var(--rt-space-6);
+      border-top: 1px solid var(--rt-border);
+    }
+    .revoke-cancel-btn {
+      padding: 0 20px;
+      height: 40px;
+      background: transparent;
+      border: 1px solid var(--rt-border);
+      border-radius: 8px;
+      color: var(--rt-text-secondary);
+      font-size: var(--rt-font-size-sm);
+      cursor: pointer;
+      transition: all 200ms ease-out;
+    }
+    .revoke-cancel-btn:hover { border-color: var(--rt-text-muted); }
+    .revoke-confirm-btn {
+      padding: 0 20px;
+      height: 40px;
+      background: #EF4444;
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: var(--rt-font-size-sm);
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 200ms ease-out;
+    }
+    .revoke-confirm-btn:hover { background: #DC2626; }
+
+    /* Revoked state inside share panel */
+    .share-revoked-state {
+      text-align: center;
+      padding: var(--rt-space-4) 0;
+      color: var(--rt-text-muted);
+      font-size: var(--rt-font-size-sm);
+    }
+    .share-revoked-state .revoked-icon { font-size: 28px; margin-bottom: 8px; }
+
+    /* ═══════════════════════════════════════
+       Revoked Full Page (dark theme)
+       ═══════════════════════════════════════ */
+    .revoked-page {
+      position: fixed;
+      inset: 0;
+      background: var(--rt-bg-body);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      text-align: center;
+      padding: var(--rt-space-5);
+    }
+    .revoked-page .revoked-icon-lg {
+      font-size: 48px;
+      color: var(--rt-text-muted);
+      margin-bottom: var(--rt-space-4);
+    }
+    .revoked-page .revoked-title {
+      font-size: var(--rt-font-size-xl);
+      font-weight: 700;
+      color: var(--rt-text-primary);
+      margin-bottom: var(--rt-space-2);
+    }
+    .revoked-page .revoked-desc {
+      font-size: var(--rt-font-size-base);
+      color: var(--rt-text-muted);
+      margin-bottom: var(--rt-space-10);
+    }
+    .revoked-page .revoked-brand {
+      font-size: var(--rt-font-size-xs);
+      color: var(--rt-text-disabled);
+    }
+
+    /* Mobile: share button at bottom */
+    .mobile-share-bar {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--rt-bg-card);
+      border-top: 1px solid var(--rt-border);
+      padding: var(--rt-space-3) var(--rt-space-4);
+      z-index: 20;
+    }
+    .mobile-share-bar .share-btn {
+      width: 100%;
+      justify-content: center;
+      padding: 10px;
+    }
+
+    @media (max-width: 768px) {
+      .header .share-btn { display: none; }
+      .mobile-share-bar { display: block; }
+      main { padding-bottom: 72px; }
+    }
   </style>
 </head>
 <body>
@@ -148,12 +529,42 @@
   <header class="header">
     <div class="container flex items-center justify-between py-3">
       <div class="flex items-center gap-2">
-        <span class="status-dot waiting" id="statusDot"></span>
-        <h1 class="text-lg font-semibold" id="topicTitle">圆桌讨论</h1>
+        <span class="status-badge waiting" id="statusBadge">
+          <span class="badge-dot"></span>
+          <span id="statusLabel">等待中</span>
+        </span>
+        <h1 class="text-lg font-semibold" style="color:var(--rt-text-primary)" id="topicTitle">圆桌讨论</h1>
       </div>
-      <div class="conn-status">
-        <span class="conn-dot connected" id="connDot"></span>
-        <span id="connText">已连接</span>
+      <div class="flex items-center gap-3">
+        <!-- Share button (desktop) -->
+        <div class="relative" id="shareContainer">
+          <button class="share-btn" id="shareBtn" aria-label="分享链接">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
+            </svg>
+            <span>分享</span>
+          </button>
+          <!-- Desktop Popover -->
+          <div class="share-popover" id="sharePopover">
+            <div class="share-popover-title">📋 分享链接</div>
+            <div id="sharePanelContent">
+              <div class="share-link-row">
+                <input class="share-link-input" id="shareLinkInput" readonly>
+                <button class="copy-btn" id="copyBtn">复制</button>
+              </div>
+              <div class="share-hint">任何人通过此链接可查看讨论</div>
+              <button class="revoke-link-btn" id="revokeLinkBtn">⚠️ 撤销链接</button>
+            </div>
+            <div class="share-revoked-state hidden" id="shareRevokedState">
+              <div class="revoked-icon">🔒</div>
+              <div>链接已撤销</div>
+            </div>
+          </div>
+        </div>
+        <div class="conn-status">
+          <span class="conn-dot connected" id="connDot"></span>
+          <span id="connText">已连接</span>
+        </div>
       </div>
     </div>
   </header>
@@ -163,8 +574,8 @@
     <!-- Waiting state -->
     <div id="waitingState" class="flex flex-col items-center justify-center py-20">
       <div class="spinner mb-4"></div>
-      <p class="text-gray-500 text-lg">讨论即将开始…</p>
-      <p class="text-gray-400 text-sm mt-2">发言将会实时显示在这里</p>
+      <p class="text-lg" style="color: var(--rt-text-secondary)">讨论即将开始…</p>
+      <p class="text-sm mt-2" style="color: var(--rt-text-muted)">发言将会实时显示在这里</p>
     </div>
 
     <!-- Active state (hidden initially) -->
@@ -177,20 +588,59 @@
 
       <!-- Conclusion card (hidden until concluded) -->
       <div id="conclusionCard" class="hidden conclusion-card mt-6">
-        <h3 class="text-lg font-semibold mb-2" style="position:relative;z-index:1">📌 讨论结论</h3>
-        <div id="conclusionContent" class="text-gray-700 leading-relaxed" style="position:relative;z-index:1"></div>
+        <h3 class="text-lg font-semibold mb-2" style="position:relative;z-index:1;color:var(--rt-text-primary)">📌 讨论结论</h3>
+        <div id="conclusionContent" class="leading-relaxed" style="position:relative;z-index:1;color:var(--rt-text-secondary)"></div>
       </div>
     </div>
 
-    <!-- Revoked state (hidden) -->
-    <div id="revokedState" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div class="bg-white rounded-xl p-8 max-w-sm mx-4 text-center shadow-xl">
-        <div class="text-4xl mb-4">🔒</div>
-        <h2 class="text-xl font-semibold mb-2">链接已失效</h2>
-        <p class="text-gray-500">此讨论页面的访问权限已被创作者撤销</p>
-      </div>
+    <!-- Revoked state (hidden) — updated to dark theme per design spec -->
+    <div id="revokedState" class="revoked-page hidden">
+      <div class="revoked-icon-lg">🔒</div>
+      <h2 class="revoked-title">此讨论链接已失效</h2>
+      <p class="revoked-desc">创作者已撤销了此链接的访问权限</p>
+      <p class="revoked-brand">Roundtable AI · 圆桌讨论</p>
     </div>
   </main>
+
+  <!-- Mobile Share Bar -->
+  <div class="mobile-share-bar" id="mobileShareBar">
+    <button class="share-btn" id="mobileShareBtn" aria-label="分享链接">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px">
+        <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
+      </svg>
+      <span>分享讨论</span>
+    </button>
+  </div>
+
+  <!-- Mobile Bottom Sheet -->
+  <div class="share-sheet-overlay" id="shareSheetOverlay"></div>
+  <div class="share-sheet" id="shareSheet">
+    <div class="share-sheet-handle"></div>
+    <div class="share-popover-title">📋 分享链接</div>
+    <div id="shareSheetContent">
+      <input class="share-link-input" id="shareSheetLinkInput" readonly style="width:100%;margin-bottom:12px">
+      <button class="copy-btn" id="sheetCopyBtn" style="width:100%;padding:12px;font-size:var(--rt-font-size-base);margin-bottom:12px">复制链接</button>
+      <div class="share-hint">任何人通过此链接可查看讨论</div>
+      <button class="revoke-link-btn" id="sheetRevokeLinkBtn" style="justify-content:center;padding-top:16px">⚠️ 撤销链接</button>
+    </div>
+    <div class="share-revoked-state hidden" id="sheetRevokedState">
+      <div class="revoked-icon">🔒</div>
+      <div>链接已撤销</div>
+    </div>
+  </div>
+
+  <!-- Revoke Confirmation Modal -->
+  <div class="revoke-modal-overlay" id="revokeModalOverlay" role="dialog" aria-modal="true" aria-label="确认撤销链接">
+    <div class="revoke-modal">
+      <div class="revoke-modal-icon">⚠️</div>
+      <div class="revoke-modal-title">确认撤销链接？</div>
+      <div class="revoke-modal-desc">撤销后，所有通过此链接的访问将在 5 秒内失效，且不可恢复。</div>
+      <div class="revoke-modal-actions">
+        <button class="revoke-cancel-btn" id="revokeCancelBtn">取消</button>
+        <button class="revoke-confirm-btn" id="revokeConfirmBtn">确认撤销</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     // Config injected by server
@@ -209,7 +659,8 @@
     };
 
     // DOM refs
-    const $statusDot = document.getElementById('statusDot');
+    const $statusBadge = document.getElementById('statusBadge');
+    const $statusLabel = document.getElementById('statusLabel');
     const $topicTitle = document.getElementById('topicTitle');
     const $connDot = document.getElementById('connDot');
     const $connText = document.getElementById('connText');
@@ -340,10 +791,10 @@
     // ---- Rendering ----
     function renderParticipants() {
       $participantsBar.innerHTML = state.participants.map(p => `
-        <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-full px-3 py-1.5 text-sm whitespace-nowrap">
+        <div class="flex items-center gap-2 rounded-full px-3 py-1.5 text-sm whitespace-nowrap" style="background:var(--rt-bg-card);border:1px solid var(--rt-border)">
           <div class="avatar" style="width:24px;height:24px;font-size:11px">${(p.display_name || p.profile || '?')[0]}</div>
-          <span class="font-medium">${p.display_name || p.profile}</span>
-          ${p.role ? `<span class="text-gray-400 text-xs">${p.role}</span>` : ''}
+          <span class="font-medium" style="color:var(--rt-text-primary)">${p.display_name || p.profile}</span>
+          ${p.role ? `<span class="text-xs" style="color:var(--rt-text-muted)">${p.role}</span>` : ''}
         </div>
       `).join('');
     }
@@ -361,20 +812,20 @@
           <div class="avatar">${initial}</div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1">
-              <span class="font-semibold text-sm">${speech.display_name || speech.participant}</span>
+              <span class="font-semibold text-sm" style="color:var(--rt-text-primary)">${speech.display_name || speech.participant}</span>
               ${round}
-              <span class="text-xs text-gray-400 ml-auto">${formatTime(speech.created_at)}</span>
+              <span class="text-xs ml-auto" style="color:var(--rt-text-muted)">${formatTime(speech.created_at)}</span>
             </div>
-            <div class="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(speech.content)}</div>
+            <div class="text-sm leading-relaxed whitespace-pre-wrap" style="color:var(--rt-text-secondary)">${escapeHtml(speech.content)}</div>
           </div>
         </div>
       `;
 
       $speechesContainer.appendChild(div);
 
-      // Remove highlight after 3s
+      // Remove highlight after 2s
       if (isNew) {
-        setTimeout(() => div.classList.remove('highlight'), 3000);
+        setTimeout(() => div.classList.remove('highlight'), 2000);
         // Auto-scroll
         div.scrollIntoView({ behavior: 'smooth', block: 'end' });
       }
@@ -389,7 +840,14 @@
     }
 
     function updateStatusUI() {
-      $statusDot.className = `status-dot ${state.status}`;
+      const statusMap = {
+        waiting: { cls: 'waiting', label: '等待中' },
+        active:  { cls: 'live',    label: 'LIVE' },
+        concluded: { cls: 'ended', label: '已结束' },
+      };
+      const info = statusMap[state.status] || statusMap.waiting;
+      $statusBadge.className = `status-badge ${info.cls}`;
+      $statusLabel.textContent = info.label;
       if (state.status === 'concluded') {
         $waitingState.classList.add('hidden');
         $activeState.classList.remove('hidden');
@@ -418,6 +876,259 @@
       if (!ts) return '';
       const d = new Date(ts * 1000);
       return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+    }
+
+    // ═══════════════════════════════════════
+    // Share Interaction Logic
+    // ═══════════════════════════════════════
+
+    // DOM refs — Share
+    const $shareContainer = document.getElementById('shareContainer');
+    const $shareBtn = document.getElementById('shareBtn');
+    const $sharePopover = document.getElementById('sharePopover');
+    const $sharePanelContent = document.getElementById('sharePanelContent');
+    const $shareLinkInput = document.getElementById('shareLinkInput');
+    const $copyBtn = document.getElementById('copyBtn');
+    const $revokeLinkBtn = document.getElementById('revokeLinkBtn');
+    const $shareRevokedState = document.getElementById('shareRevokedState');
+    const $mobileShareBtn = document.getElementById('mobileShareBtn');
+    const $shareSheetOverlay = document.getElementById('shareSheetOverlay');
+    const $shareSheet = document.getElementById('shareSheet');
+    const $shareSheetContent = document.getElementById('shareSheetContent');
+    const $shareSheetLinkInput = document.getElementById('shareSheetLinkInput');
+    const $sheetCopyBtn = document.getElementById('sheetCopyBtn');
+    const $sheetRevokeLinkBtn = document.getElementById('sheetRevokeLinkBtn');
+    const $sheetRevokedState = document.getElementById('sheetRevokedState');
+    const $revokeModalOverlay = document.getElementById('revokeModalOverlay');
+    const $revokeCancelBtn = document.getElementById('revokeCancelBtn');
+    const $revokeConfirmBtn = document.getElementById('revokeConfirmBtn');
+
+    // State
+    let shareLink = '';
+    let popoverOpen = false;
+    let sheetOpen = false;
+
+    function isMobile() {
+      return window.innerWidth < 768;
+    }
+
+    // ---- Share Button Click ----
+    $shareBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (popoverOpen) {
+        closePopover();
+      } else {
+        await openPopover();
+      }
+    });
+
+    $mobileShareBtn.addEventListener('click', async () => {
+      await openSheet();
+    });
+
+    // ---- Desktop Popover ----
+    async function openPopover() {
+      if (isMobile()) {
+        await openSheet();
+        return;
+      }
+      // Generate share link if not already set
+      if (!shareLink) {
+        await generateShareLink();
+      }
+      $sharePopover.classList.add('visible');
+      popoverOpen = true;
+    }
+
+    function closePopover() {
+      $sharePopover.classList.remove('visible');
+      popoverOpen = false;
+    }
+
+    // Close popover on click outside
+    document.addEventListener('click', (e) => {
+      if (popoverOpen && !$shareContainer.contains(e.target)) {
+        closePopover();
+      }
+    });
+
+    // Close popover on ESC
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (revokeModalOpen) {
+          closeRevokeModal();
+        } else if (sheetOpen) {
+          closeSheet();
+        } else if (popoverOpen) {
+          closePopover();
+        }
+      }
+    });
+
+    // ---- Mobile Bottom Sheet ----
+    async function openSheet() {
+      if (!shareLink) {
+        await generateShareLink();
+      }
+      $shareSheetOverlay.classList.add('visible');
+      $shareSheet.classList.add('visible');
+      sheetOpen = true;
+    }
+
+    function closeSheet() {
+      $shareSheetOverlay.classList.remove('visible');
+      $shareSheet.classList.remove('visible');
+      sheetOpen = false;
+    }
+
+    $shareSheetOverlay.addEventListener('click', closeSheet);
+
+    // ---- Generate Share Link ----
+    async function generateShareLink() {
+      try {
+        const resp = await fetch(`${API_BASE}/api/${CONFIG.token}/share`, {
+          method: 'POST',
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          // Build full URL from the relative share_url
+          shareLink = `${location.origin}${data.share_url}`;
+        } else {
+          // Fallback: just use current URL
+          shareLink = location.href;
+        }
+      } catch {
+        shareLink = location.href;
+      }
+
+      // Update UI
+      $shareLinkInput.value = shareLink;
+      $shareSheetLinkInput.value = shareLink;
+    }
+
+    // ---- Copy to Clipboard ----
+    function copyToClipboard(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      // Fallback for WeChat / old browsers
+      return new Promise((resolve, reject) => {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          document.execCommand('copy');
+          resolve();
+        } catch (err) {
+          reject(err);
+        } finally {
+          document.body.removeChild(textarea);
+        }
+      });
+    }
+
+    function showCopySuccess(btn, originalText) {
+      btn.textContent = '✓ 已复制';
+      btn.classList.add('copied');
+      btn.disabled = true;
+      setTimeout(() => {
+        btn.textContent = originalText;
+        btn.classList.remove('copied');
+        btn.disabled = false;
+      }, 2000);
+    }
+
+    $copyBtn.addEventListener('click', async () => {
+      if (!shareLink) return;
+      try {
+        await copyToClipboard(shareLink);
+        showCopySuccess($copyBtn, '复制');
+      } catch {
+        // If clipboard fails, select the input so user can manually copy
+        $shareLinkInput.select();
+      }
+    });
+
+    $sheetCopyBtn.addEventListener('click', async () => {
+      if (!shareLink) return;
+      try {
+        await copyToClipboard(shareLink);
+        showCopySuccess($sheetCopyBtn, '复制链接');
+      } catch {
+        $shareSheetLinkInput.select();
+      }
+    });
+
+    // ---- Revoke Confirmation Modal ----
+    let revokeModalOpen = false;
+
+    function openRevokeModal() {
+      $revokeModalOverlay.classList.add('visible');
+      revokeModalOpen = true;
+    }
+
+    function closeRevokeModal() {
+      $revokeModalOverlay.classList.remove('visible');
+      revokeModalOpen = false;
+    }
+
+    $revokeLinkBtn.addEventListener('click', () => {
+      openRevokeModal();
+    });
+
+    $sheetRevokeLinkBtn.addEventListener('click', () => {
+      openRevokeModal();
+    });
+
+    $revokeCancelBtn.addEventListener('click', closeRevokeModal);
+
+    // Close modal on overlay click
+    $revokeModalOverlay.addEventListener('click', (e) => {
+      if (e.target === $revokeModalOverlay) {
+        closeRevokeModal();
+      }
+    });
+
+    // ---- Revoke Confirm ----
+    $revokeConfirmBtn.addEventListener('click', async () => {
+      $revokeConfirmBtn.disabled = true;
+      $revokeConfirmBtn.textContent = '撤销中…';
+
+      try {
+        const resp = await fetch(`${API_BASE}/api/${CONFIG.token}/revoke`, {
+          method: 'POST',
+        });
+
+        if (resp.ok) {
+          closeRevokeModal();
+          showRevokedInPanel();
+          // The SSE 'revoked' event will show the full-page revoked state
+        } else {
+          alert('撤销失败，请重试');
+          $revokeConfirmBtn.disabled = false;
+          $revokeConfirmBtn.textContent = '确认撤销';
+        }
+      } catch {
+        alert('网络错误，请重试');
+        $revokeConfirmBtn.disabled = false;
+        $revokeConfirmBtn.textContent = '确认撤销';
+      }
+    });
+
+    function showRevokedInPanel() {
+      // Desktop popover
+      $sharePanelContent.classList.add('hidden');
+      $shareRevokedState.classList.remove('hidden');
+      // Mobile sheet
+      $shareSheetContent.classList.add('hidden');
+      $sheetRevokedState.classList.remove('hidden');
+      // Auto-close panels after 3s
+      setTimeout(() => {
+        closePopover();
+        closeSheet();
+      }, 3000);
     }
 
     // ---- Init ----

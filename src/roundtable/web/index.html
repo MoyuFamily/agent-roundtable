@@ -8,13 +8,13 @@
   <link rel="stylesheet" href="/theme.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: var(--rt-font-sans); background: var(--rt-bg-surface); color: var(--rt-text-primary); min-height: 100vh; }
+    body { font-family: var(--rt-font-sans); background: var(--rt-bg-body); color: var(--rt-text-primary); min-height: 100vh; }
 
     /* Status indicator */
     .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-    .status-dot.waiting { background: var(--rt-status-waiting); animation: pulse 2s infinite; }
-    .status-dot.active { background: var(--rt-status-active); animation: pulse 1.5s infinite; }
-    .status-dot.concluded { background: var(--rt-status-concluded); }
+    .status-dot.waiting { background: var(--rt-brand); animation: pulse 2s infinite; }
+    .status-dot.active { background: var(--rt-error); animation: pulse 1.5s infinite; }
+    .status-dot.concluded { background: var(--rt-success); }
 
     @keyframes pulse {
       0%, 100% { opacity: 1; transform: scale(1); }
@@ -26,10 +26,10 @@
       background: var(--rt-bg-card);
       border: 1px solid var(--rt-border);
       border-radius: var(--rt-radius-lg);
-      padding: var(--rt-space-md) var(--rt-space-lg);
-      margin-bottom: var(--rt-space-md);
+      padding: var(--rt-space-4) var(--rt-space-5);
+      margin-bottom: var(--rt-space-4);
       box-shadow: var(--rt-shadow-sm);
-      transition: all var(--rt-transition);
+      transition: all var(--rt-duration-normal);
     }
     .speech-card:hover { box-shadow: var(--rt-shadow-md); }
 
@@ -97,10 +97,10 @@
 
     /* Conclusion card */
     .conclusion-card {
-      background: linear-gradient(135deg, var(--rt-primary-50), var(--rt-bg-card));
+      background: linear-gradient(135deg, rgba(79, 70, 229, 0.08), var(--rt-bg-card));
       border: 1.5px solid var(--rt-brand);
       border-radius: var(--rt-radius-lg);
-      padding: var(--rt-space-xl);
+      padding: var(--rt-space-6);
       box-shadow: 0 0 20px var(--rt-brand-glow), 0 0 60px rgba(79, 70, 229, 0.1);
       position: relative;
       overflow: hidden;
@@ -135,7 +135,7 @@
     .container {
       max-width: 768px;
       margin: 0 auto;
-      padding: var(--rt-space-md);
+      padding: var(--rt-space-4);
     }
 
     /* Revoked state */
@@ -153,7 +153,7 @@
     .spinner {
       width: 40px; height: 40px;
       border: 3px solid var(--rt-border);
-      border-top-color: var(--rt-primary);
+      border-top-color: var(--rt-brand);
       border-radius: 50%;
       animation: spin 1s linear infinite;
     }
@@ -163,8 +163,8 @@
     .avatar {
       width: 36px; height: 36px;
       border-radius: 50%;
-      background: var(--rt-primary-100);
-      color: var(--rt-primary);
+      background: rgba(79, 70, 229, 0.15);
+      color: var(--rt-brand);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -175,8 +175,8 @@
 
     /* Round badge */
     .round-badge {
-      background: var(--rt-primary-50);
-      color: var(--rt-primary);
+      background: rgba(79, 70, 229, 0.08);
+      color: var(--rt-brand);
       font-size: 12px;
       font-weight: 600;
       padding: 2px 8px;
@@ -521,6 +521,17 @@
       .header .share-btn { display: none; }
       .mobile-share-bar { display: block; }
       main { padding-bottom: 72px; }
+    }
+
+    /* Reduced motion accessibility */
+    @media (prefers-reduced-motion: reduce) {
+      .status-badge .badge-dot,
+      .conn-dot.reconnecting,
+      .spinner {
+        animation: none !important;
+      }
+      .speech-card.new { animation: none !important; }
+      .conclusion-card { animation: none !important; }
     }
   </style>
 </head>

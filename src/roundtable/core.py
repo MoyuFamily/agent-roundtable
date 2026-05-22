@@ -6,9 +6,13 @@ imports. All handlers return plain dicts (JSON-serializable).
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import sqlite3
+import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, ClassVar
 
 from roundtable.db import RoundtableDB
@@ -193,21 +197,23 @@ class RoundtableCore:
 
             # --- Web publisher hook ---
             publisher = self._publishers.get(discussion_id)
+            p_info = p_map.get(speech.participant)
+            speech_data = {
+                "id": speech.id,
+                "round": speech.round,
+                "participant": speech.participant,
+                "display_name": p_info.display_name if p_info else speech.participant,
+                "content": speech.content,
+                "created_at": speech.created_at,
+            }
             if publisher:
                 try:
-                    p_info = p_map.get(speech.participant)
-                    publisher.on_speech(
-                        {
-                            "id": speech.id,
-                            "round": speech.round,
-                            "participant": speech.participant,
-                            "display_name": p_info.display_name if p_info else speech.participant,
-                            "content": speech.content,
-                            "created_at": speech.created_at,
-                        }
-                    )
+                    publisher.on_speech(speech_data)
                 except Exception:
                     logger.exception(f"Web publisher on_speech failed for {discussion_id}")
+            else:
+                # Publisher not in memory (cross-process) — update discussion.json directly
+                self._update_web_discussion_json(discussion_id, speech_data, disc.topic, participants)
 
             # Speech notification
             p_info = p_map.get(speech.participant)
@@ -543,11 +549,14 @@ class RoundtableCore:
             if publisher:
                 try:
                     if action == "concluded":
-                        publisher.conclude()
+                        publisher.conclude(disc_after.conclusion or "")
                     publisher.stop()
                     logger.info(f"Web publisher stopped for {discussion_id}")
                 except Exception:
                     logger.exception(f"Web publisher cleanup failed for {discussion_id}")
+            elif action == "concluded":
+                # Cross-process: update discussion.json directly
+                self._conclude_web_discussion(discussion_id, disc_after.conclusion or "")
 
             return {
                 "ok": True,
@@ -1003,6 +1012,84 @@ class RoundtableCore:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _update_web_discussion_json(
+        self,
+        discussion_id: str,
+        speech_data: dict[str, Any],
+        topic: str,
+        participants: list[Any],
+    ) -> None:
+        """Update discussion.json directly when publisher is not in memory (cross-process)."""
+        import fcntl as _fcntl
+
+        web_dir = Path("/tmp") / "roundtable_web" / discussion_id
+        json_path = web_dir / "discussion.json"
+        if not json_path.exists():
+            return
+
+        try:
+            # Read existing data with shared lock
+            with open(json_path) as f:
+                _fcntl.flock(f.fileno(), _fcntl.LOCK_SH)
+                try:
+                    data = json.load(f)
+                finally:
+                    _fcntl.flock(f.fileno(), _fcntl.LOCK_UN)
+
+            # Append speech
+            data.setdefault("speeches", []).append(speech_data)
+            data["updated_at"] = int(time.time())
+
+            # Write back with exclusive lock
+            tmp = json_path.with_suffix(".json.tmp")
+            with open(tmp, "w") as f:
+                _fcntl.flock(f.fileno(), _fcntl.LOCK_EX)
+                try:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                finally:
+                    _fcntl.flock(f.fileno(), _fcntl.LOCK_UN)
+            os.rename(str(tmp), str(json_path))
+            logger.info("Updated web discussion.json for %s (cross-process)", discussion_id)
+        except Exception:
+            logger.exception("Failed to update web discussion.json for %s", discussion_id)
+
+    def _conclude_web_discussion(self, discussion_id: str, conclusion: str) -> None:
+        """Update discussion.json with conclusion when publisher is not in memory (cross-process)."""
+        import fcntl as _fcntl
+
+        web_dir = Path("/tmp") / "roundtable_web" / discussion_id
+        json_path = web_dir / "discussion.json"
+        if not json_path.exists():
+            return
+
+        try:
+            with open(json_path) as f:
+                _fcntl.flock(f.fileno(), _fcntl.LOCK_SH)
+                try:
+                    data = json.load(f)
+                finally:
+                    _fcntl.flock(f.fileno(), _fcntl.LOCK_UN)
+
+            data["conclusion"] = conclusion
+            data["status"] = "concluded"
+            data["updated_at"] = int(time.time())
+
+            tmp = json_path.with_suffix(".json.tmp")
+            with open(tmp, "w") as f:
+                _fcntl.flock(f.fileno(), _fcntl.LOCK_EX)
+                try:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                finally:
+                    _fcntl.flock(f.fileno(), _fcntl.LOCK_UN)
+            os.rename(str(tmp), str(json_path))
+            logger.info("Concluded web discussion.json for %s (cross-process)", discussion_id)
+        except Exception:
+            logger.exception("Failed to conclude web discussion.json for %s", discussion_id)
 
     def _make_notifier(self, config: dict[str, Any] | None) -> Notifier:
         """Create a Notifier from a discussion's notification config."""

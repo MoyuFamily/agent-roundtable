@@ -27,7 +27,8 @@ docs/design/web-viewer/
 ├── state-ended.html            ← 已结束原型
 ├── component-spec.md           ← 发言卡片组件规范
 ├── mobile-spec.md              ← 移动端适配规则
-└── animation-spec.md           ← 实时更新动效规范
+├── animation-spec.md           ← 实时更新动效规范
+└── share-interaction-spec.md   ← 分享交互稿（链接复制 + 撤销确认）
 ```
 
 ---
@@ -156,6 +157,23 @@ docs/design/web-viewer/
 
 ---
 
+## 分享交互
+
+### 链接复制
+
+- 桌面端：Popover 弹出面板（360px），显示可复制链接
+- 移动端：Bottom Sheet 底部滑出
+- 复制反馈：「复制」→「✓ 已复制」绿色提示，2s 恢复
+- 降级：`navigator.clipboard` → `execCommand` fallback（微信兼容）
+
+### 链接撤销
+
+- 确认对话框：红色「确认撤销」按钮 + 警告文案
+- 撤销后 ≤5s 页面切换为失效提示页
+- 详见 `share-interaction-spec.md`
+
+---
+
 ## 给码飞的开发提示
 
 1. **theme.css** 直接引入，CSS 变量全局可用
@@ -177,4 +195,5 @@ docs/design/web-viewer/
 - [x] 发言卡片组件规范（component-spec.md）
 - [x] 移动端适配规则（mobile-spec.md）
 - [x] 实时更新动效规范（animation-spec.md）
+- [x] 分享交互稿（share-interaction-spec.md）
 - [x] 设计规范总览（本文件）

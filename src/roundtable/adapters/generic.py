@@ -63,6 +63,8 @@ class Roundtable:
         participants: builtins.list[dict[str, Any]],
         *,
         notifications: dict[str, Any] | None = None,
+        web: bool = False,
+        web_port: int = 8199,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Create a new discussion.
@@ -71,10 +73,16 @@ class Roundtable:
             topic: Discussion topic.
             participants: List of participant dicts (min 2).
             notifications: Optional notification config dict.
+            web: If True, start a web viewer for live viewing.
+            web_port: Port for the web viewer (default 8199).
             **kwargs: Additional arguments passed to create_discussion.
         """
         try:
-            return self._core.create_discussion(topic, participants, notifications=notifications, **kwargs)
+            return self._core.create_discussion(
+                topic, participants,
+                notifications=notifications, web=web, web_port=web_port,
+                **kwargs,
+            )
         except (ValueError, Exception) as e:
             return {"error": str(e)}
 

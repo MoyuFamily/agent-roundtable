@@ -37,6 +37,7 @@ class RoundtableCore:
     def __init__(self, db: RoundtableDB | None = None, send_fn: Any = None):
         self.db = db or RoundtableDB()
         self._send_fn = send_fn
+        self._publishers: dict[str, Any] = {}  # discussion_id → WebPublisher
 
     # ------------------------------------------------------------------
     # Public API
@@ -53,6 +54,8 @@ class RoundtableCore:
         created_by: str = "coordinator",
         output_path: str | None = None,
         notifications: dict[str, Any] | None = None,
+        web: bool = False,
+        web_port: int = 8199,
     ) -> dict[str, Any]:
         """Create a new roundtable discussion.
 
@@ -84,6 +87,34 @@ class RoundtableCore:
                 output_path=output_path,
                 notifications=notifications,
             )
+
+            # Optionally start web viewer
+            web_url = None
+            if web:
+                try:
+                    import os as _os
+
+                    from roundtable.web_publisher import WebPublisher
+
+                    output_dir = _os.path.join("/tmp", "roundtable_web", disc.id)
+                    publisher = WebPublisher(output_dir, port=web_port)
+                    web_url = publisher.start(
+                        disc.id,
+                        topic=topic.strip(),
+                        participants=[
+                            {
+                                "profile": p["profile"],
+                                "display_name": p.get("display_name", p["profile"]),
+                                "role": p.get("role", ""),
+                            }
+                            for p in participants
+                        ],
+                    )
+                    self._publishers[disc.id] = publisher
+                    logger.info("Web viewer started for discussion %s: %s", disc.id, web_url)
+                except Exception:
+                    logger.exception("Failed to start web viewer for discussion %s", disc.id)
+
             return {
                 "ok": True,
                 "discussion_id": disc.id,
@@ -92,6 +123,7 @@ class RoundtableCore:
                 "max_rounds": disc.max_rounds,
                 "speech_order": disc.speech_order,
                 "status": disc.status,
+                "web_url": web_url,
             }
         finally:
             conn.close()
@@ -158,6 +190,24 @@ class RoundtableCore:
             notifier = self._make_notifier(disc.notifications)
             participants = self.db.get_participants(conn, discussion_id)
             p_map = {p.participant: p for p in participants}
+
+            # --- Web publisher hook ---
+            publisher = self._publishers.get(discussion_id)
+            if publisher:
+                try:
+                    p_info = p_map.get(speech.participant)
+                    publisher.on_speech(
+                        {
+                            "id": speech.id,
+                            "round": speech.round,
+                            "participant": speech.participant,
+                            "display_name": p_info.display_name if p_info else speech.participant,
+                            "content": speech.content,
+                            "created_at": speech.created_at,
+                        }
+                    )
+                except Exception:
+                    logger.exception(f"Web publisher on_speech failed for {discussion_id}")
 
             # Speech notification
             p_info = p_map.get(speech.participant)
@@ -487,6 +537,17 @@ class RoundtableCore:
                 if disc_after:
                     notifier = self._make_notifier(disc.notifications)
                     self._notify_concluded(conn, disc_after, notifier)
+
+            # Web publisher hook — conclude + stop
+            publisher = self._publishers.pop(discussion_id, None)
+            if publisher:
+                try:
+                    if action == "concluded":
+                        publisher.conclude()
+                    publisher.stop()
+                    logger.info(f"Web publisher stopped for {discussion_id}")
+                except Exception:
+                    logger.exception(f"Web publisher cleanup failed for {discussion_id}")
 
             return {
                 "ok": True,

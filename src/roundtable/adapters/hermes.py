@@ -187,6 +187,16 @@ ROUNDTABLE_INIT_SCHEMA = {
             },
             "output_path": {"type": "string", "description": "Path to save conclusion"},
             "created_by": {"type": "string", "description": "Creator profile name"},
+            "web": {
+                "type": "boolean",
+                "description": "Start a web viewer for live discussion viewing",
+                "default": False,
+            },
+            "web_port": {
+                "type": "integer",
+                "description": "Port for the web viewer (default: 8199)",
+                "default": 8199,
+            },
             "notifications": {
                 "type": "object",
                 "description": "Notification config for real-time push to messaging channels",

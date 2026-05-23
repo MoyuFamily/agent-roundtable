@@ -319,6 +319,17 @@ router.get("/api/:token/poll", (req, res, params) => {
   pollWaiters.get(params.token).add(waiter);
 });
 
+// POST /api/:token/share → Generate share link (link is simply the page URL)
+router.post("/api/:token/share", (req, res, params) => {
+  if (!isTokenValid(params.token)) return send403(res);
+
+  const data = readDiscussion();
+  if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
+
+  // Share link is just the viewer URL with the token
+  sendJSON(res, { ok: true, share_url: `/r/${params.token}` });
+});
+
 // POST /api/:token/revoke → Revoke token
 router.post("/api/:token/revoke", (req, res, params) => {
   if (!isTokenValid(params.token)) return send403(res);
@@ -429,6 +440,13 @@ async function main() {
       const params = { token: req.params.token };
       router._routes
         .find((r) => r.method === "GET" && r.path === "/api/:token/poll")
+        ?.handlers[0](req, res, params);
+    });
+
+    app.post("/api/:token/share", (req, res) => {
+      const params = { token: req.params.token };
+      router._routes
+        .find((r) => r.method === "POST" && r.path === "/api/:token/share")
         ?.handlers[0](req, res, params);
     });
 

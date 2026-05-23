@@ -203,3 +203,46 @@ class Roundtable:
             return self._core.notify(discussion_id, event, **kwargs)
         except Exception as e:
             return {"error": str(e)}
+
+    # ------------------------------------------------------------------
+    # API Aliases
+    # ------------------------------------------------------------------
+
+    def create_discussion(
+        self,
+        topic: str,
+        participants: builtins.list[dict[str, Any]],
+        *,
+        notifications: dict[str, Any] | None = None,
+        web: bool = False,
+        web_port: int = 8199,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Create a new discussion. Alias for init."""
+        return self.init(
+            topic,
+            participants,
+            notifications=notifications,
+            web=web,
+            web_port=web_port,
+            **kwargs,
+        )
+
+    def end_discussion(
+        self,
+        discussion_id: str,
+        *,
+        force: bool = False,
+        conclusion: str | None = None,
+    ) -> dict[str, Any]:
+        """End a discussion. Alias for end."""
+        return self.end(discussion_id, force=force, conclusion=conclusion)
+
+    def list_discussions(self, **kwargs: Any) -> dict[str, Any]:
+        """List discussions. Alias for list."""
+        return self.list(**kwargs)
+
+    def status(self, discussion_id: str) -> dict[str, Any]:
+        """Get discussion status. Alias for get_status."""
+        return self.get_status(discussion_id)
+

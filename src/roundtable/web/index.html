@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>圆桌讨论 — Roundtable</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <link rel="stylesheet" href="/theme.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -40,6 +41,179 @@
     .speech-card.highlight {
       border-left: 3px solid var(--rt-brand);
       box-shadow: -4px 0 12px var(--rt-brand-glow), var(--rt-shadow-sm);
+    }
+
+    :root {
+      --rt-role-product-rgb: 59, 130, 246;
+      --rt-role-design-rgb: 168, 85, 247;
+      --rt-role-engineer-rgb: 34, 197, 94;
+      --rt-role-research-rgb: 245, 158, 11;
+      --rt-role-marketing-rgb: 236, 72, 153;
+      --rt-role-default-rgb: 100, 116, 139;
+    }
+
+    /* Distinct Speech Cards by Role */
+    .speech-card.role-product {
+      border-left: 4px solid var(--rt-role-product);
+      background: linear-gradient(135deg, rgba(var(--rt-role-product-rgb), 0.04) 0%, var(--rt-bg-card) 100%);
+    }
+    .speech-card.role-design {
+      border-left: 4px solid var(--rt-role-design);
+      background: linear-gradient(135deg, rgba(var(--rt-role-design-rgb), 0.04) 0%, var(--rt-bg-card) 100%);
+    }
+    .speech-card.role-engineer {
+      border-left: 4px solid var(--rt-role-engineer);
+      background: linear-gradient(135deg, rgba(var(--rt-role-engineer-rgb), 0.04) 0%, var(--rt-bg-card) 100%);
+    }
+    .speech-card.role-research {
+      border-left: 4px solid var(--rt-role-research);
+      background: linear-gradient(135deg, rgba(var(--rt-role-research-rgb), 0.04) 0%, var(--rt-bg-card) 100%);
+    }
+    .speech-card.role-marketing {
+      border-left: 4px solid var(--rt-role-marketing);
+      background: linear-gradient(135deg, rgba(var(--rt-role-marketing-rgb), 0.04) 0%, var(--rt-bg-card) 100%);
+    }
+    .speech-card.role-default {
+      border-left: 4px solid var(--rt-role-default);
+      background: linear-gradient(135deg, rgba(var(--rt-role-default-rgb), 0.04) 0%, var(--rt-bg-card) 100%);
+    }
+
+    /* Round Section Aggregation */
+    .round-section {
+      border: 1px solid var(--rt-border);
+      border-radius: var(--rt-radius-lg);
+      background: rgba(30, 41, 59, 0.2);
+      margin-bottom: var(--rt-space-5);
+      overflow: hidden;
+      box-shadow: var(--rt-shadow-sm);
+      transition: all var(--rt-duration-normal);
+    }
+    .round-section:hover {
+      box-shadow: var(--rt-shadow-md);
+      border-color: var(--rt-border-light);
+    }
+    .round-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--rt-space-3) var(--rt-space-4);
+      background: rgba(79, 70, 229, 0.04);
+      border-bottom: 1px solid var(--rt-border);
+      cursor: pointer;
+      user-select: none;
+      transition: background var(--rt-duration-fast);
+    }
+    .round-header:hover {
+      background: rgba(79, 70, 229, 0.08);
+    }
+    .round-title {
+      font-size: var(--rt-font-size-sm);
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      color: var(--rt-brand-light);
+      display: flex;
+      align-items: center;
+      gap: var(--rt-space-2);
+    }
+    .round-badge-count {
+      font-size: var(--rt-font-size-xs);
+      font-weight: 500;
+      color: var(--rt-text-secondary);
+      background: var(--rt-border);
+      padding: 2px 8px;
+      border-radius: var(--rt-radius-full);
+    }
+    .round-body {
+      padding: var(--rt-space-4);
+      display: flex;
+      flex-direction: column;
+      gap: var(--rt-space-4);
+    }
+    .round-section.collapsed .round-body {
+      display: none;
+    }
+    .round-section.collapsed .round-header {
+      border-bottom-color: transparent;
+    }
+    .round-section .toggle-icon {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      color: var(--rt-text-muted);
+      transition: transform var(--rt-duration-normal);
+    }
+    .round-section.collapsed .toggle-icon {
+      transform: rotate(-90deg);
+    }
+
+    /* Markdown styling inside cards and conclusion */
+    .markdown-content p { margin-bottom: var(--rt-space-2); }
+    .markdown-content p:last-child { margin-bottom: 0; }
+    .markdown-content ul, .markdown-content ol { margin-bottom: var(--rt-space-2); padding-left: var(--rt-space-5); }
+    .markdown-content ul { list-style-type: disc; }
+    .markdown-content ol { list-style-type: decimal; }
+    .markdown-content li { margin-bottom: var(--rt-space-1); }
+    .markdown-content pre {
+      background: var(--rt-bg-code);
+      border: 1px solid var(--rt-border);
+      border-radius: var(--rt-radius-sm);
+      padding: var(--rt-space-3);
+      overflow-x: auto;
+      margin-bottom: var(--rt-space-3);
+      font-family: var(--rt-font-mono);
+      font-size: var(--rt-font-size-xs);
+      color: var(--rt-text-primary);
+    }
+    .markdown-content code {
+      font-family: var(--rt-font-mono);
+      background: var(--rt-bg-code);
+      padding: 2px 4px;
+      border-radius: var(--rt-radius-sm);
+      font-size: 90%;
+      color: var(--rt-brand-light);
+    }
+    .markdown-content pre code {
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+      color: inherit;
+      font-size: inherit;
+    }
+    .markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content h4 {
+      color: var(--rt-text-primary);
+      font-weight: 600;
+      margin-top: var(--rt-space-4);
+      margin-bottom: var(--rt-space-2);
+    }
+    .markdown-content h1 { font-size: 1.3em; border-bottom: 1px solid var(--rt-border); padding-bottom: var(--rt-space-1); }
+    .markdown-content h2 { font-size: 1.15em; }
+    .markdown-content h3 { font-size: 1.05em; }
+    .markdown-content blockquote {
+      border-left: 4px solid var(--rt-brand);
+      padding-left: var(--rt-space-3);
+      color: var(--rt-text-muted);
+      margin-bottom: var(--rt-space-2);
+      font-style: italic;
+    }
+    .markdown-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: var(--rt-space-3);
+      font-size: var(--rt-font-size-sm);
+    }
+    .markdown-content th, .markdown-content td {
+      border: 1px solid var(--rt-border);
+      padding: var(--rt-space-2);
+      text-align: left;
+    }
+    .markdown-content th {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--rt-text-primary);
+      font-weight: 600;
     }
 
     /* Status badge in header */
@@ -656,7 +830,7 @@
   <script>
     // Config injected by server
     const CONFIG = window.__RT_CONFIG__ || { token: '', port: 8199, host: '0.0.0.0' };
-    const API_BASE = `${location.protocol}//${CONFIG.host}:${CONFIG.port}`;
+    const API_BASE = '';
 
     // State
     let state = {
@@ -772,11 +946,28 @@
 
       // Update speeches
       if (data.speeches) {
+        const isInitialLoad = state.speeches.length === 0;
         const newSpeeches = data.speeches.filter(s => !state.speechIdSet.has(s.id));
         for (const s of newSpeeches) {
           state.speechIdSet.add(s.id);
           state.speeches.push(s);
-          renderSpeech(s, true);
+          renderSpeech(s, !isInitialLoad);
+        }
+
+        // If it was the initial load, collapse older rounds
+        if (isInitialLoad && state.speeches.length > 0) {
+          const rounds = [...new Set(state.speeches.map(s => s.round))].sort((a, b) => a - b);
+          if (rounds.length > 1) {
+            const latestRound = rounds[rounds.length - 1];
+            for (const r of rounds) {
+              if (r !== latestRound) {
+                const section = document.getElementById(`round-section-${r}`);
+                if (section) {
+                  section.classList.add('collapsed');
+                }
+              }
+            }
+          }
         }
       }
 
@@ -799,6 +990,59 @@
       }
     }
 
+    // ---- Helper functions for role styles and aggregation ----
+    function getRoleType(roleStr) {
+      if (!roleStr) return 'default';
+      const r = roleStr.toLowerCase();
+      if (r.includes('product') || r.includes('pm') || r.includes('director') || r.includes('经理') || r.includes('总监')) return 'product';
+      if (r.includes('design') || r.includes('ui') || r.includes('ux') || r.includes('设计')) return 'design';
+      if (r.includes('engineer') || r.includes('dev') || r.includes('coder') || r.includes('tech') || r.includes('开发') || r.includes('工程') || r.includes('技术')) return 'engineer';
+      if (r.includes('research') || r.includes('science') || r.includes('sci') || r.includes('researcher') || r.includes('研究') || r.includes('分析')) return 'research';
+      if (r.includes('marketing') || r.includes('sales') || r.includes('biz') || r.includes('运营') || r.includes('市场')) return 'marketing';
+      return 'default';
+    }
+
+    window.toggleRound = function(roundNum) {
+      const section = document.getElementById(`round-section-${roundNum}`);
+      if (section) {
+        section.classList.toggle('collapsed');
+      }
+    };
+
+    function getOrCreateRoundSection(roundNum, isNew) {
+      const id = `round-section-${roundNum}`;
+      let section = document.getElementById(id);
+      if (!section) {
+        section = document.createElement('div');
+        section.id = id;
+        section.className = 'round-section';
+        
+        const titleText = roundNum === 0 ? '📢 开场发言 (Round 0)' : `💬 第 ${roundNum} 轮讨论 (Round ${roundNum})`;
+        
+        section.innerHTML = `
+          <div class="round-header" onclick="toggleRound(${roundNum})">
+            <div class="round-title">
+              <span>${titleText}</span>
+              <span class="round-badge-count" id="round-count-${roundNum}">0 条发言</span>
+            </div>
+            <svg class="toggle-icon" viewBox="0 0 24 24">
+              <path d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+          <div class="round-body" id="round-body-${roundNum}"></div>
+        `;
+        
+        // Collapse all previous rounds if it's dynamic update (isNew)
+        if (isNew) {
+          const existingSections = $speechesContainer.querySelectorAll('.round-section');
+          existingSections.forEach(s => s.classList.add('collapsed'));
+        }
+        
+        $speechesContainer.appendChild(section);
+      }
+      return section;
+    }
+
     // ---- Rendering ----
     function renderParticipants() {
       $participantsBar.innerHTML = state.participants.map(p => `
@@ -811,28 +1055,53 @@
     }
 
     function renderSpeech(speech, isNew = false) {
+      // Find role info
+      let roleType = 'default';
+      let roleName = '';
+      if (speech.participant === 'coordinator') {
+        roleType = 'default';
+        roleName = '协调者';
+      } else {
+        const participantObj = state.participants.find(p => p.profile === speech.participant);
+        if (participantObj) {
+          roleType = getRoleType(participantObj.role);
+          roleName = participantObj.role || '';
+        }
+      }
+
       const div = document.createElement('div');
-      div.className = `speech-card${isNew ? ' new highlight' : ''}`;
+      div.className = `speech-card role-${roleType}${isNew ? ' new highlight' : ''}`;
       div.id = `speech-${speech.id}`;
 
       const initial = (speech.display_name || speech.participant || '?')[0];
-      const round = speech.round > 0 ? `<span class="round-badge">R${speech.round}</span>` : '';
+      const round = speech.round > 0 ? `<span class="round-badge" style="background: var(--rt-role-${roleType}-bg); color: var(--rt-role-${roleType})">R${speech.round}</span>` : '';
 
       div.innerHTML = `
         <div class="flex items-start gap-3">
-          <div class="avatar">${initial}</div>
+          <div class="avatar" style="background: var(--rt-role-${roleType}); color: var(--rt-text-inverse); box-shadow: 0 0 8px var(--rt-role-${roleType}-bg)">${initial}</div>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1">
+            <div class="flex items-center gap-2 mb-2">
               <span class="font-semibold text-sm" style="color:var(--rt-text-primary)">${speech.display_name || speech.participant}</span>
+              ${roleName ? `<span class="text-xs px-2 py-0.5 rounded-full font-medium" style="background: var(--rt-role-${roleType}-bg); color: var(--rt-role-${roleType})">${roleName}</span>` : ''}
               ${round}
               <span class="text-xs ml-auto" style="color:var(--rt-text-muted)">${formatTime(speech.created_at)}</span>
             </div>
-            <div class="text-sm leading-relaxed whitespace-pre-wrap" style="color:var(--rt-text-secondary)">${escapeHtml(speech.content)}</div>
+            <div class="text-sm leading-relaxed markdown-content" style="color:var(--rt-text-secondary)">${marked.parse(speech.content)}</div>
           </div>
         </div>
       `;
 
-      $speechesContainer.appendChild(div);
+      // Get or create round section
+      getOrCreateRoundSection(speech.round, isNew);
+      const body = document.getElementById(`round-body-${speech.round}`);
+      body.appendChild(div);
+
+      // Update count
+      const countEl = document.getElementById(`round-count-${speech.round}`);
+      if (countEl) {
+        const count = body.children.length;
+        countEl.textContent = `${count} 条发言`;
+      }
 
       // Remove highlight after 2s
       if (isNew) {
@@ -843,7 +1112,7 @@
     }
 
     function renderConclusion(content) {
-      $conclusionContent.textContent = content;
+      $conclusionContent.innerHTML = `<div class="markdown-content">${marked.parse(content)}</div>`;
       $conclusionCard.classList.remove('hidden');
       setTimeout(() => {
         $conclusionCard.scrollIntoView({ behavior: 'smooth', block: 'center' });

@@ -608,3 +608,64 @@ def test_read_shows_correct_rounds(core):
     speeches = read["speeches"]
     rounds = [s["round"] for s in speeches]
     assert rounds == [0, 0, 0, 1, 1], f"Expected rounds [0, 0, 0, 1, 1], got {rounds}"
+
+
+# ---------------------------------------------------------------------------
+# API method aliases tests
+# ---------------------------------------------------------------------------
+
+
+def test_core_aliases(core):
+    """Verify that all wrapper method aliases work in RoundtableCore."""
+    disc = core.init(topic="Alias Test", participants=_make_participants())
+    assert disc["ok"] is True
+    disc_id = disc["discussion_id"]
+
+    # test speak
+    core.speak(disc_id, "alice", "Alice speaks")
+    core.speak(disc_id, "bob", "Bob speaks")
+
+    # test get_status alias
+    status = core.get_status(disc_id)
+    assert status["ok"] is True
+    assert status["status"] == "active"
+
+    # test end alias
+    end_res = core.end(disc_id, conclusion="Done with aliases")
+    assert end_res["ok"] is True
+
+    # test list alias
+    discs = core.list()
+    assert discs["ok"] is True
+    assert any(d["id"] == disc_id for d in discs["discussions"])
+
+
+def test_generic_adapter_aliases(tmp_path):
+    """Verify that Roundtable class in generic adapter supports both aliases."""
+    from roundtable.adapters.generic import Roundtable
+
+    rt = Roundtable(db_path=str(tmp_path / "roundtable_generic.db"))
+
+    # test create_discussion (alias for init)
+    disc = rt.create_discussion(topic="Generic Alias Test", participants=_make_participants())
+    assert disc["ok"] is True
+    disc_id = disc["discussion_id"]
+
+    # test speak
+    rt.speak(disc_id, "alice", "Alice speaks")
+    rt.speak(disc_id, "bob", "Bob speaks")
+
+    # test status (alias for get_status)
+    status = rt.status(disc_id)
+    assert status["ok"] is True
+    assert status["status"] == "active"
+
+    # test end_discussion (alias for end)
+    end_res = rt.end_discussion(disc_id, conclusion="Concluded")
+    assert end_res["ok"] is True
+
+    # test list_discussions (alias for list)
+    discs = rt.list_discussions()
+    assert discs["ok"] is True
+    assert any(d["id"] == disc_id for d in discs["discussions"])
+

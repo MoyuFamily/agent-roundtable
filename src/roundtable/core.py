@@ -650,6 +650,62 @@ class RoundtableCore:
         finally:
             conn.close()
 
+    # ------------------------------------------------------------------
+    # API Aliases
+    # ------------------------------------------------------------------
+
+    def init(
+        self,
+        topic: str,
+        participants: list[dict[str, Any]],
+        *,
+        context: str | None = None,
+        max_rounds: int = 5,
+        speech_order: str = "fixed",
+        created_by: str = "coordinator",
+        output_path: str | None = None,
+        notifications: dict[str, Any] | None = None,
+        web: bool = False,
+        web_port: int = 8199,
+    ) -> dict[str, Any]:
+        """Create a new roundtable discussion. Alias for create_discussion."""
+        return self.create_discussion(
+            topic,
+            participants,
+            context=context,
+            max_rounds=max_rounds,
+            speech_order=speech_order,
+            created_by=created_by,
+            output_path=output_path,
+            notifications=notifications,
+            web=web,
+            web_port=web_port,
+        )
+
+    def end(
+        self,
+        discussion_id: str,
+        *,
+        force: bool = False,
+        conclusion: str | None = None,
+    ) -> dict[str, Any]:
+        """End a discussion (conclude or cancel). Alias for end_discussion."""
+        return self.end_discussion(discussion_id, force=force, conclusion=conclusion)
+
+    def list(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """List all discussions with optional status filter. Alias for list_discussions."""
+        return self.list_discussions(status=status, limit=limit)
+
+    def get_status(self, discussion_id: str) -> dict[str, Any]:
+        """Get discussion status including convergence metrics. Alias for status."""
+        return self.status(discussion_id)
+
+
     def calculate_convergence(self, discussion_id: str, round_num: int) -> dict[str, Any]:
         """Calculate convergence score for a round from its findings.
 

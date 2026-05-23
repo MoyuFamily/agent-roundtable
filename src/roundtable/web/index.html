@@ -50,9 +50,17 @@
       --rt-role-research-rgb: 245, 158, 11;
       --rt-role-marketing-rgb: 236, 72, 153;
       --rt-role-default-rgb: 100, 116, 139;
+      --rt-role-coordinator-rgb: 234, 179, 8;
+      --rt-role-coordinator: #EAB308;
+      --rt-role-coordinator-bg: rgba(234, 179, 8, 0.15);
     }
 
     /* Distinct Speech Cards by Role */
+    .speech-card.role-coordinator {
+      border-left: 4px solid var(--rt-role-coordinator);
+      background: linear-gradient(135deg, rgba(var(--rt-role-coordinator-rgb), 0.06) 0%, var(--rt-bg-card) 100%);
+      box-shadow: 0 0 12px rgba(234, 179, 8, 0.05), var(--rt-shadow-sm);
+    }
     .speech-card.role-product {
       border-left: 4px solid var(--rt-role-product);
       background: linear-gradient(135deg, rgba(var(--rt-role-product-rgb), 0.04) 0%, var(--rt-bg-card) 100%);
@@ -1059,8 +1067,8 @@
       let roleType = 'default';
       let roleName = '';
       if (speech.participant === 'coordinator') {
-        roleType = 'default';
-        roleName = '协调者';
+        roleType = 'coordinator';
+        roleName = '👑 协调者';
       } else {
         const participantObj = state.participants.find(p => p.profile === speech.participant);
         if (participantObj) {

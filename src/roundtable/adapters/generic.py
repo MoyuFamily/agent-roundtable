@@ -79,8 +79,11 @@ class Roundtable:
         """
         try:
             return self._core.create_discussion(
-                topic, participants,
-                notifications=notifications, web=web, web_port=web_port,
+                topic,
+                participants,
+                notifications=notifications,
+                web=web,
+                web_port=web_port,
                 **kwargs,
             )
         except (ValueError, Exception) as e:

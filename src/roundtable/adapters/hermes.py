@@ -96,7 +96,19 @@ def _handle(args: dict[str, Any], method: str, **extra: Any) -> str:
 
 
 def _handle_init(args: dict[str, Any], **kw: Any) -> str:
-    return _handle(args, "create_discussion")
+    result = _handle(args, "create_discussion")
+    # Auto-open browser if web viewer was started
+    try:
+        data = json.loads(result)
+        web_url = data.get("web_url")
+        if web_url:
+            import subprocess as _sp
+
+            _sp.run(["open", web_url], capture_output=True, timeout=5)
+            logger.info("Opened web viewer in browser: %s", web_url)
+    except Exception:
+        logger.debug("Could not auto-open browser for web viewer")
+    return result
 
 
 def _handle_speak(args: dict[str, Any], **kw: Any) -> str:

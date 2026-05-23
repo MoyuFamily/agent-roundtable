@@ -245,4 +245,3 @@ class Roundtable:
     def status(self, discussion_id: str) -> dict[str, Any]:
         """Get discussion status. Alias for get_status."""
         return self.get_status(discussion_id)
-

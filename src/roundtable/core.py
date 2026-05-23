@@ -692,19 +692,9 @@ class RoundtableCore:
         """End a discussion (conclude or cancel). Alias for end_discussion."""
         return self.end_discussion(discussion_id, force=force, conclusion=conclusion)
 
-    def list(
-        self,
-        *,
-        status: str | None = None,
-        limit: int = 50,
-    ) -> dict[str, Any]:
-        """List all discussions with optional status filter. Alias for list_discussions."""
-        return self.list_discussions(status=status, limit=limit)
-
     def get_status(self, discussion_id: str) -> dict[str, Any]:
         """Get discussion status including convergence metrics. Alias for status."""
         return self.status(discussion_id)
-
 
     def calculate_convergence(self, discussion_id: str, round_num: int) -> dict[str, Any]:
         """Calculate convergence score for a round from its findings.
@@ -1261,5 +1251,8 @@ class RoundtableCore:
                     f"- Round {c.round}: score={c.score:.2f}, "
                     f"consensus={c.consensus_count}, disagreement={c.disagreement_count}"
                 )
-
         return "\n".join(lines)
+
+
+# Dynamic alias to avoid shadowing built-in `list` type in the class body.
+RoundtableCore.list = RoundtableCore.list_discussions  # type: ignore[attr-defined]

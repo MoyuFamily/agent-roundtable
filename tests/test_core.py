@@ -668,4 +668,3 @@ def test_generic_adapter_aliases(tmp_path):
     discs = rt.list_discussions()
     assert discs["ok"] is True
     assert any(d["id"] == disc_id for d in discs["discussions"])
-

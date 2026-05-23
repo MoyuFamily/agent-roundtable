@@ -16,7 +16,7 @@
 
 import { createServer } from "node:http";
 import { readFileSync, watch, existsSync, writeFileSync, renameSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname, basename } from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -380,7 +380,13 @@ function startFileWatcher() {
   }
 
   let debounceTimer = null;
-  watch(DISCUSSION_PATH, () => {
+  // Watch the directory instead of the file — macOS fs.watch() doesn't
+  // reliably detect changes after atomic rename (os.rename replaces inode).
+  // Watching the parent directory catches the rename event on all platforms.
+  const watchDir = dirname(DISCUSSION_PATH);
+  const targetName = basename(DISCUSSION_PATH);
+  watch(watchDir, (_eventType, changedFilename) => {
+    if (changedFilename !== targetName) return;
     // Debounce: avoid rapid-fire during atomic writes
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {

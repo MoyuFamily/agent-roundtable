@@ -538,6 +538,7 @@ class RoundtableCore:
                 action = "concluded"
 
             # Fire concluded notification (only on conclude, not cancel)
+            disc_after = None
             if action == "concluded":
                 disc_after = self.db.get_discussion(conn, discussion_id)
                 if disc_after:
@@ -548,13 +549,13 @@ class RoundtableCore:
             publisher = self._publishers.pop(discussion_id, None)
             if publisher:
                 try:
-                    if action == "concluded":
+                    if action == "concluded" and disc_after:
                         publisher.conclude(disc_after.conclusion or "")
                     publisher.stop()
                     logger.info(f"Web publisher stopped for {discussion_id}")
                 except Exception:
                     logger.exception(f"Web publisher cleanup failed for {discussion_id}")
-            elif action == "concluded":
+            elif action == "concluded" and disc_after:
                 # Cross-process: update discussion.json directly
                 self._conclude_web_discussion(discussion_id, disc_after.conclusion or "")
 

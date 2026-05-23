@@ -29,6 +29,10 @@ Thumbs.db
 .coverage
 htmlcov/
 
+# Linting / Type checking
+.ruff_cache/
+.mypy_cache/
+
 # Database
 *.db
 *.db-journal

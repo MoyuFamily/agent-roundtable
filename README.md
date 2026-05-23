@@ -17,6 +17,10 @@
 </p>
 
 <p align="center">
+  <strong><a href="README.md">中文</a> · <a href="README_EN.md">English</a></strong>
+</p>
+
+<p align="center">
   <img src="https://raw.githubusercontent.com/ParsifalC/roundtable/main/docs/design/assets/demo.gif" alt="Roundtable Demo" width="600">
 </p>
 

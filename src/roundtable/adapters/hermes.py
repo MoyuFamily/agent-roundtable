@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import platform
 import subprocess
 from typing import Any
 
@@ -38,11 +39,20 @@ def _hermes_send_fn(platform: str, chat_id: str, message: str) -> None:
         if platform == "feishu":
             profile = os.environ.get("HERMES_PROFILE", "default")
             script = os.path.expanduser("~/.hermes/scripts/feishu-send.py")
-            subprocess.run(
+            result = subprocess.run(
                 ["python3", script, profile, chat_id, message],
                 capture_output=True,
+                text=True,
                 timeout=15,
             )
+            if result.returncode != 0:
+                logger.warning(
+                    "Notification send command failed (platform=%s, chat=%s, exit=%s): %s",
+                    platform,
+                    chat_id,
+                    result.returncode,
+                    result.stderr.strip() or result.stdout.strip(),
+                )
         else:
             logger.warning("Unsupported notification platform: %s", platform)
     except Exception as e:
@@ -102,13 +112,39 @@ def _handle_init(args: dict[str, Any], **kw: Any) -> str:
         data = json.loads(result)
         web_url = data.get("web_url")
         if web_url:
-            import subprocess as _sp
-
-            _sp.run(["open", web_url], capture_output=True, timeout=5)
-            logger.info("Opened web viewer in browser: %s", web_url)
-    except Exception:
-        logger.debug("Could not auto-open browser for web viewer")
+            opened, error = _open_web_viewer(web_url)
+            data["web_opened"] = opened
+            if error:
+                data["open_error"] = error
+            result = json.dumps(data)
+    except Exception as exc:
+        logger.debug("Could not auto-open browser for web viewer: %s", exc)
     return result
+
+
+def _open_web_viewer(web_url: str) -> tuple[bool, str | None]:
+    """Best-effort browser opener with an explicit result for callers."""
+    system = platform.system()
+    if system == "Darwin":
+        cmd = ["open", web_url]
+    elif system == "Windows":
+        cmd = ["cmd", "/c", "start", "", web_url]
+    else:
+        cmd = ["xdg-open", web_url]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        logger.debug("Could not auto-open browser for web viewer: %s", exc)
+        return False, str(exc)
+
+    if result.returncode != 0:
+        error = (result.stderr or result.stdout or f"exit {result.returncode}").strip()
+        logger.debug("Could not auto-open browser for web viewer: %s", error)
+        return False, error
+
+    logger.info("Opened web viewer in browser: %s", web_url)
+    return True, None
 
 
 def _handle_speak(args: dict[str, Any], **kw: Any) -> str:

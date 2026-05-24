@@ -72,17 +72,18 @@ class TestCreateDiscussionWeb:
         assert result["web_url"] is None
         assert len(core._publishers) == 0
 
-    def test_web_failure_does_not_block_creation(self, core):
-        """If WebPublisher fails to start, discussion should still be created."""
-        with patch("roundtable.web_publisher.WebPublisher", side_effect=RuntimeError("PM2 not found")):
-            result = core.create_discussion(
+    def test_web_failure_is_reported(self, core):
+        """If web=True is requested, a WebPublisher startup failure is visible."""
+        with (
+            patch("roundtable.web_publisher.WebPublisher", side_effect=RuntimeError("PM2 not found")),
+            pytest.raises(RuntimeError, match="Failed to start web viewer"),
+        ):
+            core.create_discussion(
                 "Test topic",
                 _make_participants(),
                 web=True,
             )
 
-        assert result["ok"] is True
-        assert result["web_url"] is None
         assert len(core._publishers) == 0
 
     def test_publisher_stored_by_discussion_id(self, core):
@@ -113,6 +114,8 @@ class TestSpeakWithPublisher:
                 _make_participants(),
                 web=True,
             )
+        core.speak(result["discussion_id"], "coordinator", "Opening")
+        mock_pub.reset_mock()
         return result["discussion_id"], mock_pub
 
     def test_speech_triggers_on_speech(self, core):
@@ -140,6 +143,7 @@ class TestSpeakWithPublisher:
         """speak() should work fine when there's no publisher (web=False)."""
         result = core.create_discussion("Topic", _make_participants())
         disc_id = result["discussion_id"]
+        core.speak(disc_id, "coordinator", "Opening")
 
         # Should not raise
         speech = core.speak(disc_id, "alice", "Hello!")
@@ -171,15 +175,16 @@ class TestEndDiscussionWithPublisher:
             )
         return result["discussion_id"], mock_pub
 
-    def test_conclude_calls_publisher_conclude_and_stop(self, core):
-        """Normal conclude should call publisher.conclude() then stop()."""
+    def test_conclude_calls_publisher_conclude_and_retains_viewer(self, core):
+        """Normal conclude should keep the web viewer available for review."""
         disc_id, mock_pub = self._create_web_discussion(core)
 
-        core.end_discussion(disc_id)
+        result = core.end_discussion(disc_id)
 
         mock_pub.conclude.assert_called_once()
-        mock_pub.stop.assert_called_once()
-        assert disc_id not in core._publishers
+        mock_pub.stop.assert_not_called()
+        assert disc_id in core._publishers
+        assert result["web_retained"] is True
 
     def test_force_cancel_calls_publisher_stop_only(self, core):
         """Force cancel should call publisher.stop() but NOT conclude()."""
@@ -204,7 +209,7 @@ class TestEndDiscussionWithPublisher:
         disc_id, mock_pub = self._create_web_discussion(core)
         mock_pub.stop.side_effect = RuntimeError("PM2 crash")
 
-        end_result = core.end_discussion(disc_id)
+        end_result = core.end_discussion(disc_id, force=True)
         assert end_result["ok"] is True
         assert disc_id not in core._publishers
 

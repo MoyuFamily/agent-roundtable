@@ -29,6 +29,10 @@ def _p():
     ]
 
 
+def _open(core, discussion_id):
+    return core.speak(discussion_id, "coordinator", "Opening")
+
+
 # ---------------------------------------------------------------------------
 # create_discussion validation
 # ---------------------------------------------------------------------------
@@ -62,6 +66,7 @@ def test_speak_empty_participant(core):
 
 def test_speak_bad_reply_to(core):
     d = core.create_discussion(topic="T", participants=_p())
+    _open(core, d["discussion_id"])
     with pytest.raises(ValueError, match="reply_to"):
         core.speak(d["discussion_id"], "alice", "hi", reply_to="notint")
 
@@ -140,7 +145,10 @@ def test_summarize_with_findings_and_convergence(core):
     )
     did = d["discussion_id"]
 
-    # Round 0
+    # Round 0 opening
+    _open(core, did)
+
+    # Round 1
     core.speak(did, "alice", "A0")
     core.speak(did, "bob", "B0")
     core.speak(did, "carol", "C0")
@@ -153,7 +161,7 @@ def test_summarize_with_findings_and_convergence(core):
     core.db.record_convergence(conn, did, 1, 0.67, 2, 1, 1)
     conn.close()
 
-    # Round 1
+    # Round 2
     core.speak(did, "alice", "A1")
     core.speak(did, "bob", "B1")
     core.speak(did, "carol", "C1")
@@ -180,6 +188,7 @@ def test_summarize_convergence_from_history(core):
     d = core.create_discussion(topic="T", participants=_p())
     did = d["discussion_id"]
 
+    _open(core, did)
     core.speak(did, "alice", "A0")
     core.speak(did, "bob", "B0")
     core.speak(did, "carol", "C0")
@@ -315,8 +324,10 @@ def test_set_send_fn(core):
     d = core.create_discussion(
         topic="T",
         participants=_p(),
-        notifications={"enabled": True, "channels": [{"platform": "feishu", "chat_id": "oc_x"}]},
+        notifications={"enabled": True, "channels": [{"platform": "feishu", "chat_id": "oc_x"}], "events": ["speech"]},
     )
+    _open(core, d["discussion_id"])
+    sent.clear()
     core.speak(d["discussion_id"], "alice", "hi")
     assert len(sent) == 1
 
@@ -338,13 +349,17 @@ def test_round_start_notification(core):
     d = core.create_discussion(topic="T", participants=_p(), notifications=notif)
     did = d["discussion_id"]
 
-    # Round 0
+    # Round 0 opening
+    _open(core, did)
+    sent.clear()
+
+    # Round 1
     core.speak(did, "alice", "A0")
     core.speak(did, "bob", "B0")
     core.speak(did, "carol", "C0")
     sent.clear()
 
-    # Round 1 — first speech should trigger round_start
+    # Round 2 — first speech should trigger round_start
     core.speak(did, "alice", "A1")
     round_start_msgs = [m for m in sent if "讨论开始" in m]
     assert len(round_start_msgs) >= 1
@@ -362,6 +377,7 @@ def test_concluded_notification(core):
     d = core.create_discussion(topic="T", participants=_p(), notifications=notif)
     did = d["discussion_id"]
 
+    _open(core, did)
     core.speak(did, "alice", "A0")
     core.speak(did, "bob", "B0")
     core.speak(did, "carol", "C0")
@@ -380,6 +396,7 @@ def test_concluded_notification(core):
 def test_read_participant_filter(core):
     d = core.create_discussion(topic="T", participants=_p())
     did = d["discussion_id"]
+    _open(core, did)
     core.speak(did, "alice", "A0")
     core.speak(did, "bob", "B0")
     core.speak(did, "carol", "C0")
@@ -397,6 +414,7 @@ def test_read_participant_filter(core):
 def test_status_with_findings_and_next_speaker(core):
     d = core.create_discussion(topic="T", participants=_p())
     did = d["discussion_id"]
+    _open(core, did)
     core.speak(did, "alice", "A0")
 
     conn = core.db.connect()

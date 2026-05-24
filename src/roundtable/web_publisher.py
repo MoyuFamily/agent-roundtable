@@ -7,6 +7,7 @@ a JSON file that Express reads via shared lock + fs.watch.
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import json
 import logging
@@ -74,6 +75,7 @@ class WebPublisher:
         self._discussion_dir.mkdir(parents=True, exist_ok=True)
         self._port = port
         self._host = host
+        self._url_host = "127.0.0.1" if host in {"", "0.0.0.0", "::"} else host
         self._token: str | None = None
         self._discussion_id: str | None = None
         self._pm2_process_name: str | None = None
@@ -117,7 +119,9 @@ class WebPublisher:
         # Start Express via PM2
         self._start_pm2(self._actual_port)
 
-        url = f"http://{self._host}:{self._actual_port}/r/{self._token}"
+        url = self.url
+        if url is None:
+            raise RuntimeError("Web viewer started without a URL")
         logger.info("Web viewer started: %s", url)
         return url
 
@@ -169,12 +173,21 @@ class WebPublisher:
         """PM2 stops the Express process."""
         if self._pm2_process_name:
             try:
-                subprocess.run(
+                result = subprocess.run(
                     ["pm2", "delete", self._pm2_process_name],
                     capture_output=True,
+                    text=True,
                     timeout=10,
                 )
-                logger.info("PM2 process %s stopped", self._pm2_process_name)
+                if result.returncode != 0:
+                    logger.warning(
+                        "PM2 delete failed for %s (exit %s): %s",
+                        self._pm2_process_name,
+                        result.returncode,
+                        result.stderr,
+                    )
+                else:
+                    logger.info("PM2 process %s stopped", self._pm2_process_name)
             except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
                 logger.warning("Failed to stop PM2 process: %s", exc)
             finally:
@@ -184,7 +197,7 @@ class WebPublisher:
     def url(self) -> str | None:
         """Current web page URL, or None if not started."""
         if self._actual_port and self._token:
-            return f"http://{self._host}:{self._actual_port}/r/{self._token}"
+            return f"http://{self._url_host}:{self._actual_port}/r/{self._token}"
         return None
 
     @property
@@ -209,9 +222,17 @@ class WebPublisher:
                 try:
                     s.bind(("", port))
                     return port
-                except OSError:
-                    continue
-        raise RuntimeError(f"No available port in range {preferred}-{preferred + 9}")
+                except OSError as exc:
+                    if exc.errno == errno.EADDRINUSE:
+                        continue
+                    if exc.errno in (errno.EACCES, errno.EPERM):
+                        raise PermissionError(
+                            f"Cannot bind web viewer to port {port}: {exc.strerror or exc}"
+                        ) from exc
+                    raise RuntimeError(f"Cannot probe web viewer port {port}: {exc}") from exc
+        raise RuntimeError(
+            f"No available port in range {preferred}-{preferred + 9}: all probed ports are already in use"
+        )
 
     def _start_pm2(self, port: int) -> None:
         """Start the Express server via PM2."""

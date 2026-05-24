@@ -99,6 +99,15 @@ def test_create_discussion_requires_participants(rt_db, db_conn):
         rt_db.create_discussion(db_conn, topic="test", participants=[])
 
 
+def test_create_discussion_rejects_duplicate_participants(rt_db, db_conn):
+    participants = [
+        {"profile": "alice", "role": "Engineer"},
+        {"profile": "alice", "role": "Designer"},
+    ]
+    with pytest.raises(ValueError, match="Duplicate participant"):
+        rt_db.create_discussion(db_conn, topic="test", participants=participants)
+
+
 def test_create_discussion_validates_max_rounds(rt_db, db_conn):
     with pytest.raises(ValueError, match="max_rounds"):
         rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS, max_rounds=0)
@@ -176,23 +185,27 @@ def test_get_active_participant_names(rt_db, db_conn):
 # ---------------------------------------------------------------------------
 
 
-def test_add_speech_in_round_0(rt_db, db_conn):
+def test_add_coordinator_speech_in_round_0(rt_db, db_conn):
     disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS)
-    result = rt_db.add_speech(db_conn, disc.id, "alice", "Hello everyone!")
+    result = rt_db.add_speech(db_conn, disc.id, "coordinator", "Hello everyone!")
     speech = result["speech"]
     assert speech.id > 0
     assert speech.round == 0
-    assert speech.participant == "alice"
+    assert speech.participant == "coordinator"
     assert speech.content == "Hello everyone!"
+
+
+def test_participant_cannot_speak_in_round_0(rt_db, db_conn):
+    disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS)
+    with pytest.raises(ValueError, match="Round 0"):
+        rt_db.add_speech(db_conn, disc.id, "alice", "Hello everyone!")
 
 
 def test_speech_round_advances_when_all_spoke(rt_db, db_conn):
     disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS)
 
-    # Round 0: all 3 speak
-    rt_db.add_speech(db_conn, disc.id, "alice", "Alice's opening")
-    rt_db.add_speech(db_conn, disc.id, "bob", "Bob's opening")
-    rt_db.add_speech(db_conn, disc.id, "carol", "Carol's opening")
+    # Round 0: coordinator opening only
+    rt_db.add_speech(db_conn, disc.id, "coordinator", "Opening")
 
     fetched = rt_db.get_discussion(db_conn, disc.id)
     assert fetched.current_round == 1
@@ -202,14 +215,17 @@ def test_speech_round_advances_when_all_spoke(rt_db, db_conn):
     fetched = rt_db.get_discussion(db_conn, disc.id)
     assert fetched.current_round == 1  # Still round 1
 
+    rt_db.add_speech(db_conn, disc.id, "bob", "Round 1 from Bob")
+    rt_db.add_speech(db_conn, disc.id, "carol", "Round 1 from Carol")
+    fetched = rt_db.get_discussion(db_conn, disc.id)
+    assert fetched.current_round == 2
+
 
 def test_speech_auto_conclude_on_max_rounds(rt_db, db_conn):
     disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS, max_rounds=1)
 
     # Round 0
-    rt_db.add_speech(db_conn, disc.id, "alice", "s1")
-    rt_db.add_speech(db_conn, disc.id, "bob", "s2")
-    rt_db.add_speech(db_conn, disc.id, "carol", "s3")
+    rt_db.add_speech(db_conn, disc.id, "coordinator", "opening")
 
     fetched = rt_db.get_discussion(db_conn, disc.id)
     assert fetched.current_round == 1
@@ -225,6 +241,7 @@ def test_speech_auto_conclude_on_max_rounds(rt_db, db_conn):
 
 def test_speech_with_reply_to(rt_db, db_conn):
     disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS)
+    rt_db.add_speech(db_conn, disc.id, "coordinator", "opening")
     r1 = rt_db.add_speech(db_conn, disc.id, "alice", "Original point")
     s1 = r1["speech"]
     r2 = rt_db.add_speech(db_conn, disc.id, "bob", "Responding", reply_to=s1.id)
@@ -234,6 +251,7 @@ def test_speech_with_reply_to(rt_db, db_conn):
 
 def test_speech_reply_to_invalid(rt_db, db_conn):
     disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS)
+    rt_db.add_speech(db_conn, disc.id, "coordinator", "opening")
     with pytest.raises(ValueError, match="reply_to speech"):
         rt_db.add_speech(db_conn, disc.id, "alice", "test", reply_to=999)
 
@@ -247,19 +265,20 @@ def test_speech_on_concluded_discussion(rt_db, db_conn):
 
 def test_get_speeches(rt_db, db_conn):
     disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS)
+    rt_db.add_speech(db_conn, disc.id, "coordinator", "opening")
     rt_db.add_speech(db_conn, disc.id, "alice", "s1")
     rt_db.add_speech(db_conn, disc.id, "bob", "s2")
-    rt_db.add_speech(db_conn, disc.id, "carol", "s3")  # completes round 0
-    rt_db.add_speech(db_conn, disc.id, "alice", "r1s1")
+    rt_db.add_speech(db_conn, disc.id, "carol", "s3")  # completes round 1
+    rt_db.add_speech(db_conn, disc.id, "alice", "r2s1")
 
     all_speeches = rt_db.get_speeches(db_conn, disc.id)
-    assert len(all_speeches) == 4
+    assert len(all_speeches) == 5
 
     round0 = rt_db.get_speeches(db_conn, disc.id, since_round=0)
-    assert len(round0) == 4
+    assert len(round0) == 5
 
     round1 = rt_db.get_speeches(db_conn, disc.id, since_round=1)
-    assert len(round1) == 1
+    assert len(round1) == 4
 
     alice_only = rt_db.get_speeches(db_conn, disc.id, participant="alice")
     assert len(alice_only) == 2
@@ -267,9 +286,10 @@ def test_get_speeches(rt_db, db_conn):
 
 def test_get_speech_count(rt_db, db_conn):
     disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS)
+    rt_db.add_speech(db_conn, disc.id, "coordinator", "opening")
     rt_db.add_speech(db_conn, disc.id, "alice", "s1")
     rt_db.add_speech(db_conn, disc.id, "bob", "s2")
-    assert rt_db.get_speech_count(db_conn, disc.id) == 2
+    assert rt_db.get_speech_count(db_conn, disc.id) == 3
 
 
 # ---------------------------------------------------------------------------

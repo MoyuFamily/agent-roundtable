@@ -42,8 +42,8 @@ class Notifier:
         send_fn: Callable[[str, str, str], None] | None = None,
     ):
         self._config = config or {}
-        self._enabled = self._config.get("enabled", False)
         self._channels: list[dict[str, str]] = self._config.get("channels", [])
+        self._enabled = self._config.get("enabled", bool(self._channels))
         self._events: set[str] = set(self._config.get("events", list(ALL_EVENTS)))
         self._send_fn = send_fn
 
@@ -164,8 +164,7 @@ class Notifier:
             if convergence is not None:
                 lines.append(f"最终收敛度: {convergence:.2f}")
             if conclusion:
-                co = conclusion[:300] + ("..." if len(conclusion) > 300 else "")
-                lines.append(f"结论: {co}")
+                lines.append(f"结论: {conclusion}")
             if consensus:
                 lines.append(f"共识点({len(consensus)}): " + "; ".join(consensus[:3])[:200])
             if disagreements:

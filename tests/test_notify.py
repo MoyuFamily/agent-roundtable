@@ -27,6 +27,26 @@ def test_notifier_enabled_with_config():
     assert n.should_notify("speech") is True
 
 
+def test_notifier_enabled_when_channels_are_configured():
+    """Providing channels should enable notifications unless explicitly disabled."""
+    sent = []
+    n = Notifier(
+        {"channels": [{"platform": "feishu", "chat_id": "oc_123"}]},
+        send_fn=lambda p, c, m: sent.append((p, c, m)),
+    )
+    assert n.enabled is True
+    n.notify("concluded", discussion_id="rt_x", topic="T", conclusion="done")
+    assert len(sent) == 1
+
+
+def test_notifier_respects_explicit_disabled_with_channels():
+    n = Notifier(
+        {"enabled": False, "channels": [{"platform": "feishu", "chat_id": "oc_123"}]},
+        send_fn=lambda p, c, m: None,
+    )
+    assert n.enabled is False
+
+
 def test_notifier_no_send_fn():
     """Notifier without send_fn should be disabled even with config."""
     n = Notifier(
@@ -148,6 +168,22 @@ def test_format_concluded_message():
     assert "讨论结束" in msg
     assert "We agreed on X" in msg
     assert "0.90" in msg
+
+
+def test_concluded_message_keeps_full_conclusion():
+    sent = []
+    n = Notifier(
+        {"enabled": True, "channels": [{"platform": "feishu", "chat_id": "oc_x"}]},
+        send_fn=lambda p, c, m: sent.append(m),
+    )
+    conclusion = "x" * 500
+    n.notify(
+        "concluded",
+        discussion_id="rt_test",
+        topic="T",
+        conclusion=conclusion,
+    )
+    assert conclusion in sent[0]
 
 
 def test_content_truncation():

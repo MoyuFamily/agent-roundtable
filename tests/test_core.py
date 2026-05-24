@@ -28,6 +28,10 @@ def _make_participants():
     ]
 
 
+def _open_discussion(core, disc_id):
+    return core.speak(disc_id, "coordinator", "Opening")
+
+
 # ---------------------------------------------------------------------------
 # Module import
 # ---------------------------------------------------------------------------
@@ -113,10 +117,11 @@ def test_speak_success(core):
     disc = core.create_discussion(topic="Test", participants=_make_participants())
     disc_id = disc["discussion_id"]
 
+    _open_discussion(core, disc_id)
     result = core.speak(disc_id, "alice", "Hello!")
     assert result["ok"] is True
     assert result["speech_id"] > 0
-    assert result["round"] == 0
+    assert result["round"] == 1
     assert result["participant"] == "alice"
 
 
@@ -145,13 +150,14 @@ def test_read_success(core):
     disc = core.create_discussion(topic="Test", participants=_make_participants())
     disc_id = disc["discussion_id"]
 
+    _open_discussion(core, disc_id)
     core.speak(disc_id, "alice", "Hi")
     core.speak(disc_id, "bob", "Hello")
 
     result = core.read(disc_id)
     assert result["ok"] is True
-    assert result["speech_count"] == 2
-    assert len(result["speeches"]) == 2
+    assert result["speech_count"] == 3
+    assert len(result["speeches"]) == 3
     assert "formatted_history" in result
 
 
@@ -159,15 +165,16 @@ def test_read_with_since_round(core):
     disc = core.create_discussion(topic="Test", participants=_make_participants())
     disc_id = disc["discussion_id"]
 
-    # Round 0
-    core.speak(disc_id, "alice", "r0s1")
-    core.speak(disc_id, "bob", "r0s2")
     # Round 1
+    _open_discussion(core, disc_id)
     core.speak(disc_id, "alice", "r1s1")
+    core.speak(disc_id, "bob", "r1s2")
+    # Round 2
+    core.speak(disc_id, "alice", "r2s1")
 
-    result = core.read(disc_id, since_round=1)
+    result = core.read(disc_id, since_round=2)
     assert result["speech_count"] == 1
-    assert result["speeches"][0]["content"] == "r1s1"
+    assert result["speeches"][0]["content"] == "r2s1"
 
 
 # ---------------------------------------------------------------------------
@@ -249,13 +256,14 @@ def test_summarize(core):
     )
     disc_id = disc["discussion_id"]
 
+    _open_discussion(core, disc_id)
     core.speak(disc_id, "alice", "PostgreSQL")
     core.speak(disc_id, "bob", "MySQL")
 
     result = core.summarize(disc_id)
     assert result["ok"] is True
     assert result["topic"] == "DB Selection"
-    assert result["speech_count"] == 2
+    assert result["speech_count"] == 3
     assert "rounds" in result
     assert "participants" in result
     assert "consensus_points" in result
@@ -296,6 +304,46 @@ def test_summarize_compact(core):
     assert compact_size < full_size, f"compact ({compact_size}B) should be smaller than full ({full_size}B)"
 
 
+def test_summarize_writes_output_path(core, tmp_path):
+    """Configured output_path should receive generated Markdown."""
+    output_path = tmp_path / "summary.md"
+    disc = core.create_discussion(
+        topic="Output Test",
+        participants=_make_participants(),
+        output_path=str(output_path),
+    )
+    disc_id = disc["discussion_id"]
+
+    _open_discussion(core, disc_id)
+    core.speak(disc_id, "alice", "PostgreSQL")
+    result = core.summarize(disc_id)
+
+    assert result["output_written"] is True
+    assert output_path.exists()
+    assert "Output Test" in output_path.read_text(encoding="utf-8")
+
+
+def test_end_writes_full_output_markdown_with_conclusion(core, tmp_path):
+    output_path = tmp_path / "final.md"
+    disc = core.create_discussion(
+        topic="Final Output Test",
+        participants=_make_participants(),
+        output_path=str(output_path),
+    )
+    disc_id = disc["discussion_id"]
+    _open_discussion(core, disc_id)
+    core.speak(disc_id, "alice", "Use PostgreSQL")
+
+    result = core.end_discussion(disc_id, conclusion="Final choice: PostgreSQL")
+
+    assert result["output_written"] is True
+    text = output_path.read_text(encoding="utf-8")
+    assert "Final Output Test" in text
+    assert "Use PostgreSQL" in text
+    assert "## 最终结论" in text
+    assert "Final choice: PostgreSQL" in text
+
+
 # ---------------------------------------------------------------------------
 # advance
 # ---------------------------------------------------------------------------
@@ -305,9 +353,8 @@ def test_advance_round(core):
     disc = core.create_discussion(topic="Test", participants=_make_participants())
     disc_id = disc["discussion_id"]
 
-    # Round 0: speak
-    core.speak(disc_id, "alice", "r0s1")
-    core.speak(disc_id, "bob", "r0s2")
+    # Round 0 opening advances to round 1
+    _open_discussion(core, disc_id)
 
     # Explicitly advance to round 2 (skip round 1)
     result = core.advance(disc_id)
@@ -341,24 +388,46 @@ def test_round_tracking_multi_round(core):
     disc = core.create_discussion(topic="Test", participants=_make_participants())
     disc_id = disc["discussion_id"]
 
-    # Round 0
-    r1 = core.speak(disc_id, "alice", "r0 alice")
-    assert r1["round"] == 0
-    r2 = core.speak(disc_id, "bob", "r0 bob")
-    assert r2["round"] == 0
+    # Round 0 opening
+    opening = core.speak(disc_id, "coordinator", "opening")
+    assert opening["round"] == 0
+    assert opening["round_complete"] is True
+
+    # Round 1
+    r1 = core.speak(disc_id, "alice", "r1 alice")
+    assert r1["round"] == 1
+    r2 = core.speak(disc_id, "bob", "r1 bob")
+    assert r2["round"] == 1
     assert r2["round_complete"] is True
 
-    # Round 1 (auto-advanced)
-    r3 = core.speak(disc_id, "alice", "r1 alice")
-    assert r3["round"] == 1
-    r4 = core.speak(disc_id, "bob", "r1 bob")
-    assert r4["round"] == 1
+    # Round 2 (auto-advanced)
+    r3 = core.speak(disc_id, "alice", "r2 alice")
+    assert r3["round"] == 2
+    r4 = core.speak(disc_id, "bob", "r2 bob")
+    assert r4["round"] == 2
     assert r4["round_complete"] is True
 
     # Verify via read
     result = core.read(disc_id, since_round=1)
-    assert result["speech_count"] == 2
-    assert all(s["round"] == 1 for s in result["speeches"])
+    assert result["speech_count"] == 4
+    assert all(s["round"] >= 1 for s in result["speeches"])
+
+
+def test_round_1_starts_after_coordinator_opening(core):
+    """Coordinator opening is the only Round 0 speech."""
+    disc = core.create_discussion(topic="Round tracking test", participants=_make_participants(), max_rounds=3)
+    disc_id = disc["discussion_id"]
+
+    r1 = core.speak(disc_id, "coordinator", "Opening statement")
+    assert r1["round"] == 0
+    assert r1["round_complete"] is True
+
+    status = core.status(disc_id)
+    assert status["current_round"] == 1
+    assert status["next_speaker"] == "alice"
+
+    r2 = core.speak(disc_id, "alice", "Alice R1")
+    assert r2["round"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +472,8 @@ def test_create_discussion_with_notifications(core):
     assert status["ok"] is True
 
     # Speak and verify notification sent
+    _open_discussion(core, disc_id)
+    sent.clear()
     core.speak(disc_id, "alice", "Hello from Alice")
     assert len(sent) == 1
     assert sent[0][0] == "feishu"
@@ -420,6 +491,7 @@ def test_create_discussion_without_notifications(core):
         participants=_make_participants(),
     )
     disc_id = result["discussion_id"]
+    _open_discussion(core, disc_id)
     core.speak(disc_id, "alice", "Hello")
     assert len(sent) == 0
 
@@ -443,6 +515,7 @@ def test_notification_failure_does_not_block(core):
     disc_id = result["discussion_id"]
 
     # Should not raise despite bad send_fn
+    _open_discussion(core, disc_id)
     r = core.speak(disc_id, "alice", "Still works")
     assert r["ok"] is True
 
@@ -464,13 +537,9 @@ def test_notification_events_filter(core):
     )
     disc_id = result["discussion_id"]
 
-    # Round 0 — speech should NOT trigger (not subscribed)
-    core.speak(disc_id, "alice", "Hello")
+    # Round 0 — opening should NOT trigger (not subscribed)
+    core.speak(disc_id, "coordinator", "Opening")
     assert len(sent) == 0
-
-    # Complete round 0 — round_end should NOT trigger for round 0 (coordinator round)
-    core.speak(disc_id, "bob", "World")
-    assert len(sent) == 0  # round 0 doesn't fire round_end
 
     # Round 1 — speech should NOT trigger
     core.speak(disc_id, "alice", "R1 Alice")
@@ -511,11 +580,7 @@ def test_manual_notify(core):
 
 
 def test_coordinator_speech_uses_current_round(core):
-    """Coordinator's speeches should track the current round, not always 0.
-
-    Before the fix, coordinator always got round_override=0.
-    After the fix, coordinator uses disc.current_round like everyone else.
-    """
+    """Only the coordinator's opening statement uses round 0."""
     result = core.create_discussion(
         topic="Round tracking test",
         participants=_make_participants(),
@@ -526,29 +591,29 @@ def test_coordinator_speech_uses_current_round(core):
     # Coordinator opening (round 0 — natural, since current_round=0)
     r = core.speak(disc_id, "coordinator", "Opening statement")
     assert r["round"] == 0, "Opening should be round 0"
+    assert r["round_complete"] is True
 
     # Round 1: all participants speak
     r_alice = core.speak(disc_id, "alice", "Alice R1")
-    assert r_alice["round"] == 0, "Alice R1 should be round 0"
+    assert r_alice["round"] == 1, "Alice R1 should be round 1"
     r_bob = core.speak(disc_id, "bob", "Bob R1")
-    assert r_bob["round"] == 0, "Bob R1 should be round 0"
-    assert r_bob["round_complete"] is True, "Round 0 should be complete"
-    # After round 0 completes, current_round advances to 1
+    assert r_bob["round"] == 1, "Bob R1 should be round 1"
+    assert r_bob["round_complete"] is True, "Round 1 should be complete"
 
-    # Coordinator speaks again in round 1 — should NOT be round 0!
-    r_coord2 = core.speak(disc_id, "coordinator", "Round 1 summary")
-    assert r_coord2["round"] == 1, f"Coordinator's second speech should be round 1, got {r_coord2['round']}"
+    # Coordinator speaks again in round 2 — should NOT be round 0.
+    r_coord2 = core.speak(disc_id, "coordinator", "Round 2 setup")
+    assert r_coord2["round"] == 2, f"Coordinator's second speech should be round 2, got {r_coord2['round']}"
 
     # Round 2: participants speak
     r_alice2 = core.speak(disc_id, "alice", "Alice R2")
-    assert r_alice2["round"] == 1
+    assert r_alice2["round"] == 2
     r_bob2 = core.speak(disc_id, "bob", "Bob R2")
-    assert r_bob2["round"] == 1
+    assert r_bob2["round"] == 2
     assert r_bob2["round_complete"] is True
 
-    # Coordinator in round 2
-    r_coord3 = core.speak(disc_id, "coordinator", "Round 2 summary")
-    assert r_coord3["round"] == 2, f"Coordinator's third speech should be round 2, got {r_coord3['round']}"
+    # Coordinator in round 3
+    r_coord3 = core.speak(disc_id, "coordinator", "Round 3 setup")
+    assert r_coord3["round"] == 3, f"Coordinator's third speech should be round 3, got {r_coord3['round']}"
 
 
 def test_round_advances_after_all_participants_speak(core):
@@ -563,26 +628,20 @@ def test_round_advances_after_all_participants_speak(core):
     # Round 0 (opening)
     r = core.speak(disc_id, "coordinator", "Opening")
     assert r["round"] == 0
-    r = core.speak(disc_id, "alice", "A0")
-    assert r["round"] == 0
-    assert r["round_complete"] is False
-    r = core.speak(disc_id, "bob", "B0")
-    assert r["round"] == 0
     assert r["round_complete"] is True
 
     # Round 1
-    r = core.speak(disc_id, "alice", "A1")
+    r = core.speak(disc_id, "alice", "A0")
     assert r["round"] == 1
-    r = core.speak(disc_id, "bob", "B1")
+    assert r["round_complete"] is False
+    r = core.speak(disc_id, "bob", "B0")
     assert r["round"] == 1
     assert r["round_complete"] is True
-    # new_round=2, max_rounds=2, 2 > 2 is False → not yet
-    assert r["discussion_complete"] is False
 
-    # Round 2 — exceeds max_rounds → auto-conclude
-    r = core.speak(disc_id, "alice", "A2")
+    # Round 2
+    r = core.speak(disc_id, "alice", "A1")
     assert r["round"] == 2
-    r = core.speak(disc_id, "bob", "B2")
+    r = core.speak(disc_id, "bob", "B1")
     assert r["round"] == 2
     assert r["round_complete"] is True
     # new_round=3 > max_rounds=2 → conclude
@@ -607,7 +666,7 @@ def test_read_shows_correct_rounds(core):
     read = core.read(disc_id)
     speeches = read["speeches"]
     rounds = [s["round"] for s in speeches]
-    assert rounds == [0, 0, 0, 1, 1], f"Expected rounds [0, 0, 0, 1, 1], got {rounds}"
+    assert rounds == [0, 1, 1, 2, 2], f"Expected rounds [0, 1, 1, 2, 2], got {rounds}"
 
 
 # ---------------------------------------------------------------------------
@@ -622,6 +681,7 @@ def test_core_aliases(core):
     disc_id = disc["discussion_id"]
 
     # test speak
+    _open_discussion(core, disc_id)
     core.speak(disc_id, "alice", "Alice speaks")
     core.speak(disc_id, "bob", "Bob speaks")
 
@@ -652,6 +712,7 @@ def test_generic_adapter_aliases(tmp_path):
     disc_id = disc["discussion_id"]
 
     # test speak
+    rt.speak(disc_id, "coordinator", "Opening")
     rt.speak(disc_id, "alice", "Alice speaks")
     rt.speak(disc_id, "bob", "Bob speaks")
 

@@ -18,6 +18,7 @@ from roundtable.exceptions import (
     DiscussionNotActiveError,
     DiscussionNotFoundError,
     InvalidFindingTypeError,
+    InvalidParticipantError,
     InvalidReplyToError,
     InvalidSpeechOrderError,
 )
@@ -197,6 +198,14 @@ class RoundtableDB:
             raise ValueError("max_rounds must be >= 1")
         if not participants:
             raise ValueError("At least one participant is required")
+        seen_profiles: set[str] = set()
+        for p in participants:
+            profile = p.get("profile", "").strip()
+            if not profile:
+                raise ValueError("Each participant must have a 'profile' field")
+            if profile in seen_profiles:
+                raise ValueError(f"Duplicate participant profile: {profile}")
+            seen_profiles.add(profile)
 
         disc_id = f"rt_{secrets.token_hex(4)}"
         now = int(time.time())
@@ -213,8 +222,6 @@ class RoundtableDB:
             )
             for p in participants:
                 profile = p.get("profile", "").strip()
-                if not profile:
-                    raise ValueError("Each participant must have a 'profile' field")
                 conn.execute(
                     """INSERT INTO participants
                        (discussion_id, participant, role, perspective,
@@ -344,9 +351,8 @@ class RoundtableDB:
     ) -> dict[str, Any]:
         """Add a speech and return result with speech + round metadata.
 
-        All speeches use the current round — including the coordinator's
-        opening statement (which is naturally round 0 since discussions
-        start at current_round=0).
+        Round 0 is reserved for the coordinator opening statement. Once that
+        opening is recorded, participant discussion starts at round 1.
 
         Returns dict with: speech (Speech), round_complete (bool),
         discussion_complete (bool), next_speaker (str|None).
@@ -360,6 +366,9 @@ class RoundtableDB:
         now = int(time.time())
         current_round = disc.current_round
         speech_round = current_round
+
+        if current_round == 0 and participant != "coordinator":
+            raise InvalidParticipantError("Round 0 is reserved for the coordinator opening statement")
 
         if reply_to is not None:
             ref = conn.execute(
@@ -383,16 +392,19 @@ class RoundtableDB:
             round_complete = False
             discussion_complete = False
 
-            # Check if all active participants have spoken in this round
-            speakers_this_round = conn.execute(
-                """SELECT DISTINCT participant FROM speeches
-                   WHERE discussion_id = ? AND round = ?""",
-                (discussion_id, current_round),
-            ).fetchall()
-            spoke_names = {r["participant"] for r in speakers_this_round}
-            round_complete = all(name in spoke_names for name in active_names)
+            if participant == "coordinator" and current_round == 0:
+                round_complete = True
+            else:
+                # Check if all active participants have spoken in this round.
+                speakers_this_round = conn.execute(
+                    """SELECT DISTINCT participant FROM speeches
+                       WHERE discussion_id = ? AND round = ?""",
+                    (discussion_id, current_round),
+                ).fetchall()
+                spoke_names = {r["participant"] for r in speakers_this_round}
+                round_complete = all(name in spoke_names for name in active_names)
 
-            if round_complete and current_round >= 0:
+            if round_complete:
                 new_round = current_round + 1
                 conn.execute(
                     "UPDATE discussions SET current_round = ? WHERE id = ?",
@@ -667,7 +679,10 @@ class RoundtableDB:
     @staticmethod
     def _row_to_discussion(row: sqlite3.Row) -> Discussion:
         notif_raw = row["notifications"]
-        notif = json.loads(notif_raw) if notif_raw else None
+        try:
+            notif = json.loads(notif_raw) if notif_raw else None
+        except json.JSONDecodeError:
+            notif = None
         return Discussion(
             id=row["id"],
             topic=row["topic"],

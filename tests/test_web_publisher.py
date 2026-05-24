@@ -7,6 +7,7 @@ File I/O uses real tmp_path for integration confidence.
 
 from __future__ import annotations
 
+import errno
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -371,6 +372,30 @@ class TestPM2Start:
         with pytest.raises(RuntimeError, match="PM2 start failed"):
             pub.start("rt_pm2_fail")
 
+    def test_port_probe_permission_error_is_not_reported_as_exhausted(self, tmp_path):
+        pub = WebPublisher(str(tmp_path), port=19014)
+        exc = PermissionError(errno.EPERM, "Operation not permitted")
+
+        with patch("roundtable.web_publisher.socket.socket") as mock_sock:
+            mock_sock.return_value.__enter__ = lambda s: s
+            mock_sock.return_value.__exit__ = MagicMock(return_value=False)
+            mock_sock.return_value.bind.side_effect = exc
+
+            with pytest.raises(PermissionError, match="Cannot bind web viewer"):
+                pub._find_available_port(19014)
+
+    def test_port_probe_all_in_use_reports_in_use(self, tmp_path):
+        pub = WebPublisher(str(tmp_path), port=19020)
+        exc = OSError(errno.EADDRINUSE, "Address already in use")
+
+        with patch("roundtable.web_publisher.socket.socket") as mock_sock:
+            mock_sock.return_value.__enter__ = lambda s: s
+            mock_sock.return_value.__exit__ = MagicMock(return_value=False)
+            mock_sock.return_value.bind.side_effect = exc
+
+            with pytest.raises(RuntimeError, match="already in use"):
+                pub._find_available_port(19020)
+
 
 # ---------------------------------------------------------------------------
 # Properties
@@ -387,8 +412,15 @@ class TestProperties:
         with patch.object(pub, "_start_pm2"):
             url = pub.start("rt_props")
         assert pub.url == url
+        assert url.startswith("http://127.0.0.1:")
         assert pub.port is not None
         assert pub.token is not None
+
+    def test_url_uses_custom_host_when_bind_host_is_specific(self, tmp_path):
+        pub = WebPublisher(str(tmp_path), port=19014, host="localhost")
+        with patch.object(pub, "_start_pm2"):
+            url = pub.start("rt_props_host")
+        assert url.startswith("http://localhost:")
 
 
 # ---------------------------------------------------------------------------
@@ -486,7 +518,8 @@ class TestRunDemoWebIntegration:
         data = json.loads(json_file.read_text())
         assert data["topic"] == "选择后端框架：FastAPI vs Go Gin vs Node Express"
         assert data["status"] == "concluded"
-        assert len(data["speeches"]) == 6  # 2 rounds x 3 participants
-        assert data["speeches"][0]["round"] == 1
+        assert len(data["speeches"]) == 7  # opening + 2 rounds x 3 participants
+        assert data["speeches"][0]["round"] == 0
+        assert data["speeches"][1]["round"] == 1
         assert data["speeches"][-1]["round"] == 2
         assert "MVP" in data["conclusion"]

@@ -2,10 +2,12 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>圆桌讨论 — Roundtable</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
   <link rel="stylesheet" href="/theme.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1010,6 +1012,34 @@
       return 'default';
     }
 
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      })[ch]);
+    }
+
+    function renderMarkdown(value) {
+      const html = marked.parse(String(value ?? ''));
+      if (window.DOMPurify) {
+        return DOMPurify.sanitize(html);
+      }
+      const template = document.createElement('template');
+      template.innerHTML = html;
+      template.content.querySelectorAll('script, iframe, object, embed, link, meta').forEach(el => el.remove());
+      template.content.querySelectorAll('*').forEach(el => {
+        for (const attr of [...el.attributes]) {
+          if (/^on/i.test(attr.name) || /javascript:/i.test(attr.value)) {
+            el.removeAttribute(attr.name);
+          }
+        }
+      });
+      return template.innerHTML;
+    }
+
     window.toggleRound = function(roundNum) {
       const section = document.getElementById(`round-section-${roundNum}`);
       if (section) {
@@ -1055,9 +1085,9 @@
     function renderParticipants() {
       $participantsBar.innerHTML = state.participants.map(p => `
         <div class="flex items-center gap-2 rounded-full px-3 py-1.5 text-sm whitespace-nowrap" style="background:var(--rt-bg-card);border:1px solid var(--rt-border)">
-          <div class="avatar" style="width:24px;height:24px;font-size:11px">${(p.display_name || p.profile || '?')[0]}</div>
-          <span class="font-medium" style="color:var(--rt-text-primary)">${p.display_name || p.profile}</span>
-          ${p.role ? `<span class="text-xs" style="color:var(--rt-text-muted)">${p.role}</span>` : ''}
+          <div class="avatar" style="width:24px;height:24px;font-size:11px">${escapeHtml((p.display_name || p.profile || '?')[0])}</div>
+          <span class="font-medium" style="color:var(--rt-text-primary)">${escapeHtml(p.display_name || p.profile)}</span>
+          ${p.role ? `<span class="text-xs" style="color:var(--rt-text-muted)">${escapeHtml(p.role)}</span>` : ''}
         </div>
       `).join('');
     }
@@ -1081,7 +1111,9 @@
       div.className = `speech-card role-${roleType}${isNew ? ' new highlight' : ''}`;
       div.id = `speech-${speech.id}`;
 
-      const initial = (speech.display_name || speech.participant || '?')[0];
+      const initial = escapeHtml((speech.display_name || speech.participant || '?')[0]);
+      const speakerName = escapeHtml(speech.display_name || speech.participant);
+      const safeRoleName = escapeHtml(roleName);
       const round = speech.round > 0 ? `<span class="round-badge" style="background: var(--rt-role-${roleType}-bg); color: var(--rt-role-${roleType})">R${speech.round}</span>` : '';
 
       div.innerHTML = `
@@ -1089,12 +1121,12 @@
           <div class="avatar" style="background: var(--rt-role-${roleType}); color: var(--rt-text-inverse); box-shadow: 0 0 8px var(--rt-role-${roleType}-bg)">${initial}</div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-2">
-              <span class="font-semibold text-sm" style="color:var(--rt-text-primary)">${speech.display_name || speech.participant}</span>
-              ${roleName ? `<span class="text-xs px-2 py-0.5 rounded-full font-medium" style="background: var(--rt-role-${roleType}-bg); color: var(--rt-role-${roleType})">${roleName}</span>` : ''}
+              <span class="font-semibold text-sm" style="color:var(--rt-text-primary)">${speakerName}</span>
+              ${roleName ? `<span class="text-xs px-2 py-0.5 rounded-full font-medium" style="background: var(--rt-role-${roleType}-bg); color: var(--rt-role-${roleType})">${safeRoleName}</span>` : ''}
               ${round}
               <span class="text-xs ml-auto" style="color:var(--rt-text-muted)">${formatTime(speech.created_at)}</span>
             </div>
-            <div class="text-sm leading-relaxed markdown-content" style="color:var(--rt-text-secondary)">${marked.parse(speech.content)}</div>
+            <div class="text-sm leading-relaxed markdown-content" style="color:var(--rt-text-secondary)">${renderMarkdown(speech.content)}</div>
           </div>
         </div>
       `;
@@ -1120,7 +1152,7 @@
     }
 
     function renderConclusion(content) {
-      $conclusionContent.innerHTML = `<div class="markdown-content">${marked.parse(content)}</div>`;
+      $conclusionContent.innerHTML = `<div class="markdown-content">${renderMarkdown(content)}</div>`;
       $conclusionCard.classList.remove('hidden');
       setTimeout(() => {
         $conclusionCard.scrollIntoView({ behavior: 'smooth', block: 'center' });

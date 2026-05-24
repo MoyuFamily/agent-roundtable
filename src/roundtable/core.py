@@ -95,12 +95,10 @@ class RoundtableCore:
             # Optionally start web viewer
             web_url = None
             if web:
+                from roundtable.web_publisher import WebPublisher
+
+                output_dir = os.path.join("/tmp", "roundtable_web", disc.id)
                 try:
-                    import os as _os
-
-                    from roundtable.web_publisher import WebPublisher
-
-                    output_dir = _os.path.join("/tmp", "roundtable_web", disc.id)
                     publisher = WebPublisher(output_dir, port=web_port)
                     web_url = publisher.start(
                         disc.id,
@@ -114,10 +112,11 @@ class RoundtableCore:
                             for p in participants
                         ],
                     )
-                    self._publishers[disc.id] = publisher
-                    logger.info("Web viewer started for discussion %s: %s", disc.id, web_url)
-                except Exception:
+                except Exception as exc:
                     logger.exception("Failed to start web viewer for discussion %s", disc.id)
+                    raise RuntimeError(f"Failed to start web viewer: {exc}") from exc
+                self._publishers[disc.id] = publisher
+                logger.info("Web viewer started for discussion %s: %s", disc.id, web_url)
 
             return {
                 "ok": True,
@@ -172,6 +171,15 @@ class RoundtableCore:
                     f"Participant '{participant}' is not an active member of this discussion. "
                     f"Active: {', '.join(active_names)}"
                 )
+            if is_coordinator and disc.current_round == 0:
+                existing_opening = conn.execute(
+                    """SELECT id FROM speeches
+                       WHERE discussion_id = ? AND round = 0 AND participant = 'coordinator'
+                       LIMIT 1""",
+                    (discussion_id,),
+                ).fetchone()
+                if existing_opening:
+                    raise InvalidParticipantError("Coordinator opening statement already exists for this discussion")
 
             result = self.db.add_speech(
                 conn,
@@ -259,7 +267,23 @@ class RoundtableCore:
 
             # Discussion auto-concluded notification
             if discussion_complete:
-                self._notify_concluded(conn, disc, notifier)
+                disc_after = self.db.get_discussion(conn, discussion_id)
+                if disc_after:
+                    self._notify_concluded(conn, disc_after, notifier)
+                    if disc_after.output_path:
+                        self._write_markdown_output(
+                            disc_after.output_path,
+                            self._build_output_markdown(conn, disc_after),
+                        )
+
+                    publisher = self._publishers.get(discussion_id)
+                    if publisher:
+                        try:
+                            publisher.conclude(disc_after.conclusion or "")
+                        except Exception:
+                            logger.exception("Web publisher conclude failed for auto-concluded %s", discussion_id)
+                    else:
+                        self._conclude_web_discussion(discussion_id, disc_after.conclusion or "")
 
             return {
                 "ok": True,
@@ -502,6 +526,10 @@ class RoundtableCore:
                 "structured_summary": structured_summary,
             }
 
+            if disc.output_path:
+                output_result = self._write_markdown_output(disc.output_path, structured_summary)
+                result.update(output_result)
+
             if not compact:
                 # Full data — includes all raw speech content
                 result["rounds"] = rounds_dict
@@ -528,6 +556,39 @@ class RoundtableCore:
             if not disc:
                 raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
             if disc.status != "active":
+                if disc.status == "concluded" and not force and conclusion is not None:
+                    conn.execute(
+                        "UPDATE discussions SET conclusion = ? WHERE id = ?",
+                        (conclusion, discussion_id),
+                    )
+                    disc_after = self.db.get_discussion(conn, discussion_id)
+                    conclusion_output_result: dict[str, Any] = {}
+                    if disc_after and disc_after.output_path:
+                        conclusion_output_result = self._write_markdown_output(
+                            disc_after.output_path,
+                            self._build_output_markdown(conn, disc_after, conclusion_override=conclusion),
+                        )
+
+                    publisher = self._publishers.get(discussion_id)
+                    web_retained = False
+                    if publisher:
+                        try:
+                            publisher.conclude(conclusion)
+                            web_retained = True
+                        except Exception:
+                            logger.exception("Web publisher conclude update failed for %s", discussion_id)
+                    else:
+                        self._conclude_web_discussion(discussion_id, conclusion)
+
+                    result = {
+                        "ok": True,
+                        "discussion_id": discussion_id,
+                        "action": "concluded",
+                        "success": True,
+                        "web_retained": web_retained,
+                    }
+                    result.update(conclusion_output_result)
+                    return result
                 raise DiscussionNotActiveError(f"Discussion {discussion_id} is already {disc.status}")
 
             if force:
@@ -545,26 +606,42 @@ class RoundtableCore:
                     notifier = self._make_notifier(disc.notifications)
                     self._notify_concluded(conn, disc_after, notifier)
 
-            # Web publisher hook — conclude + stop
-            publisher = self._publishers.pop(discussion_id, None)
+            output_result: dict[str, Any] = {}
+            if action == "concluded" and disc_after and disc_after.output_path:
+                output_result = self._write_markdown_output(
+                    disc_after.output_path,
+                    self._build_output_markdown(conn, disc_after),
+                )
+
+            # Web publisher hook. A concluded viewer remains online for post-meeting
+            # review; force-cancel still stops it immediately.
+            publisher = self._publishers.get(discussion_id)
+            web_retained = False
             if publisher:
                 try:
                     if action == "concluded" and disc_after:
                         publisher.conclude(disc_after.conclusion or "")
-                    publisher.stop()
-                    logger.info(f"Web publisher stopped for {discussion_id}")
+                        web_retained = True
+                        logger.info("Web publisher retained for concluded discussion %s", discussion_id)
+                    else:
+                        self._publishers.pop(discussion_id, None)
+                        publisher.stop()
+                        logger.info("Web publisher stopped for %s", discussion_id)
                 except Exception:
                     logger.exception(f"Web publisher cleanup failed for {discussion_id}")
             elif action == "concluded" and disc_after:
                 # Cross-process: update discussion.json directly
                 self._conclude_web_discussion(discussion_id, disc_after.conclusion or "")
 
-            return {
+            result = {
                 "ok": True,
                 "discussion_id": discussion_id,
                 "action": action,
                 "success": ok,
+                "web_retained": web_retained,
             }
+            result.update(output_result)
+            return result
         finally:
             conn.close()
 
@@ -876,8 +953,11 @@ class RoundtableCore:
                     for p in participants
                 ],
             )
+            self._publishers[disc_id] = publisher
             if verbose:
                 print(f"\n  🌐 Web viewer: {url}\n")
+
+        self.speak(disc_id, "coordinator", f"开场：围绕「{topic}」展开圆桌讨论。")
 
         # 2. Run rounds
         for round_num in range(1, max_rounds + 1):
@@ -892,17 +972,6 @@ class RoundtableCore:
                     f"Round {round_num} 发言：{name} 对本议题的看法（demo 默认内容）。",
                 )
                 self.speak(disc_id, name, content)
-
-                # Publish to web viewer
-                if publisher:
-                    publisher.on_speech(
-                        {
-                            "participant": name,
-                            "display_name": p_map.get(name, {}).get("display_name", name),
-                            "content": content,
-                            "round": round_num,
-                        }
-                    )
 
                 if verbose:
                     p_info = p_map.get(name, {})
@@ -940,10 +1009,6 @@ class RoundtableCore:
             f"两周内交付 MVP。"
         )
         self.end_discussion(disc_id, conclusion=conclusion)
-
-        # 3b. Conclude web viewer
-        if publisher:
-            publisher.conclude(conclusion)
 
         # 4. Get final summary
         summary = self.summarize(disc_id, compact=True)
@@ -1141,6 +1206,65 @@ class RoundtableCore:
     def _make_notifier(self, config: dict[str, Any] | None) -> Notifier:
         """Create a Notifier from a discussion's notification config."""
         return Notifier(config, send_fn=self._send_fn)
+
+    def _write_markdown_output(self, output_path: str, content: str) -> dict[str, Any]:
+        """Write generated Markdown to the configured discussion output path."""
+        try:
+            path = Path(output_path).expanduser()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content.rstrip() + "\n", encoding="utf-8")
+            return {"output_written": True, "output_path": str(path)}
+        except Exception as exc:
+            logger.exception("Failed to write roundtable output_path: %s", output_path)
+            return {"output_written": False, "output_path": output_path, "output_error": str(exc)}
+
+    def _build_summary_markdown(self, conn: sqlite3.Connection, disc: Discussion) -> str:
+        """Build the same structured Markdown used by summarize()."""
+        participants = self.db.get_participants(conn, disc.id)
+        speeches = self.db.get_speeches(conn, disc.id)
+        findings = self.db.get_findings(conn, disc.id)
+        conv_history = self.db.get_convergence_history(conn, disc.id)
+
+        p_map = {
+            p.participant: {
+                "role": p.role,
+                "display_name": p.display_name,
+                "perspective": p.perspective,
+            }
+            for p in participants
+        }
+        consensus_pts = [f.content for f in findings if f.type == "consensus"]
+        disagreement_pts = [f.content for f in findings if f.type == "disagreement"]
+        new_points = [f.content for f in findings if f.type == "new_point"]
+        final_score = disc.convergence_score
+        if not final_score and conv_history:
+            final_score = conv_history[-1].score
+
+        return self._build_structured_summary(
+            disc,
+            participants,
+            speeches,
+            p_map,
+            consensus_pts,
+            disagreement_pts,
+            new_points,
+            final_score,
+            conv_history,
+        )
+
+    def _build_output_markdown(
+        self,
+        conn: sqlite3.Connection,
+        disc: Discussion,
+        *,
+        conclusion_override: str | None = None,
+    ) -> str:
+        """Build the Markdown written to output_path."""
+        conclusion = conclusion_override if conclusion_override is not None else disc.conclusion
+        summary = self._build_summary_markdown(conn, disc)
+        if not conclusion:
+            return summary
+        return f"{summary}\n\n## 最终结论\n\n{conclusion.strip()}"
 
     def _notify_concluded(self, conn: sqlite3.Connection, disc: Discussion, notifier: Notifier) -> None:
         """Fire the concluded notification with summary data."""

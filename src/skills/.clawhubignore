@@ -1,0 +1,27 @@
+# ClawHub package hygiene
+
+# Python/build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Local/runtime state
+.env
+.env.*
+*.db
+*.sqlite
+.DS_Store
+node_modules/
+.venv/
+
+# Repository-only materials
+.github/
+docs/internal/
+docs/product/

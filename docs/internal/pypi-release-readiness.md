@@ -92,7 +92,8 @@
 - [x] 文档中没有真实 token、密码、账号密钥或私有 webhook。
 - [x] README 没有引导用户安装错误包名 `roundtable`。
 - [x] dist 产物不包含无关内部文件、缓存、`.env` 或测试临时数据（已检查 wheel/sdist 中无 `docs/internal`、`docs/product`、`.env`、`__pycache__`、`node_modules`）。
-- [ ] 发布版本号、CHANGELOG、LICENSE、SECURITY 信息已与首发版本一致。
+- [x] 发布版本号、CHANGELOG、LICENSE、SECURITY 信息已与首发版本一致。
+- [x] Hermes Skill Hub / OpenClaw Skill Hub 发布材料已准备，详见 `docs/internal/skill-hub-release-readiness.md`。
 
 ## 5. 发布当天 Boss 需要完成的账号/token 步骤
 

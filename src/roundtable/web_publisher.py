@@ -226,9 +226,7 @@ class WebPublisher:
                     if exc.errno == errno.EADDRINUSE:
                         continue
                     if exc.errno in (errno.EACCES, errno.EPERM):
-                        raise PermissionError(
-                            f"Cannot bind web viewer to port {port}: {exc.strerror or exc}"
-                        ) from exc
+                        raise PermissionError(f"Cannot bind web viewer to port {port}: {exc.strerror or exc}") from exc
                     raise RuntimeError(f"Cannot probe web viewer port {port}: {exc}") from exc
         raise RuntimeError(
             f"No available port in range {preferred}-{preferred + 9}: all probed ports are already in use"

@@ -5,7 +5,7 @@
 <h1 align="center">Roundtable</h1>
 
 <p align="center">
-  <strong>A multi-agent roundtable discussion engine that lets AI agents debate, track consensus and disagreements, and generate structured conclusions.</strong>
+  <strong>agent-roundtable is a multi-agent roundtable discussion engine for AI agent teams: let multiple agents speak in order, track consensus and disagreements, and generate structured meeting notes and conclusions.</strong>
 </p>
 
 <p align="center">
@@ -31,13 +31,13 @@ When you let multiple AI agents discuss a complex problem, the hard part is not 
 
 | What you care about | Roundtable's answer |
 |---|---|
-| How do multiple agents collaborate? | Use a roundtable meeting model to manage participants, rounds, and speaking order |
+| How do multiple agents collaborate? | Use a roundtable meeting model to manage participants, rounds, and ordered speaking |
 | Is the discussion converging? | Automatically track convergence score, consensus points, and disagreement points |
-| How are conclusions captured? | Generate structured summaries for PRDs, architecture reviews, and decision records |
+| How are conclusions captured? | Generate structured summaries for meeting notes, PRDs, architecture reviews, and decision records |
 | Can it integrate with existing agent systems? | Framework-agnostic; integrate via adapters with Hermes Agent or any agent framework |
 | Is it heavy to run? | The core library has zero external dependencies and uses only Python stdlib + SQLite |
 
-**In one sentence: You pick the participants and define the topic; Roundtable manages the discussion, tracks consensus and disagreements, and captures the conclusion.**
+**In one sentence: `agent-roundtable` is a Python package embeddable in any AI agent system; you pick the participants and define the topic, and it manages multi-agent roundtable discussions, ordered speaking, consensus/disagreement tracking, and structured meeting notes.**
 
 ## 🧩 Use Cases
 
@@ -51,7 +51,13 @@ When you let multiple AI agents discuss a complex problem, the hard part is not 
 
 ### Installation
 
-This repository has not been published to PyPI yet. Install from source for now:
+The official PyPI package name is planned as `agent-roundtable`. After release, install it with:
+
+```bash
+pip install agent-roundtable
+```
+
+Before the PyPI release, use source installation for local validation:
 
 ```bash
 git clone https://github.com/ParsifalC/roundtable.git
@@ -59,7 +65,7 @@ cd roundtable
 pip install -e .
 ```
 
-> Note: The existing `roundtable` / `roundtable-ai` packages on PyPI are not this project. Do not install this project with `pip install roundtable` yet.
+> Note: The existing `roundtable` / `roundtable-ai` packages on PyPI are not this project. Do not install this project with `pip install roundtable`.
 
 ### Basic Usage
 
@@ -136,7 +142,7 @@ result = rt.init(
 |---------|-------------|
 | 🧑‍⚖️ **Roundtable Discussion Model** | Manage multi-agent discussions with topic, participants, and rounds |
 | 📊 **Convergence Tracking** | Auto-calculate consensus score per round to quantify discussion progress |
-| 🧾 **Structured Summaries** | Output consensus, disagreements, recommendations, and final conclusions |
+| 🧾 **Structured Summaries** | Output consensus, disagreements, recommendations, and conclusions for meeting notes and decision records |
 | 🔌 **Framework Agnostic** | Run standalone or integrate with any agent framework via adapters |
 | 🔔 **Real-time Notifications** | Push discussion events to Feishu, Slack, or any messaging platform |
 | 🛡️ **Error-Safe** | Generic adapter returns dict for all methods and never throws exceptions |
@@ -172,7 +178,7 @@ src/roundtable/
 
 ## 🛣️ Roadmap
 
-- Confirm and publish the official PyPI package name
+- Publish PyPI package name: `agent-roundtable` (install with `pip install agent-roundtable`)
 - Add CLI examples and end-to-end demos
 - Improve structured summary templates
 - Add adapters for more agent frameworks

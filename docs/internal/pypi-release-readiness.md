@@ -76,22 +76,22 @@
 - [x] README Quick Start 覆盖创建讨论、顺序发言、查看状态、总结、结束讨论。
 - [x] 本文档记录目标用户、卖点、发布前/发布当天/发布后 checklist。
 - [x] 设计侧确认 PyPI/GitHub Markdown 展示层级和可读性。
-- [ ] 工程侧确认 PyPI 元数据是否需要补充 authors、keywords、classifiers、project.urls。
+- [x] 工程侧确认 PyPI 元数据已补充 authors、keywords、classifiers、project.urls。
 
 ### 4.2 工程与构建
 
 - [x] `pyproject.toml` 中 `[project].name` 使用 `agent-roundtable`。
-- [ ] `python -m build` 能生成 sdist 和 wheel。
-- [ ] `twine check dist/*` 通过。
-- [ ] 临时 venv 能从本地 wheel 安装，并验证 `import roundtable`。
-- [ ] 发布 workflow 或手动发布命令已准备好，但不会自动发布。
-- [ ] 未创建 release tag，未上传 PyPI/TestPyPI。
+- [x] `python -m build` 能生成 sdist 和 wheel。
+- [x] `twine check dist/*` 通过。
+- [x] 临时 venv 能从本地 wheel 安装，并验证 `import roundtable`。
+- [x] 已准备手动触发的 GitHub Actions 发布 workflow：`.github/workflows/publish.yml`，默认发布到 TestPyPI，需要人工触发，不会自动发布。
+- [x] 未创建 release tag，未上传 PyPI/TestPyPI。
 
 ### 4.3 风险检查
 
 - [x] 文档中没有真实 token、密码、账号密钥或私有 webhook。
 - [x] README 没有引导用户安装错误包名 `roundtable`。
-- [ ] dist 产物不包含无关内部文件、缓存、`.env` 或测试临时数据。
+- [x] dist 产物不包含无关内部文件、缓存、`.env` 或测试临时数据（已检查 wheel/sdist 中无 `docs/internal`、`docs/product`、`.env`、`__pycache__`、`node_modules`）。
 - [ ] 发布版本号、CHANGELOG、LICENSE、SECURITY 信息已与首发版本一致。
 
 ## 5. 发布当天 Boss 需要完成的账号/token 步骤
@@ -112,7 +112,25 @@
 3. token 只复制一次，不要写入仓库、文档、聊天记录或 issue。
 4. 本地发布时，使用环境变量或 `~/.pypirc` 的安全配置；CI 发布时，写入 GitHub Actions Secrets。
 
-### 5.3 本地发布命令建议
+### 5.3 GitHub Actions 发布准备
+
+推荐优先使用 PyPI Trusted Publishing，避免长期保存 token：
+
+1. 在 GitHub 仓库 Settings → Environments 创建 `testpypi` 和 `pypi` 两个 environment。
+2. 在 TestPyPI/PyPI 项目 Publishing 页面配置 Trusted Publisher：
+   - repository：`ParsifalC/roundtable`
+   - workflow：`publish.yml`
+   - environment：分别填 `testpypi` 或 `pypi`
+3. 手动触发 GitHub Actions `Publish Python Package` workflow，先选择 `testpypi` 做预演。
+4. TestPyPI 安装验证通过后，再手动触发同一 workflow 并选择 `pypi`。
+
+如果首发前 PyPI 项目尚不存在、Trusted Publishing 无法预先绑定，可临时使用 GitHub Actions Secret：
+
+1. 创建 `TEST_PYPI_API_TOKEN` / `PYPI_API_TOKEN` secret。
+2. 取消 `.github/workflows/publish.yml` 中对应 `password:` 行注释。
+3. 首发成功后建议切换回 Trusted Publishing，并删除临时 secret。
+
+### 5.4 本地发布命令建议
 
 发布当天由技术负责人在确认构建产物后执行，示例只展示命令形态：
 

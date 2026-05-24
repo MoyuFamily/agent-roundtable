@@ -5,7 +5,7 @@
 <h1 align="center">Roundtable</h1>
 
 <p align="center">
-  <strong>多智能体圆桌讨论引擎：让 AI Agent 围绕一个问题多轮发言、追踪共识分歧，并自动生成结构化结论。</strong>
+  <strong>agent-roundtable 是面向 AI Agent 团队的多智能体圆桌讨论引擎：让多个 Agent 围绕同一问题顺序发言、追踪共识分歧，并自动生成结构化会议记录与结论。</strong>
 </p>
 
 <p align="center">
@@ -31,13 +31,13 @@
 
 | 你关心的 | Roundtable 的答案 |
 |---|---|
-| 多 Agent 怎么协作？ | 用圆桌会议模型管理参与者、轮次和发言顺序 |
+| 多 Agent 怎么协作？ | 用圆桌会议模型管理参与者、轮次和顺序发言 |
 | 讨论有没有收敛？ | 自动追踪 convergence score、共识点和分歧点 |
-| 结论怎么沉淀？ | 自动生成结构化 summary，可用于 PRD、架构评审、决策记录 |
+| 结论怎么沉淀？ | 自动生成结构化 summary，可用于会议记录、PRD、架构评审、决策记录 |
 | 能接入现有 Agent 系统吗？ | 框架无关，通过 adapter 接入 Hermes Agent 或任意 Agent 框架 |
 | 运行成本高吗？ | 核心库零外部依赖，只使用 Python 标准库和 SQLite |
 
-**一句话：你只管选人、定话题，Roundtable 帮你管理讨论过程、追踪分歧共识，并沉淀结论。**
+**一句话：`agent-roundtable` 是一个可嵌入任意 AI Agent 系统的 Python 包；你只管选人、定话题，它负责管理多 Agent 圆桌讨论、顺序发言、分歧共识追踪，并沉淀会议记录与结论。**
 
 ## 🧩 适合场景
 
@@ -51,7 +51,13 @@
 
 ### 安装
 
-当前仓库尚未发布到 PyPI。请先从源码安装：
+PyPI 发布后，请使用正式包名安装：
+
+```bash
+pip install agent-roundtable
+```
+
+发布前或需要验证当前分支时，可从源码安装：
 
 ```bash
 git clone https://github.com/ParsifalC/roundtable.git
@@ -59,7 +65,7 @@ cd roundtable
 pip install -e .
 ```
 
-> 说明：PyPI 上的 `roundtable` / `roundtable-ai` 目前不是本项目，请勿直接使用 `pip install roundtable` 安装。
+> 说明：本项目的 PyPI 包名是 `agent-roundtable`。PyPI 上的 `roundtable` / `roundtable-ai` 不是本项目，请勿使用 `pip install roundtable` 或 `pip install roundtable-ai` 安装本项目。
 
 ### 基本用法
 
@@ -136,7 +142,7 @@ result = rt.init(
 |------|------|
 | 🧑‍⚖️ **圆桌讨论模型** | 用 topic、participants、rounds 管理多 Agent 讨论流程 |
 | 📊 **收敛追踪** | 自动计算每轮共识度（convergence score），量化讨论进展 |
-| 🧾 **结构化总结** | 输出共识、分歧、决策建议和结论，适合沉淀文档 |
+| 🧾 **结构化总结** | 输出共识、分歧、决策建议和结论，适合沉淀会议记录与决策文档 |
 | 🔌 **框架无关** | 独立运行，或通过 adapter 接入任何 Agent 框架 |
 | 🔔 **实时通知** | 讨论事件推送到飞书、Slack 或任意消息平台 |
 | 🛡️ **错误安全** | Generic adapter 所有方法返回 dict，永不抛异常 |
@@ -172,7 +178,7 @@ src/roundtable/
 
 ## 🛣️ 后续计划
 
-- 明确并发布正式 PyPI 包名
+- 发布 `agent-roundtable` 到 PyPI
 - 补充 CLI 示例和端到端 Demo
 - 增强结构化总结模板
 - 补充更多 Agent 框架 adapter

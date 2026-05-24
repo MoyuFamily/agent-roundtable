@@ -61,7 +61,7 @@ Roundtable skill 让 Agent 团队围绕一个 topic 进行结构化、多轮圆�
 - [x] 本机存在 Hermes CLI：`hermes skills publish --help` 可用。
 - [x] 本机存在 ClawHub CLI：`clawhub publish --help` 可用。
 - [x] 已确认 ClawHub 发布命令形态：`clawhub publish src/skills --slug roundtable --name "Roundtable" --version 1.0.0`。
-- [ ] 尚未确认 ClawHub 登录状态；发布当天执行 `clawhub whoami`。
+- [x] 已确认 ClawHub 登录状态：当前本机未登录，`clawhub whoami` 返回 `Error: Not logged in. Run: clawhub login`；真实发布前必须先登录目标账号。
 - [ ] 尚未执行真实发布；需 Boss 明确确认目标账号/owner 后进行。
 
 ## 4. 发布命令建议

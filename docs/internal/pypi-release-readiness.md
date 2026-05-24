@@ -75,7 +75,7 @@
 - [x] README 说明 PyPI 上 `roundtable` / `roundtable-ai` 不是本项目。
 - [x] README Quick Start 覆盖创建讨论、顺序发言、查看状态、总结、结束讨论。
 - [x] 本文档记录目标用户、卖点、发布前/发布当天/发布后 checklist。
-- [ ] 设计侧确认 PyPI/GitHub Markdown 展示层级和可读性。
+- [x] 设计侧确认 PyPI/GitHub Markdown 展示层级和可读性。
 - [ ] 工程侧确认 PyPI 元数据是否需要补充 authors、keywords、classifiers、project.urls。
 
 ### 4.2 工程与构建

@@ -25,19 +25,30 @@
 
 ---
 
-## ⚡ 30 秒理解 Roundtable
+## ⚡ 10 秒速览
 
-当你让多个 AI Agent 讨论复杂问题时，真正麻烦的不是“让它们说话”，而是：
+```bash
+pip install agent-roundtable
+```
 
-| 你关心的 | Roundtable 的答案 |
+`agent-roundtable` 是一个可嵌入任意 AI Agent 系统的 Python 包。你只管选人、定话题，它负责管理多 Agent 圆桌讨论、顺序发言、共识/分歧追踪，并沉淀结构化会议记录与结论。
+
+| 你想快速确认的事 | Roundtable 的答案 |
 |---|---|
-| 多 Agent 怎么协作？ | 用圆桌会议模型管理参与者、轮次和顺序发言 |
-| 讨论有没有收敛？ | 自动追踪 convergence score、共识点和分歧点 |
-| 结论怎么沉淀？ | 自动生成结构化 summary，可用于会议记录、PRD、架构评审、决策记录 |
-| 能接入现有 Agent 系统吗？ | 框架无关，通过 adapter 接入 Hermes Agent 或任意 Agent 框架 |
-| 运行成本高吗？ | 核心库零外部依赖，只使用 Python 标准库和 SQLite |
+| 它解决什么问题？ | 让多个 Agent 像开会一样围绕同一议题发言、记录和收敛 |
+| 包名和导入名是什么？ | 安装 `agent-roundtable`，代码里 `import roundtable` |
+| 能不能独立使用？ | 可以，核心库只依赖 Python 标准库和 SQLite |
+| 能不能接 Agent 框架？ | 可以，通过 adapter 接入 Hermes Agent 或任意 Agent 系统 |
+| 输出是什么？ | 讨论状态、convergence score、共识/分歧、结构化 summary 与结论 |
 
-**一句话：`agent-roundtable` 是一个可嵌入任意 AI Agent 系统的 Python 包；你只管选人、定话题，它负责管理多 Agent 圆桌讨论、顺序发言、分歧共识追踪，并沉淀会议记录与结论。**
+## 🧭 什么时候用它？
+
+当你已经有多个 Agent / 角色，但缺少一个“会议协议层”时，就适合引入 Roundtable：
+
+1. **创建会议**：定义 topic、participants 和 max_rounds。
+2. **顺序发言**：记录每个 Agent 在每一轮的观点。
+3. **观察收敛**：查看状态、共识度、共识点和分歧点。
+4. **沉淀结论**：生成 summary，结束讨论并留下可追溯决策。
 
 ## 🧩 适合场景
 

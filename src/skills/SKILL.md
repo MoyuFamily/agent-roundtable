@@ -7,6 +7,11 @@ metadata:
   hermes:
     tags: [discussion, multi-agent, collaboration, debate, roundtable]
     related_skills: [kanban-worker, kanban-orchestrator]
+  openclaw:
+    requires:
+      env: []
+      bins: []
+    primaryEnv: null
 ---
 
 # Roundtable Discussion Skill

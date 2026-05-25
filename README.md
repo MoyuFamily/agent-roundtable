@@ -5,15 +5,14 @@
 <h1 align="center">Roundtable</h1>
 
 <p align="center">
-  <strong>让多个 AI 坐下来开会讨论，自动追踪共识与分歧，得出结论。</strong>
+  <strong>agent-roundtable 是面向 AI Agent 团队的多智能体圆桌讨论引擎：让多个 Agent 围绕同一问题顺序发言、追踪共识分歧，并自动生成结构化会议记录与结论。</strong>
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/roundtable-ai/"><img src="https://img.shields.io/pypi/v/roundtable-ai.svg" alt="PyPI version"></a>
   <a href="#development"><img src="https://img.shields.io/badge/tests-passing-brightgreen.svg" alt="Tests"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
-  <a href="#installation"><img src="https://img.shields.io/badge/dependencies-zero-brightgreen.svg" alt="Zero Dependencies"></a>
+  <a href="#-核心特性"><img src="https://img.shields.io/badge/core-zero_dependencies-brightgreen.svg" alt="Zero Dependencies"></a>
 </p>
 
 <p align="center">
@@ -26,53 +25,50 @@
 
 ---
 
-## ⚡ 3 行代码，开个会
-
-```python
-from roundtable import RoundtableCore
-
-core = RoundtableCore()
-result = core.create_discussion(
-    topic="Should we use PostgreSQL or MySQL?",
-    participants=[
-        {"profile": "alice", "role": "Backend Engineer"},
-        {"profile": "bob", "role": "DBA"},
-    ],
-    max_rounds=3,
-)
-# 开始讨论
-core.speak(result["discussion_id"], "alice", "PostgreSQL has better JSON support.")
-core.speak(result["discussion_id"], "bob", "MySQL is simpler to operate at scale.")
-```
-
-## 🎯 为什么需要 Roundtable？
-
-当你让多个 AI Agent 讨论一个复杂问题时，通常需要自己管理：
-- **谁先说？谁后说？** → Roundtable 自动管理发言顺序
-- **说了什么？达成共识了吗？** → 自动追踪 convergence score
-- **讨论怎么结束？结论在哪？** → 自动生成结构化总结
-- **实时知道进展？** → 推送通知到飞书/Slack/任意平台
-
-**一句话：你只管选人、定话题，Roundtable 帮你管剩下的一切。**
-
-## ✨ 核心特性
-
-| 特性 | 说明 |
-|------|------|
-| 🪶 **零依赖** | 只用 Python 标准库（sqlite3 + dataclasses），不会给你添包 |
-| 🔌 **框架无关** | 独立运行，或通过 adapter 接入任何 Agent 框架 |
-| 📊 **收敛追踪** | 自动计算每轮共识度（convergence score），量化讨论进展 |
-| 🔔 **实时通知** | 讨论事件推送到飞书、Slack 或任意消息平台 |
-| 🛡️ **错误安全** | Generic adapter 所有方法返回 dict，永不抛异常 |
-| 🗂️ **SQLite 持久化** | 讨论记录持久存储，随时回溯 |
-
-## 📦 安装
+## ⚡ 10 秒速览
 
 ```bash
-pip install roundtable
+pip install agent-roundtable
 ```
 
-从源码安装：
+`agent-roundtable` 是一个可嵌入任意 AI Agent 系统的 Python 包。你只管选人、定话题，它负责管理多 Agent 圆桌讨论、顺序发言、共识/分歧追踪，并沉淀结构化会议记录与结论。
+
+| 你想快速确认的事 | Roundtable 的答案 |
+|---|---|
+| 它解决什么问题？ | 让多个 Agent 像开会一样围绕同一议题发言、记录和收敛 |
+| 包名和导入名是什么？ | 安装 `agent-roundtable`，代码里 `import roundtable` |
+| 能不能独立使用？ | 可以，核心库只依赖 Python 标准库和 SQLite |
+| 能不能接 Agent 框架？ | 可以，通过 adapter 接入 Hermes Agent 或任意 Agent 系统 |
+| 输出是什么？ | 讨论状态、convergence score、共识/分歧、结构化 summary 与结论 |
+
+## 🧭 什么时候用它？
+
+当你已经有多个 Agent / 角色，但缺少一个“会议协议层”时，就适合引入 Roundtable：
+
+1. **创建会议**：定义 topic、participants 和 max_rounds。
+2. **顺序发言**：记录每个 Agent 在每一轮的观点。
+3. **观察收敛**：查看状态、共识度、共识点和分歧点。
+4. **沉淀结论**：生成 summary，结束讨论并留下可追溯决策。
+
+## 🧩 适合场景
+
+- **技术方案评审**：让架构师、后端、运维、安全角色分别发言，沉淀决策依据
+- **产品决策讨论**：让产品、设计、开发、增长角色讨论 MVP 边界和优先级
+- **代码 Review 辩论**：让不同 Agent 从质量、安全、性能角度审查实现方案
+- **需求澄清**：让多个专家角色围绕模糊需求追问、反驳和收敛
+- **多 Agent 工作流**：作为 coordinator 的讨论协议层，记录过程和结论
+
+## 🚀 快速开始
+
+### 安装
+
+PyPI 发布后，请使用正式包名安装：
+
+```bash
+pip install agent-roundtable
+```
+
+发布前或需要验证当前分支时，可从源码安装：
 
 ```bash
 git clone https://github.com/ParsifalC/roundtable.git
@@ -80,9 +76,11 @@ cd roundtable
 pip install -e .
 ```
 
-## 🚀 快速开始
+> 说明：本项目的 PyPI 包名是 `agent-roundtable`。PyPI 上的 `roundtable` / `roundtable-ai` 不是本项目，请勿使用 `pip install roundtable` 或 `pip install roundtable-ai` 安装本项目。
 
 ### 基本用法
+
+例如：让后端架构师、运维工程师、产品经理三个 Agent 讨论数据库选型，Roundtable 负责管理轮次、记录观点、追踪收敛并生成结论。
 
 ```python
 from roundtable import RoundtableCore
@@ -91,31 +89,31 @@ core = RoundtableCore()
 
 # 1. 创建讨论
 result = core.create_discussion(
-    topic="选择前端框架：React vs Vue vs Svelte",
+    topic="选择数据库：PostgreSQL vs MySQL vs TiDB",
     participants=[
-        {"profile": "alice", "role": "全栈工程师", "display_name": "Alice"},
-        {"profile": "bob", "role": "前端 Lead", "display_name": "Bob"},
-        {"profile": "carol", "role": "产品经理", "display_name": "Carol"},
+        {"profile": "backend_architect", "role": "后端架构师", "display_name": "Backend Architect"},
+        {"profile": "ops_engineer", "role": "运维工程师", "display_name": "Ops Engineer"},
+        {"profile": "product_manager", "role": "产品经理", "display_name": "Product Manager"},
     ],
     max_rounds=3,
 )
 disc_id = result["discussion_id"]
 
 # 2. 参与者发言
-core.speak(disc_id, "alice", "Svelte 编译时优化性能最好...")
-core.speak(disc_id, "bob", "React 生态最成熟，招人容易...")
-core.speak(disc_id, "carol", "从产品迭代速度看，Vue 的学习曲线最低...")
+core.speak(disc_id, "backend_architect", "PostgreSQL 的 JSON 和事务能力更适合复杂业务建模。")
+core.speak(disc_id, "ops_engineer", "MySQL 运维经验和工具链更成熟，团队上手成本低。")
+core.speak(disc_id, "product_manager", "从迭代速度看，我们需要优先保证未来功能扩展能力。")
 
 # 3. 查看讨论状态（含收敛度）
 status = core.status(disc_id)
 print(f"Convergence: {status['convergence_score']}")
 
-# 4. 生成总结
+# 4. 生成结构化总结
 summary = core.summarize(disc_id, compact=True)
 print(summary["structured_summary"])
 
 # 5. 结束讨论
-core.end_discussion(disc_id, conclusion="选择 Vue 3 + Vite")
+core.end_discussion(disc_id, conclusion="选择 PostgreSQL，优先支持复杂数据结构和长期扩展。")
 ```
 
 ### 错误安全模式（推荐用于生产环境）
@@ -149,9 +147,22 @@ result = rt.init(
 )
 ```
 
-## 🔌 与 Hermes Agent 集成
+## ✨ 核心特性
 
-安装 Hermes Agent 后，Roundtable 自动注册 9 个工具：
+| 特性 | 说明 |
+|------|------|
+| 🧑‍⚖️ **圆桌讨论模型** | 用 topic、participants、rounds 管理多 Agent 讨论流程 |
+| 📊 **收敛追踪** | 自动计算每轮共识度（convergence score），量化讨论进展 |
+| 🧾 **结构化总结** | 输出共识、分歧、决策建议和结论，适合沉淀会议记录与决策文档 |
+| 🔌 **框架无关** | 独立运行，或通过 adapter 接入任何 Agent 框架 |
+| 🔔 **实时通知** | 讨论事件推送到飞书、Slack 或任意消息平台 |
+| 🛡️ **错误安全** | Generic adapter 所有方法返回 dict，永不抛异常 |
+| 🗂️ **SQLite 持久化** | 讨论记录持久存储，随时回溯 |
+| 🪶 **零依赖核心** | 核心库只用 Python 标准库（sqlite3 + dataclasses） |
+
+## 🔌 为 Hermes Agent 集成而生
+
+Roundtable 可以独立作为 Python 库使用，也可以作为 Hermes Agent 的 toolset 使用，让多个 Agent 通过工具调用参与同一场结构化讨论。
 
 ```yaml
 # Hermes 配置
@@ -159,11 +170,11 @@ toolsets:
   - roundtable
 ```
 
-无需额外代码，AI Agent 即可通过工具调用来创建、参与、管理讨论。
+安装 Hermes Agent 后，Roundtable 可注册讨论相关工具，AI Agent 能够创建、参与、读取、总结和结束讨论。
 
 ## 📐 架构
 
-```
+```text
 src/roundtable/
 ├── __init__.py       # 公共 API
 ├── core.py           # 业务逻辑层
@@ -176,6 +187,14 @@ src/roundtable/
     └── generic.py    # 通用 Python API（错误安全）
 ```
 
+## 🛣️ 后续计划
+
+- 发布 `agent-roundtable` 到 PyPI
+- 补充 CLI 示例和端到端 Demo
+- 增强结构化总结模板
+- 补充更多 Agent 框架 adapter
+- 增加讨论结果导出能力
+
 ## 🤝 贡献
 
 1. Fork 本仓库
@@ -187,7 +206,7 @@ src/roundtable/
 ### 代码规范
 
 - Python 3.10+，使用 type hints
-- **零外部依赖**（stdlib only）
+- 核心库零外部依赖（stdlib only）
 - 所有异常继承 `RoundtableError`
 - 所有公共方法返回 JSON-serializable dict
 
@@ -202,4 +221,4 @@ src/roundtable/
 
 ## 📄 许可证
 
-[MIT](LICENSE)
+[Apache-2.0](LICENSE)

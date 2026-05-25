@@ -606,3 +606,4 @@ See `references/open-source-readiness.md` for the pre-release checklist (LICENSE
 ## Open-Source Release
 
 See `references/open-source-readiness-checklist.md` for the pre-release audit: missing LICENSE, Hermes-specific files to separate, build-backend fix, .gitignore, internal docs to remove, generic adapter gaps, and target package structure.
+# Test line

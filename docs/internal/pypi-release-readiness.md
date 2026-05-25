@@ -119,7 +119,7 @@
 
 1. 在 GitHub 仓库 Settings → Environments 创建 `testpypi` 和 `pypi` 两个 environment。
 2. 在 TestPyPI/PyPI 项目 Publishing 页面配置 Trusted Publisher：
-   - repository：`ParsifalC/roundtable`
+   - repository：`MoyuFamily/roundtable`
    - workflow：`publish.yml`
    - environment：分别填 `testpypi` 或 `pypi`
 3. 手动触发 GitHub Actions `Publish Python Package` workflow，先选择 `testpypi` 做预演。

@@ -18,7 +18,7 @@ metadata:
 
 ## Publishing to skill hubs
 
-When preparing Roundtable for Hermes Skill Hub or OpenClaw/ClawHub, use the release checklist in `references/skill-hub-publishing.md`. Key reminders: keep `src/skills/` self-contained and free of private team data, include both Hermes and OpenClaw metadata blocks in `SKILL.md`, check `hermes skills publish --help`, `clawhub publish --help`, and `clawhub whoami`, and gate real publishing on user confirmation of target account/repo.
+When preparing Roundtable for Hermes Skill Hub or OpenClaw/ClawHub, use the release checklist in `src/skills/references/skill-hub-publishing.md`. Key reminders: keep `src/skills/` self-contained and free of private team data, include both Hermes and OpenClaw metadata blocks in `SKILL.md`, check `hermes skills publish --help`, `clawhub publish --help`, and `clawhub whoami`, and gate real publishing on user confirmation of target account/repo.
 
 ## Overview
 
@@ -410,7 +410,7 @@ Each round is evaluated for convergence:
 
 ## Conclusion Document Format
 
-The format below works for general discussions. For **product/design/dev discussions aimed at producing a buildable specification**, use the decision-oriented format instead — see `references/web-viewer-discussion-example.md` for the full pattern (MVP清单, 技术架构, 验收标准, 风险提示, 设计交付物, 行动项).
+The format below works for general discussions. For **product/design/dev discussions aimed at producing a buildable specification**, use the decision-oriented format instead — see `src/skills/references/web-viewer-discussion-example.md` for the full pattern (MVP清单, 技术架构, 验收标准, 风险提示, 设计交付物, 行动项).
 
 ```markdown
 # Roundtable Conclusion: [Topic]
@@ -536,12 +536,12 @@ PYEOF
 
 **When to use Direct Core API**: Any time reliability matters — demos, verification meetings, production discussions. The direct API is faster (no sub-agent overhead) and 100% reliable.
 
-24. **Quick verification meetings** — When Boss says "组织一次会议看效果", use the lightweight pattern: coordinator speaks for all participants directly via `roundtable_speak` (no `delegate_task`). Runs in ~2min vs ~15-20min. Always include notifications config even for demos — the goal is to verify the full pipeline including group chat sync. See `references/quick-verification-example.md` for a working example.
+24. **Quick verification meetings** — When Boss says "组织一次会议看效果", use the lightweight pattern: coordinator speaks for all participants directly via `roundtable_speak` (no `delegate_task`). Runs in ~2min vs ~15-20min. Always include notifications config even for demos — the goal is to verify the full pipeline including group chat sync. See `src/skills/references/quick-verification-example.md` for a working example.
 25. **delegate_task sub-agents can fail to call roundtable_speak** — Observed in 2026-05-23 session (6/6 failures). Sub-agents produce speech text in their response but `tool_trace` is empty. **DO NOT assume this is permanent** — it's a bug under investigation (`t_xxxxxxxx`). Before falling back to Direct Core API, check: (1) sub-agent's `enabled_toolsets` includes `"roundtable"`, (2) the profile has roundtable tools registered, (3) try a different profile. If confirmed broken, use Direct Core API as temporary bypass and file/update the bug task.
 26. **Direct Core API is an emergency bypass, NOT the default** — Use `roundtable_init` + `delegate_task` as the primary flow. Direct Core API (`core.speak()`) exists for when the standard flow is confirmed broken AND you need the discussion to proceed now. Always file a bug task when you're forced to use it.
 27. **`web` and `web_port` params on roundtable_init** — The core supports `web=True` to auto-start a WebPublisher HTTP server. The Hermes tool schema now includes these params. Default `web=True` in `_handle_init` so discussions always open WebViewer. Port auto-increments if 8199 is busy (check `web_url` in init response for actual port).
 28. **Adapter handles UX side-effects, core returns data** — When adding features that interact with the user's environment (browser, notifications, file watchers), implement them at the **adapter level** (`adapters/hermes.py`), not in `core.py`. The core library should be stateless and headless — it returns data (URLs, IDs, status) and the adapter decides what to do with it. Example: browser auto-open lives in `_handle_init` (adapter), not in `create_discussion` (core). The generic adapter may choose different UX behavior or none at all.
-> **Notifications implementation detail**: See `references/notifications-implementation.md` for architecture, send_fn wiring, and execution flow diagrams. See `references/notification-debugging.md` for verification pitfalls and debugging checklist.
+> **Notifications implementation detail**: See `src/skills/references/notifications-implementation.md` for architecture, send_fn wiring, and execution flow diagrams. See `src/skills/references/notification-debugging.md` for verification pitfalls and debugging checklist.
 
 1. **At least 2 participants required** — A discussion needs multiple viewpoints
 2. **Participant must be registered** — Only profiles listed in `participants` can speak. **Exception**: `participant="coordinator"` is always allowed (bypasses the participant check). This was a bug fix — previously, `roundtable_speak(participant="coordinator")` would fail with "not an active member". Coordinator's speech is recorded in round 0 and does NOT affect round advancement logic.
@@ -588,22 +588,22 @@ These methods find the JSON file at `/tmp/roundtable_web/{discussion_id}/discuss
 
 ## Test Results
 
-See `references/test-results-2026-05-20.md` for the first functional test results, including bugs found and product acceptance report.
+See `src/skills/references/test-results-2026-05-20.md` for the first functional test results, including bugs found and product acceptance report.
 
 ## Open-Source Release
 
-See `references/open-source-readiness.md` for the pre-release checklist (LICENSE, cleanup, adapter gaps, test isolation).
+See `src/skills/references/open-source-readiness.md` for the pre-release checklist (LICENSE, cleanup, adapter gaps, test isolation).
 
 ## Working Examples
 
-- `references/opc-experience-discussion-example.md` — 4-round, 4-participant discussion with timing data and workflow
-- `references/notifications-example.md` — roundtable with real-time push notifications to Feishu
-- `references/release-planning-discussion.md` — 3-round product/design/dev discussion for open-source release planning
-- `references/ai-relay-open-source-discussion.md` — 3-round discussion with hybrid workflow (delegate_task + Direct Core API), notifications, and conclusion doc → 5/29 release plan
-- `references/web-viewer-discussion-example.md` — Decision-oriented conclusion doc pattern: MVP清单, 技术架构, 验收标准, 风险提示, 设计交付物. Use this format when the discussion goal is to produce a buildable specification.
-- `references/post-discussion-kanban-dispatch.md` — After discussion concludes, create kanban tasks grouped by owner, subscribe notifications, and dispatch to team via Feishu groups.
+- `src/skills/references/opc-experience-discussion-example.md` — 4-round, 4-participant discussion with timing data and workflow
+- `src/skills/references/notifications-example.md` — roundtable with real-time push notifications to Feishu
+- `src/skills/references/release-planning-discussion.md` — 3-round product/design/dev discussion for open-source release planning
+- `src/skills/references/ai-relay-open-source-discussion.md` — 3-round discussion with hybrid workflow (delegate_task + Direct Core API), notifications, and conclusion doc → 5/29 release plan
+- `src/skills/references/web-viewer-discussion-example.md` — Decision-oriented conclusion doc pattern: MVP清单, 技术架构, 验收标准, 风险提示, 设计交付物. Use this format when the discussion goal is to produce a buildable specification.
+- `src/skills/references/post-discussion-kanban-dispatch.md` — After discussion concludes, create kanban tasks grouped by owner, subscribe notifications, and dispatch to team via Feishu groups.
 
 ## Open-Source Release
 
-See `references/open-source-readiness-checklist.md` for the pre-release audit: missing LICENSE, Hermes-specific files to separate, build-backend fix, .gitignore, internal docs to remove, generic adapter gaps, and target package structure.
+See `src/skills/references/open-source-readiness-checklist.md` for the pre-release audit: missing LICENSE, Hermes-specific files to separate, build-backend fix, .gitignore, internal docs to remove, generic adapter gaps, and target package structure.
 # Test line

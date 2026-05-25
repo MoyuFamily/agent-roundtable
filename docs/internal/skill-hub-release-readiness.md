@@ -7,10 +7,14 @@
 ### 1.1 Hermes Skill Hub
 
 - Skill 名称：`roundtable`
-- Skill 路径：`src/skills/`
-- 入口文件：`src/skills/SKILL.md`
+- Skill 路径：仓库根目录 `SKILL.md`（单文件，与 `src/skills/SKILL.md` 同源）
+- 入口文件：`SKILL.md`（仓库根目录）
 - 目标用户：Hermes Agent 用户，希望通过 toolset 使用多 Agent 圆桌讨论能力。
-- 发布方式：使用 `hermes skills publish src/skills --to github --repo <target-repo>` 或按 Hermes Skill Hub 当前维护流程提交到目标 registry/tap。
+- 发布方式：SKILL.md 直接放在主仓库 `MoyuFamily/roundtable` 根目录，用户通过 URL 安装：
+  ```bash
+  hermes skills install https://raw.githubusercontent.com/MoyuFamily/roundtable/main/SKILL.md
+  ```
+- ⚠️ 不使用 `github:owner/repo` 格式安装——ClawHub 上已有同名 `roundtable` skill（作者 @robbyczgw-cla），会导致 `hermes skills install` 优先解析到 ClawHub 缓存而非 GitHub。
 
 ### 1.2 OpenClaw / ClawHub
 
@@ -68,12 +72,13 @@ Roundtable skill 让 Agent 团队围绕一个 topic 进行结构化、多轮圆�
 
 ### 4.1 Hermes Skill Hub
 
+SKILL.md 已放在主仓库根目录，无需单独发布步骤。用户直接通过 URL 安装：
+
 ```bash
-# 仅示例：根据 Hermes Skill Hub 当前目标 repo/tap 替换 <target-repo>
-hermes skills publish src/skills --to github --repo <target-repo>
+hermes skills install https://raw.githubusercontent.com/MoyuFamily/roundtable/main/SKILL.md
 ```
 
-如果发布流程改为 PR/tap 收录，则提交 `src/skills/` 目录内容，并确保 Hub 索引读取 `SKILL.md` frontmatter。
+> 已废弃的方案：原先维护独立仓库 `MoyuFamily/hermes-skill-roundtable`，因维护两仓库易不同步，改为单仓库 + URL 安装。
 
 ### 4.2 OpenClaw / ClawHub
 
@@ -93,9 +98,8 @@ clawhub publish src/skills \
 
 ### 5.1 Hermes Skill Hub
 
-- [ ] Hub 搜索 `roundtable` 能看到该 skill。
-- [ ] `hermes skills inspect <id-or-url>` 可预览 frontmatter 与正文。
-- [ ] `hermes skills install <id-or-url>` 能安装到干净 profile。
+- [x] 主仓库 `MoyuFamily/roundtable` 根目录有 `SKILL.md`。
+- [x] `hermes skills install https://raw.githubusercontent.com/MoyuFamily/roundtable/main/SKILL.md` 能安装到干净 profile。
 - [ ] 新会话中 `skill_view(name="roundtable")` 或技能列表可看到该 skill。
 - [ ] 启用 `roundtable` toolset 后，工具列表包含 `roundtable_init/read/speak/status/summarize/end/list`。
 
@@ -109,4 +113,7 @@ clawhub publish src/skills \
 
 ## 6. 当前准备结论
 
-Hermes Skill Hub 与 OpenClaw/ClawHub 的发布材料已具备：`SKILL.md` 已补齐双平台 metadata，ClawHub ignore 文件已添加，CLI 命令形态已核对。剩余动作是发布当天由 Boss 确认目标账号、目标 registry/tap、是否需要组织 owner 后，再执行真实发布与安装验证。
+- **Hermes Skill Hub**：已就绪。SKILL.md 在主仓库根目录，URL 安装验证通过。
+- **ClawHub**：已发布 `agent-roundtable@1.0.0`，moderation CLEAN。
+- **PyPI**：`agent-roundtable` 待上传（429 限速中），cron 自动重试。
+- 已废弃独立仓库 `MoyuFamily/hermes-skill-roundtable`，改为单仓库维护。

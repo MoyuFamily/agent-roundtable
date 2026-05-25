@@ -1,0 +1,43 @@
+name: SKILL.md Consistency Check
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  check-skill-md:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check SKILL.md consistency
+      run: |
+        echo "🔍 检查 SKILL.md 文件一致性..."
+        
+        # 检查两个文件是否存在
+        if [ ! -f "SKILL.md" ]; then
+          echo "❌ 错误: 根目录 SKILL.md 不存在"
+          exit 1
+        fi
+        
+        if [ ! -f "src/skills/SKILL.md" ]; then
+          echo "❌ 错误: src/skills/SKILL.md 不存在"
+          exit 1
+        fi
+        
+        # 检查文件是否一致
+        if diff -q "SKILL.md" "src/skills/SKILL.md" > /dev/null 2>&1; then
+          echo "✅ 两个 SKILL.md 文件一致"
+        else
+          echo "❌ 错误: 两个 SKILL.md 文件不一致"
+          echo ""
+          echo "请运行以下命令同步:"
+          echo "  ./scripts/sync_skill.sh src2root"
+          echo ""
+          echo "差异:"
+          diff -u "SKILL.md" "src/skills/SKILL.md" | head -50
+          exit 1
+        fi

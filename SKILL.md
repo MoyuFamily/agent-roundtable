@@ -61,7 +61,6 @@ Or pass `enabled_toolsets: ["roundtable"]` when spawning an agent.
 | `roundtable_list` | List all discussions |
 | `roundtable_advance` | Manually advance to next round (use when auto-advance doesn't trigger) |
 | `roundtable_notify` | Manually trigger a notification event for a discussion |
-| `roundtable_notify` | Manually trigger a notification for a discussion event |
 
 ## Execution Model (Important)
 
@@ -153,7 +152,7 @@ delegate_task(
 {formatted_history}
 
 ## Your Task
-From your role's perspective, share your观点 on this topic.
+From your role's perspective, share your viewpoint on this topic.
 - Reference others' points if relevant
 - Keep it 200-500 words
 - Both pros AND cons, with concrete examples
@@ -232,8 +231,8 @@ You are participating in a roundtable discussion.
 {formatted_history}
 
 ## Your Task
-From your role's perspective, share your观点 on this topic.
-- You may引用 or respond to other participants' statements
+From your role's perspective, share your viewpoint on this topic.
+- You may reference or respond to other participants' statements
 - Keep it concise and powerful, 200-500 words
 - If you agree with a point, explicitly state your agreement
 - If you disagree, explain why and propose alternatives

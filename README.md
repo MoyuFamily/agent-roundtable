@@ -72,7 +72,7 @@ pip install agent-roundtable
 
 ```bash
 git clone https://github.com/MoyuFamily/agent-roundtable.git
-cd roundtable
+cd agent-roundtable
 pip install -e .
 ```
 

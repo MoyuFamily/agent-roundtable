@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-roundtable"
 version = "0.1.0"
-description = "Framework-agnostic multi-agent roundtable discussion engine"
+description = "Multi-Agent Roundtable Discussion Engine / 多 Agent 圆桌讨论引擎"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"

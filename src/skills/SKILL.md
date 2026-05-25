@@ -118,7 +118,7 @@ roundtable_speak(
 
 Optionally send opening notification:
 ```
-send_message(target="feishu:oc_xxx", message="🔔 圆桌讨论已启动 [rt_xxx]\n📋 主题: ...\n👥 参与者: ...")
+send_message(target="feishu:oc_xxx", message="🔔 Roundtable started [rt_xxx]\n📋 Topic: ...\n👥 Participants: ...")
 ```
 
 ### Step 3: Multi-Round Discussion
@@ -138,7 +138,7 @@ roundtable_speak(
 
 ```python
 delegate_task(
-    goal="你是{角色名}，{职位}。请从{角色}角度发表观点，然后调用 roundtable_speak 记录发言。",
+    goal="You are {display_name}, {role}. Share your viewpoint on this topic from a {role} perspective, then call roundtable_speak to record your speech.",
     context="""You are participating in a roundtable discussion.
 
 ## Discussion Info
@@ -166,12 +166,12 @@ roundtable_speak(discussion_id="{id}", participant="{profile}", content="your sp
 
 **3c. After each participant, send notification (if configured):**
 ```
-send_message(target="feishu:oc_xxx", message="💬 第N轮 | {角色}（{职位}）发言：\n{摘要}")
+send_message(target="feishu:oc_xxx", message="💬 Round {N} | {role} ({display_name}) spoke:\n{summary}")
 ```
 
 **3d. After all participants in a round, send round_end notification:**
 ```
-send_message(target="feishu:oc_xxx", message="✅ 第N轮结束\n共识: ...\n分歧: ...")
+send_message(target="feishu:oc_xxx", message="✅ Round {N} complete\nConsensus: ...\nDisagreements: ...")
 ```
 
 **Why sequential, not parallel**: Participants need to read each other's responses to build on them. Parallel delegation means everyone speaks into a void.
@@ -210,7 +210,7 @@ roundtable_end(
 
 Send concluded notification:
 ```
-send_message(target="feishu:oc_xxx", message="🏁 讨论结束\n结论: ...")
+send_message(target="feishu:oc_xxx", message="🏁 Discussion ended\nConclusion: ...")
 ```
 
 ## Participant Prompt Template
@@ -281,7 +281,7 @@ on `RoundtableCore`. The Hermes adapter (`adapters/hermes.py`) provides
 **Manual fallback**: If send_fn is broken or unavailable, the coordinator can
 manually push notifications using `send_message` after each speech:
 ```
-send_message(target="feishu:oc_xxx", message="💬 第N轮 | 发言者: 内容摘要...")
+send_message(target="feishu:oc_xxx", message="💬 Round {N} | Speaker: summary...")
 ```
 
 ### Timing
@@ -409,7 +409,7 @@ Each round is evaluated for convergence:
 
 ## Conclusion Document Format
 
-The format below works for general discussions. For **product/design/dev discussions aimed at producing a buildable specification**, use the decision-oriented format instead — see `references/web-viewer-discussion-example.md` for the full pattern (MVP清单, 技术架构, 验收标准, 风险提示, 设计交付物, 行动项).
+The format below works for general discussions. For **product/design/dev discussions aimed at producing a buildable specification**, use the decision-oriented format instead — see `references/web-viewer-discussion-example.md` for the full pattern (MVP scope, tech architecture, acceptance criteria, risk assessment, design deliverables, action items).
 
 ```markdown
 # Roundtable Conclusion: [Topic]
@@ -510,7 +510,7 @@ PYEOF
 ```python
 # Step 1: Delegate to sub-agent for thought generation
 result = delegate_task(
-    goal="你是产品总监饼哥，请从产品角度发表对'{topic}'的观点...",
+    goal="You are the Product Director. Share your viewpoint on '{topic}' from a product perspective...",
     context="...",
     toolsets=["roundtable"]  # sub-agent will fail to call roundtable_speak — that's expected
 )
@@ -599,7 +599,7 @@ See `references/open-source-readiness.md` for the pre-release checklist (LICENSE
 - `references/notifications-example.md` — roundtable with real-time push notifications to Feishu
 - `references/release-planning-discussion.md` — 3-round product/design/dev discussion for open-source release planning
 - `references/ai-relay-open-source-discussion.md` — 3-round discussion with hybrid workflow (delegate_task + Direct Core API), notifications, and conclusion doc → 5/29 release plan
-- `references/web-viewer-discussion-example.md` — Decision-oriented conclusion doc pattern: MVP清单, 技术架构, 验收标准, 风险提示, 设计交付物. Use this format when the discussion goal is to produce a buildable specification.
+- `references/web-viewer-discussion-example.md` — Decision-oriented conclusion doc pattern: MVP scope, tech architecture, acceptance criteria, risk assessment, design deliverables. Use this format when the discussion goal is to produce a buildable specification.
 - `references/post-discussion-kanban-dispatch.md` — After discussion concludes, create kanban tasks grouped by owner, subscribe notifications, and dispatch to team via Feishu groups.
 
 ## Open-Source Release

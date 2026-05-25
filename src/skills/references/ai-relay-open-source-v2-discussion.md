@@ -1,7 +1,7 @@
 # AI Relay Open-Source Readiness Discussion (v2)
 
 ## Metadata
-- **Discussion ID**: rt_d58933ce
+- **Discussion ID**: rt_xxxxxxxx
 - **Date**: 2026-05-23
 - **Rounds**: 3
 - **Participants**: bingge (Product Director), pixiel (Designer), mafei (Dev Engineer)
@@ -50,9 +50,9 @@ The `roundtable_init` tool call failed with `ModuleNotFoundError: No module name
 ## Kanban Task Distribution
 
 4 tasks created and dispatched via kanban three-step pattern:
-- `t_506ab26c` — mafei: Security + License (P0)
-- `t_e44281dc` — mafei: CI/CD + build scripts (P0)
-- `t_fa9c2924` — bingge: README + templates (P0)
-- `t_6a54b03c` — pixiel: Logo + visual baseline (P0)
+- `t_xxxxxxxx` — mafei: Security + License (P0)
+- `t_xxxxxxxx` — mafei: CI/CD + build scripts (P0)
+- `t_xxxxxxxx` — bingge: README + templates (P0)
+- `t_xxxxxxxx` — pixiel: Logo + visual baseline (P0)
 
 All subscribed to company group notifications. All picked up by Gateway Dispatcher within seconds.

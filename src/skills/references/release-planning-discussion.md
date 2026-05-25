@@ -1,7 +1,7 @@
 # Release Planning Discussion Example
 
 **Date**: 2026-05-21
-**Discussion ID**: rt_a6ffee90
+**Discussion ID**: rt_xxxxxxxx
 **Topic**: 圆桌(Roundtable)开源发布方案与最新版本测试评估
 
 ## Setup

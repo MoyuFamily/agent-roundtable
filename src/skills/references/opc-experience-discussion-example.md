@@ -1,7 +1,7 @@
 # OPC Experience Discussion — Working Example
 
 **Date**: 2026-05-21
-**Discussion ID**: `rt_ef1898ca`
+**Discussion ID**: `rt_xxxxxxxx`
 **Participants**: 4 (bingge/pixiel/mafei/default)
 **Rounds**: 4
 **Total duration**: ~15 minutes

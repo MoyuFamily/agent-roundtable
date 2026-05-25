@@ -33,7 +33,7 @@ core.create_discussion(
     web_port=8199,
     notifications={
         "enabled": True,
-        "channels": [{"platform": "feishu", "chat_id": "oc_641cd42be1caadab56e51a6e7f5b5fde"}],
+        "channels": [{"platform": "feishu", "chat_id": "oc_your_company_group_id"}],
         "events": ["round_start", "speech", "round_end", "concluded"]
     }
 )

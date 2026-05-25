@@ -1,9 +1,9 @@
 # Roundtable Release Planning Discussion
 
 **Date**: 2026-05-23  
-**Discussion ID**: `rt_91f05a5c`  
+**Discussion ID**: `rt_xxxxxxxx`  
 **WebViewer**: `http://0.0.0.0:8206/r/COVUagOC9zBn5ByxHTyEMiI7`  
-**Conclusion doc**: `roundtable/docs/discussions/rt_91f05a5c_roundtable-release-plan.md`
+**Conclusion doc**: `roundtable/docs/discussions/rt_xxxxxxxx_roundtable-release-plan.md`
 
 ## Configuration
 
@@ -19,7 +19,7 @@ roundtable_init(
     max_rounds=3,
     notifications={
         "enabled": True,
-        "channels": [{"platform": "feishu", "chat_id": "oc_641cd42be1caadab56e51a6e7f5b5fde"}],
+        "channels": [{"platform": "feishu", "chat_id": "oc_your_company_group_id"}],
         "events": ["round_start", "speech", "round_end", "concluded"]
     },
     web=True

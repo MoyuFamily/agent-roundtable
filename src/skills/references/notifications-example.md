@@ -18,7 +18,7 @@ roundtable_init(
     max_rounds=4,
     notifications={
         "enabled": True,
-        "channels": [{"platform": "feishu", "chat_id": "oc_58375a4383991628fe03a5d0ce657ff8"}],
+        "channels": [{"platform": "feishu", "chat_id": "oc_your_company_group_id"}],
         "events": ["round_start", "speech", "round_end", "concluded"]
     }
 )

@@ -61,7 +61,7 @@ Before the PyPI release, use source installation for local validation:
 
 ```bash
 git clone https://github.com/MoyuFamily/agent-roundtable.git
-cd roundtable
+cd agent-roundtable
 pip install -e .
 ```
 

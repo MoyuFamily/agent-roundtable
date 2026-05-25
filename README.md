@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/MoyuFamily/roundtable/main/docs/design/assets/svg/roundtable-logo.svg" alt="Roundtable" width="128" height="128">
+  <img src="https://raw.githubusercontent.com/MoyuFamily/agent-roundtable/main/docs/design/assets/svg/roundtable-logo.svg" alt="Roundtable" width="128" height="128">
 </p>
 
 <h1 align="center">Roundtable</h1>
@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/MoyuFamily/roundtable/main/docs/design/assets/demo.gif" alt="Roundtable Demo" width="600">
+  <img src="https://raw.githubusercontent.com/MoyuFamily/agent-roundtable/main/docs/design/assets/demo.gif" alt="Roundtable Demo" width="600">
 </p>
 
 ---
@@ -71,7 +71,7 @@ pip install agent-roundtable
 发布前或需要验证当前分支时，可从源码安装：
 
 ```bash
-git clone https://github.com/MoyuFamily/roundtable.git
+git clone https://github.com/MoyuFamily/agent-roundtable.git
 cd roundtable
 pip install -e .
 ```

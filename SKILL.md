@@ -1,7 +1,7 @@
 ---
 name: agent-roundtable
 description: "Multi-agent roundtable discussion — topic-driven multi-round debate with convergence detection and conclusion generation"
-version: 1.2.0
+version: 1.2.1
 platforms: [linux, macos, windows]
 metadata:
   hermes:
@@ -12,6 +12,8 @@ metadata:
       env: []
       bins: []
     primaryEnv: null
+    emoji: "🤝"
+    homepage: "https://roundtable.izmw.me"
 ---
 
 # Roundtable Discussion Skill

@@ -6,7 +6,7 @@
 
 ### 报告 Bug
 
-1. 在 [GitHub Issues](https://github.com/MoyuFamily/roundtable/issues) 中搜索是否已有类似问题
+1. 在 [GitHub Issues](https://github.com/MoyuFamily/agent-roundtable/issues) 中搜索是否已有类似问题
 2. 如果没有，创建一个新的 Issue，包含：
    - 问题描述
    - 复现步骤
@@ -44,7 +44,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/MoyuFamily/roundtable.git
+git clone https://github.com/MoyuFamily/agent-roundtable.git
 cd roundtable
 
 # 创建虚拟环境

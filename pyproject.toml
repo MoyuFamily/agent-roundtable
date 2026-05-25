@@ -38,11 +38,11 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/ParsifalC/roundtable"
-Repository = "https://github.com/ParsifalC/roundtable"
-Issues = "https://github.com/ParsifalC/roundtable/issues"
-Documentation = "https://github.com/ParsifalC/roundtable#readme"
-Changelog = "https://github.com/ParsifalC/roundtable/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/MoyuFamily/roundtable"
+Repository = "https://github.com/MoyuFamily/roundtable"
+Issues = "https://github.com/MoyuFamily/roundtable/issues"
+Documentation = "https://github.com/MoyuFamily/roundtable#readme"
+Changelog = "https://github.com/MoyuFamily/roundtable/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 hermes = []  # Hermes adapter auto-discovers if hermes-agent is installed

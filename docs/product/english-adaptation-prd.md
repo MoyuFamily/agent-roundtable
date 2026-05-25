@@ -4,7 +4,7 @@
 > **Date**: 2026-05-21
 > **Status**: Draft
 > **Owner**: 饼哥 (Product Director)
-> **Project**: [roundtable-ai](https://github.com/ParsifalC/roundtable)
+> **Project**: [roundtable-ai](https://github.com/MoyuFamily/roundtable)
 
 ---
 

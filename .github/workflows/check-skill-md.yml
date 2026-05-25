@@ -28,9 +28,13 @@ jobs:
           exit 1
         fi
         
-        # 检查文件是否一致
-        if diff -q "SKILL.md" "src/skills/SKILL.md" > /dev/null 2>&1; then
-          echo "✅ 两个 SKILL.md 文件一致"
+        # 创建临时文件，调整 src/skills/SKILL.md 的路径
+        TEMP_ROOT=$(mktemp)
+        sed 's|references/|src/skills/references/|g' "src/skills/SKILL.md" > "$TEMP_ROOT"
+        
+        # 检查文件是否一致 (考虑路径调整)
+        if diff -q "$TEMP_ROOT" "SKILL.md" > /dev/null 2>&1; then
+          echo "✅ 两个 SKILL.md 文件一致 (路径已调整)"
         else
           echo "❌ 错误: 两个 SKILL.md 文件不一致"
           echo ""
@@ -38,6 +42,9 @@ jobs:
           echo "  ./scripts/sync_skill.sh src2root"
           echo ""
           echo "差异:"
-          diff -u "SKILL.md" "src/skills/SKILL.md" | head -50
+          diff -u "$TEMP_ROOT" "SKILL.md" | head -50
+          rm -f "$TEMP_ROOT"
           exit 1
         fi
+        
+        rm -f "$TEMP_ROOT"

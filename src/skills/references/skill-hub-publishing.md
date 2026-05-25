@@ -50,7 +50,7 @@ The current ClawHub CLI command shape is `clawhub publish <path>`; do not use ol
 
 2. **`clawhub login` is separate from publishing**: Login stores a token in `~/Library/Application Support/clawhub/config.json` (macOS). Even after successful login, the license acceptance gate still blocks publishing until accepted server-side.
 
-3. **Hermes has no central Skill Hub registry**: `hermes skills publish --to github --repo <target>` publishes to a specific GitHub repo. There is no official `hermes-hub/skills` repo yet. To distribute a Hermes skill, create a dedicated GitHub repo (e.g., `ParsifalC/hermes-skills-roundtable`) and tell users to add it as a tap or install from the raw repo. Alternatively, contribute to `hermes-hub/skills` if one exists at publish time — check with `hermes skills publish --help` for updated guidance.
+3. **Hermes has no central Skill Hub registry**: `hermes skills publish --to github --repo <target>` publishes to a specific GitHub repo. There is no official `hermes-hub/skills` repo yet. To distribute a Hermes skill, create a dedicated GitHub repo (e.g., `your_github_username/hermes-skills-roundtable`) and tell users to add it as a tap or install from the raw repo. Alternatively, contribute to `hermes-hub/skills` if one exists at publish time — check with `hermes skills publish --help` for updated guidance.
 
 4. **Python package (PyPI) is independent**: The `uv build` / `python -m build` step produces sdist+wheel for PyPI. This is separate from both Hermes and ClawHub publishing. PyPI upload uses `twine upload dist/*` or `uv publish` — not `clawhub` or `hermes` CLI.
 

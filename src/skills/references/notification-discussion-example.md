@@ -2,11 +2,11 @@
 
 ## Discussion: AI Relay Feature Iteration (2026-05-21)
 
-**Discussion ID**: rt_468775a4
+**Discussion ID**: rt_xxxxxxxx
 **Topic**: 以 Vercel Serverless 模式开发部署的 AI Relay 后续功能迭代
 **Participants**: 4 (饼哥/产品, 像素姐/设计, 码飞/技术, 小赫/协调者)
 **Rounds**: 4
-**Notifications**: Pushed to company group `oc_58375a4383991628fe03a5d0ce657ff8`
+**Notifications**: Pushed to company group `oc_your_company_group_id`
 
 ### Notification Pattern Used
 
@@ -15,7 +15,7 @@ Since send_fn was not wired in the adapter at the time, notifications were sent 
 ```
 # After each delegate_task completes:
 send_message(
-    target="feishu:oc_58375a4383991628fe03a5d0ce657ff8",
+    target="feishu:oc_your_company_group_id",
     message="💬 圆桌讨论 [rt_xxx] 第N轮 | 角色（职位）发言：\n\n摘要内容..."
 )
 ```

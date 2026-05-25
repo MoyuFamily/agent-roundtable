@@ -1,7 +1,7 @@
 # Roundtable Functional Test Results (2026-05-20)
 
 ## Test Setup
-- **Discussion ID**: `rt_f286729c`
+- **Discussion ID**: `rt_xxxxxxxx`
 - **Topic**: 如何实现多 Agent 圆桌讨论更合理和高效
 - **Participants**: 饼哥(bingge/产品)、像素姐(pixiel/设计)、码飞(mafei/技术)
 - **Coordinator**: 小赫(default)

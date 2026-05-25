@@ -1,11 +1,11 @@
 # AI Relay Iteration Discussion — Working Example with Notifications
 
 **Date**: 2026-05-21
-**Discussion ID**: `rt_468775a4`
+**Discussion ID**: `rt_xxxxxxxx`
 **Participants**: 4 (bingge/pixiel/mafei/default)
 **Rounds**: 4
 **Total duration**: ~20 minutes
-**Notifications**: Pushed to company group `oc_58375a4383991628fe03a5d0ce657ff8`
+**Notifications**: Pushed to company group `oc_your_company_group_id`
 
 ## What Made This Discussion Effective
 
@@ -23,8 +23,8 @@
    ```python
    # After each delegate_task returns:
    send_message(
-       target="feishu:oc_58375a4383991628fe03a5d0ce657ff8",
-       message=f"💬 圆桌讨论 [rt_468775a4] 第{N}轮 | {角色}（{职位}）发言：\n{摘要}"
+       target="feishu:oc_your_company_group_id",
+       message=f"💬 圆桌讨论 [rt_xxxxxxxx] 第{N}轮 | {角色}（{职位}）发言：\n{摘要}"
    )
    ```
 

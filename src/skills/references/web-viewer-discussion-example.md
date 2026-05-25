@@ -4,7 +4,7 @@
 **Topic**: 圆桌讨论内置 Web 查让没有自定义 channel 的用户也能查看讨论详情
 **Participants**: 饼哥(产品), 像素姐(设计), 码飞(开发), coordinator
 **Rounds**: 3
-**Discussion ID**: rt_36c7dbdd
+**Discussion ID**: rt_xxxxxxxx
 
 ## Key Pattern: Decision-Oriented Conclusion
 

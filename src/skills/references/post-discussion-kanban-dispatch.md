@@ -49,11 +49,11 @@ docs/roundtable-open-source-readiness.md"
 ```bash
 # 1. Subscribe task notifications to company group
 hermes kanban notify-subscribe $TASK_ID \
-  --platform feishu --chat-id oc_641cd42be1caadab56e51a6e7f5b5fde \
+  --platform feishu --chat-id oc_your_company_group_id \
   --notifier-profile default
 
 # 2. Notify individual in their team group
-python3 ~/.hermes/scripts/feishu-send.py default oc_9d04216e33af421910a9a474ca3df2d5 \
+python3 ~/.hermes/scripts/feishu-send.py default oc_dev_team_group_id \
   '🚀 【P0任务】Brief description\n\n📋 task_id: title\n⏰ 截止: date\n📄 详情: doc_path'
 
 # 3. Dispatcher auto-picks up ready tasks
@@ -63,21 +63,21 @@ python3 ~/.hermes/scripts/feishu-send.py default oc_9d04216e33af421910a9a474ca3d
 
 | Member | Role | Group Chat ID |
 |--------|------|---------------|
-| 饼哥 | Product Director | oc_499af4f571564373e4b00fc89711fddc |
-| 像素姐 | Designer | oc_f2c01de83a34cc12d136bfc2f05d78a0 |
-| 码飞 | Developer | oc_9d04216e33af421910a9a474ca3df2d5 |
-| 公司群 | All | oc_641cd42be1caadab56e51a6e7f5b5fde |
+| 饼哥 | Product Director | oc_product_team_group_id |
+| 像素姐 | Designer | oc_design_team_group_id |
+| 码飞 | Developer | oc_dev_team_group_id |
+| 公司群 | All | oc_your_company_group_id |
 
 ## Example: AI Relay Open-Source (2026-05-23)
 
-Discussion `rt_d58933ce` produced 4 kanban tasks:
+Discussion `rt_xxxxxxxx` produced 4 kanban tasks:
 
 | Task ID | Assignee | Title | Status |
 |---------|----------|-------|--------|
-| t_506ab26c | mafei | 安全扫描+密钥清理+License合规 | done |
-| t_e44281dc | mafei | CI/CD流水线+本地构建脚本 | done |
-| t_fa9c2924 | bingge | README+QuickStart+Issue/PR模板 | done |
-| t_6a54b03c | pixiel | Logo+视觉底线+截图素材 | done |
+| t_xxxxxxxx | mafei | 安全扫描+密钥清理+License合规 | done |
+| t_xxxxxxxx | mafei | CI/CD流水线+本地构建脚本 | done |
+| t_xxxxxxxx | bingge | README+QuickStart+Issue/PR模板 | done |
+| t_xxxxxxxx | pixiel | Logo+视觉底线+截图素材 | done |
 
 All 4 tasks completed within the same day. Gateway Dispatcher auto-assigned
 to worker agents after creation.

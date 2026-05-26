@@ -159,6 +159,8 @@ class WebPublisher:
         *,
         display_name: str | None = None,
         role: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
     ) -> None:
         """Append a PRD-shaped speech_start stream event."""
         if self._revoked:
@@ -176,6 +178,10 @@ class WebPublisher:
             event["display_name"] = display_name
         if role is not None:
             event["role"] = role
+        if title is not None:
+            event["title"] = title
+        if description is not None:
+            event["description"] = description
         self._append_stream_event(event)
         self._write_discussion_json()
 
@@ -447,9 +453,30 @@ class WebPublisher:
                 return str(item.get("role") or "")
         return ""
 
+    def _title_for_participant(self, participant: str) -> str:
+        for item in self._participants:
+            if item.get("profile") == participant or item.get("participant") == participant:
+                return str(item.get("title") or "")
+        return ""
+
+    def _description_for_participant(self, participant: str) -> str:
+        for item in self._participants:
+            if item.get("profile") == participant or item.get("participant") == participant:
+                return str(item.get("description") or "")
+        return ""
+
     def _avatar_for_participant(self, participant: str) -> str:
+        """Resolve avatar for a participant, preferring explicit config over role-based fallback."""
+        # 1. Check for explicit avatar in participant data
+        for item in self._participants:
+            if item.get("profile") == participant or item.get("participant") == participant:
+                explicit = item.get("avatar", "")
+                if explicit:
+                    return explicit
+        # 2. Coordinator default
         if participant == "coordinator":
             return "📋"
+        # 3. Role-based fallback
         role = self._role_for_participant(participant).lower()
         if "design" in role or "设计" in role:
             return "🎨"

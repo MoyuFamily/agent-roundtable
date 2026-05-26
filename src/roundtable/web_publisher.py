@@ -512,7 +512,7 @@ class WebPublisher:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     def _write_discussion_json_raw(self, data: dict[str, Any]) -> None:
-        """Atomic write: flock lock file → write .tmp → fsync → rename."""
+        """Atomic write: flock lock file → read/merge existing disk state → write .tmp → fsync → rename."""
         target = self._discussion_dir / "discussion.json"
         lock_path = target.with_suffix(".json.lock")
         tmp = target.with_suffix(".json.tmp")
@@ -520,7 +520,96 @@ class WebPublisher:
         with open(lock_path, "a") as lock_file:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
             try:
-                with open(tmp, "w") as f:
+                # Read existing data to merge and prevent overwriting cross-process changes
+                existing = None
+                if target.exists():
+                    try:
+                        with open(target, encoding="utf-8") as f:
+                            existing = json.load(f)
+                    except (json.JSONDecodeError, FileNotFoundError):
+                        pass
+
+                if existing:
+                    # 1. Merge speeches by id
+                    existing_speeches = existing.get("speeches", [])
+                    speech_map = {s["id"]: s for s in existing_speeches}
+                    for s in data.get("speeches", []):
+                        speech_map[s["id"]] = s
+                    data["speeches"] = sorted(speech_map.values(), key=lambda s: s["id"])
+                    self._speeches = data["speeches"]
+
+                    # 2. Merge round_summaries by round
+                    existing_summaries = existing.get("round_summaries", [])
+                    summary_map = {s["round"]: s for s in existing_summaries if "round" in s}
+                    for s in data.get("round_summaries", []):
+                        if "round" in s:
+                            summary_map[s["round"]] = s
+                    data["round_summaries"] = sorted(summary_map.values(), key=lambda s: s.get("round", 0))
+                    self._round_summaries = data["round_summaries"]
+
+                    # 3. Merge final_summary
+                    existing_fs = existing.get("final_summary")
+                    data_fs = data.get("final_summary")
+                    if existing_fs and not data_fs:
+                        data["final_summary"] = existing_fs
+                        self._final_summary = existing_fs
+                    elif existing_fs and data_fs:
+                        ex_verdict = existing_fs.get("verdict", "")
+                        new_verdict = data_fs.get("verdict", "")
+                        ex_items = len(existing_fs.get("consensus", [])) + len(existing_fs.get("disagreement", []))
+                        new_items = len(data_fs.get("consensus", [])) + len(data_fs.get("disagreement", []))
+                        verdict_changed = new_verdict != ex_verdict
+                        has_more_items = new_items > ex_items
+                        if not verdict_changed and not has_more_items:
+                            data["final_summary"] = existing_fs
+                            self._final_summary = existing_fs
+                        else:
+                            self._final_summary = data_fs
+
+                    # 4. Merge status & conclusion
+                    if existing.get("status") == "concluded" and data.get("status") != "concluded":
+                        data["status"] = "concluded"
+                        self._status = "concluded"
+                    if existing.get("conclusion") and not data.get("conclusion"):
+                        data["conclusion"] = existing.get("conclusion")
+                        self._conclusion = existing.get("conclusion")
+
+                    # 5. Merge root events (e.g. speech_delta, status_delta from fallback sync)
+                    existing_events = existing.get("events", [])
+                    new_events = data.get("events", [])
+                    if existing_events:
+                        seen_events = set()
+                        merged_events = []
+
+                        def get_event_sig(ev: dict[str, Any]) -> Any:
+                            ev_type = ev.get("type")
+                            if ev_type == "speech_delta":
+                                return ("speech_delta", ev.get("speech", {}).get("id"))
+                            elif ev_type == "status_delta":
+                                return ("status_delta", ev.get("status"), ev.get("conclusion"))
+                            elif ev_type == "round_summary":
+                                return ("round_summary", ev.get("round"))
+                            elif ev_type == "final_summary":
+                                return ("final_summary", ev.get("verdict"))
+                            else:
+                                return json.dumps(ev, sort_keys=True)
+
+                        for ev in existing_events + new_events:
+                            sig = get_event_sig(ev)
+                            if sig not in seen_events:
+                                seen_events.add(sig)
+                                merged_events.append(ev)
+                        data["events"] = merged_events
+
+                    # 6. Merge revoked_tokens
+                    existing_revoked = existing.get("revoked_tokens", [])
+                    new_revoked = data.get("revoked_tokens", [])
+                    merged_revoked = list(set(existing_revoked + new_revoked))
+                    data["revoked_tokens"] = merged_revoked
+                    if self._token in merged_revoked:
+                        self._revoked = True
+
+                with open(tmp, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
                     f.flush()
                     os.fsync(f.fileno())

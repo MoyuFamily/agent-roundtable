@@ -285,6 +285,60 @@
     .viewpoints-card.collapsed .toggle-icon {
       transform: rotate(-90deg);
     }
+    /* === Sprint 3: Agent 人格可视化 === */
+    /* Avatar 圆形 emoji 展示 */
+    .speaker-avatar {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--rt-surface-elevated);
+      border: 2px solid var(--rt-border-light);
+      font-size: 20px;
+      flex-shrink: 0;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .speaker-avatar:hover {
+      transform: scale(1.12);
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+    }
+    /* 角色标签 */
+    .speaker-role-tag {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      line-height: 1.4;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .role-tech    { background: rgba(59,130,246,0.15); color: #60a5fa; }
+    .role-product { background: rgba(168,85,247,0.15); color: #c084fc; }
+    .role-design  { background: rgba(236,72,153,0.15); color: #f472b6; }
+    .role-coord   { background: rgba(34,197,94,0.15);  color: #4ade80; }
+    .role-default { background: rgba(148,163,184,0.12); color: #94a3b8; }
+    /* 发言卡片 header 改为 flex 带 avatar */
+    .speech-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: var(--rt-space-2);
+    }
+    .speech-header-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .speech-header .speaker-name {
+      margin-left: 0;
+    }
     /* 发言完成标记 ✓ */
     .speech-checkmark {
       display: inline-block;
@@ -375,6 +429,103 @@
       margin-top: 2px;
       color: var(--rt-text-muted);
       font-size: var(--rt-font-size-xs);
+    }
+    /* Agent 信息浮层 (点击 avatar 触发) */
+    .agent-info-popup {
+      position: fixed;
+      z-index: 1100;
+      background: rgba(15, 23, 42, 0.97);
+      border: 1px solid var(--rt-border-light);
+      border-radius: var(--rt-radius-lg);
+      padding: var(--rt-space-4);
+      max-width: 280px;
+      min-width: 220px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      backdrop-filter: blur(12px);
+      animation: popIn 0.18s ease-out;
+      pointer-events: auto;
+    }
+    @keyframes popIn {
+      from { opacity: 0; transform: scale(0.92) translateY(6px); }
+      to   { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    .agent-info-popup .agent-info-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: var(--rt-space-2);
+    }
+    .agent-info-popup .agent-info-avatar {
+      font-size: 32px;
+      width: 44px;
+      height: 44px;
+    }
+    .agent-info-popup .agent-info-name {
+      font-weight: 700;
+      color: var(--rt-text-primary);
+      font-size: 14px;
+    }
+    .agent-info-popup .agent-info-role {
+      font-size: 12px;
+      color: var(--rt-text-secondary);
+    }
+    .agent-info-popup .agent-info-desc {
+      font-size: 13px;
+      color: var(--rt-text-secondary);
+      line-height: 1.5;
+      margin-top: var(--rt-space-2);
+    }
+    .agent-info-popup .agent-info-stats {
+      display: flex;
+      gap: var(--rt-space-3);
+      margin-top: var(--rt-space-3);
+      padding-top: var(--rt-space-2);
+      border-top: 1px solid var(--rt-border);
+    }
+    .agent-info-popup .agent-stat {
+      text-align: center;
+    }
+    .agent-info-popup .agent-stat-value {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--rt-brand);
+    }
+    .agent-info-popup .agent-stat-label {
+      font-size: 11px;
+      color: var(--rt-text-muted);
+    }
+    /* 参与者栏 avatar 增强 */
+    .participants-bar {
+      display: flex;
+      align-items: center;
+      gap: var(--rt-space-2);
+      flex-wrap: wrap;
+    }
+    .participant-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px 3px 6px;
+      border-radius: 999px;
+      background: var(--rt-surface-elevated);
+      border: 1px solid var(--rt-border);
+      font-size: 13px;
+      color: var(--rt-text-secondary);
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .participant-chip:hover {
+      border-color: var(--rt-brand);
+      background: rgba(99, 102, 241, 0.08);
+    }
+    .participant-chip .chip-avatar {
+      font-size: 16px;
+      line-height: 1;
+    }
+    .participant-chip .chip-count {
+      font-size: 11px;
+      color: var(--rt-text-muted);
+      margin-left: 2px;
     }
 
     /* Status badge in header */
@@ -1627,6 +1778,87 @@
       return 'default';
     }
 
+    // Sprint 3: Agent 人格可视化辅助函数
+    function getParticipantAvatar(agent) {
+      if (agent === 'coordinator') return '📋';
+      const p = state.participants.find(x => x.profile === agent || x.participant === agent);
+      if (p && p.avatar) return p.avatar;
+      const role = (p && p.role) ? p.role.toLowerCase() : '';
+      if (role.includes('design') || role.includes('设计')) return '🎨';
+      if (role.includes('product') || role.includes('产品') || role.includes('总监')) return '📦';
+      if (role.includes('engineer') || role.includes('tech') || role.includes('技术') || role.includes('开发')) return '⚡';
+      if (role.includes('research') || role.includes('研究')) return '🔬';
+      return '🤖';
+    }
+
+    function getRoleTagClass(roleType) {
+      const map = { engineer: 'role-tech', product: 'role-product', design: 'role-design', coordinator: 'role-coord' };
+      return map[roleType] || 'role-default';
+    }
+
+    // Agent 信息浮层
+    let agentInfoPopup = null;
+    let agentInfoTimeout = null;
+
+    function showAgentInfo(agent, anchorEl) {
+      hideAgentInfo();
+      const p = state.participants.find(x => x.profile === agent || x.participant === agent);
+      const avatar = getParticipantAvatar(agent);
+      const name = (p && p.display_name) || agent || 'Agent';
+      const role = (p && p.role) || '';
+      const desc = (p && p.description) || '';
+      const agentId = agent || 'unknown';
+      const speechCount = state.speeches ? state.speeches.filter(s => s.participant === agentId).length : 0;
+      const roundCount = new Set((state.speeches || []).filter(s => s.participant === agentId).map(s => s.round)).size;
+
+      const popup = document.createElement('div');
+      popup.className = 'agent-info-popup';
+      popup.innerHTML = `
+        <div class="agent-info-header">
+          <div class="agent-info-avatar speaker-avatar" style="cursor:default">${avatar}</div>
+          <div>
+            <div class="agent-info-name">${escapeHtml(name)}</div>
+            ${role ? `<div class="agent-info-role">${escapeHtml(role)}</div>` : ''}
+          </div>
+        </div>
+        ${desc ? `<div class="agent-info-desc">${escapeHtml(desc)}</div>` : ''}
+        <div class="agent-info-stats">
+          <div class="agent-stat"><div class="agent-stat-value">${speechCount}</div><div class="agent-stat-label">发言</div></div>
+          <div class="agent-stat"><div class="agent-stat-value">${roundCount}</div><div class="agent-stat-label">轮次</div></div>
+        </div>
+      `;
+      document.body.appendChild(popup);
+      agentInfoPopup = popup;
+
+      // 定位
+      const rect = anchorEl.getBoundingClientRect();
+      let left = rect.left;
+      let top = rect.bottom + 8;
+      if (left + 280 > window.innerWidth) left = window.innerWidth - 290;
+      if (top + 200 > window.innerHeight) top = rect.top - 208;
+      popup.style.left = Math.max(8, left) + 'px';
+      popup.style.top = Math.max(8, top) + 'px';
+
+      // 点击外部关闭
+      setTimeout(() => {
+        document.addEventListener('click', hideAgentInfoOnClick);
+      }, 50);
+    }
+
+    function hideAgentInfo() {
+      if (agentInfoPopup) {
+        agentInfoPopup.remove();
+        agentInfoPopup = null;
+      }
+      document.removeEventListener('click', hideAgentInfoOnClick);
+    }
+
+    function hideAgentInfoOnClick(e) {
+      if (agentInfoPopup && !agentInfoPopup.contains(e.target)) {
+        hideAgentInfo();
+      }
+    }
+
     function escapeHtml(value) {
       return String(value ?? '').replace(/[&<>"']/g, ch => ({
         '&': '&amp;',
@@ -1698,21 +1930,33 @@
 
     // ---- Rendering ----
     function renderParticipants() {
-      $participantsBar.innerHTML = state.participants.map(p => `
-        <div class="flex items-center gap-2 rounded-full px-3 py-1.5 text-sm whitespace-nowrap" style="background:var(--rt-bg-card);border:1px solid var(--rt-border)">
-          <div class="avatar" style="width:24px;height:24px;font-size:11px">${escapeHtml((p.display_name || p.profile || '?')[0])}</div>
-          <span class="font-medium" style="color:var(--rt-text-primary)">${escapeHtml(p.display_name || p.profile)}</span>
-          ${p.role ? `<span class="text-xs" style="color:var(--rt-text-muted)">${escapeHtml(p.role)}</span>` : ''}
-        </div>
-      `).join('');
+      $participantsBar.innerHTML = state.participants.map(p => {
+        const agent = p.profile || p.participant || '';
+        const avatar = getParticipantAvatar(agent);
+        const name = escapeHtml(p.display_name || p.profile || '?');
+        const roleType = getRoleType(p.role || '');
+        const speechCount = state.speeches ? state.speeches.filter(s => s.participant === agent).length : 0;
+        return `<div class="participant-chip" data-agent="${escapeHtml(agent)}" onclick="event.stopPropagation(); showAgentInfo('${escapeHtml(agent)}', this)">
+          <span class="chip-avatar">${avatar}</span>
+          <span class="font-medium" style="color:var(--rt-text-primary)">${name}</span>
+          ${p.role ? `<span class="speaker-role-tag ${getRoleTagClass(roleType)}">${escapeHtml(p.role)}</span>` : ''}
+          ${speechCount > 0 ? `<span class="chip-count">${speechCount}</span>` : ''}
+        </div>`;
+      }).join('');
     }
 
     function participantMeta(agent) {
       const participantObj = state.participants.find(p => p.profile === agent || p.participant === agent);
+      const isCoordinator = agent === 'coordinator';
+      const roleType = isCoordinator ? 'coordinator' : getRoleType(participantObj?.role || '');
+      const defaultAvatars = { coordinator: '📋', design: '🎨', product: '📦', engineer: '⚡', research: '🔬', marketing: '📣', default: '🤖' };
       return {
         name: participantObj?.display_name || agent || 'Agent',
         role: participantObj?.role || '',
-        roleType: agent === 'coordinator' ? 'coordinator' : getRoleType(participantObj?.role || ''),
+        roleType,
+        avatar: participantObj?.avatar || (isCoordinator ? '📋' : (defaultAvatars[roleType] || '🤖')),
+        title: participantObj?.title || '',
+        description: participantObj?.description || '',
       };
     }
 
@@ -1735,17 +1979,18 @@
       div.className = `speech-card role-${meta.roleType} new highlight streaming`;
       div.id = `speech-${id}`;
 
-      const initial = escapeHtml((meta.name || agent || '?')[0]);
+      const avatar = getParticipantAvatar(agent);
       const speakerName = escapeHtml(meta.name);
       const safeRoleName = escapeHtml(meta.role);
       const round = roundNum > 0 ? `<span class="round-badge" style="background: var(--rt-role-${meta.roleType}-bg); color: var(--rt-role-${meta.roleType})">R${roundNum}</span>` : '';
+      const roleTagClass = getRoleTagClass(meta.roleType);
       div.innerHTML = `
         <div class="flex items-start gap-3">
-          <div class="avatar" style="background: var(--rt-role-${meta.roleType}); color: var(--rt-text-inverse); box-shadow: 0 0 8px var(--rt-role-${meta.roleType}-bg)">${initial}</div>
+          <div class="speaker-avatar" style="background: var(--rt-role-${meta.roleType}-bg); border-color: var(--rt-role-${meta.roleType})" onclick="event.stopPropagation(); showAgentInfo('${escapeHtml(agent)}', this)">${avatar}</div>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="font-semibold text-sm" style="color:var(--rt-text-primary)">${speakerName}</span>
-              ${meta.role ? `<span class="text-xs px-2 py-0.5 rounded-full font-medium" style="background: var(--rt-role-${meta.roleType}-bg); color: var(--rt-role-${meta.roleType})">${safeRoleName}</span>` : ''}
+            <div class="speech-header-meta">
+              <span class="speaker-name font-semibold text-sm" style="color:var(--rt-text-primary)">${speakerName}</span>
+              ${meta.role ? `<span class="speaker-role-tag ${roleTagClass}">${safeRoleName}</span>` : ''}
               ${round}
               <span class="text-xs ml-auto" style="color:var(--rt-text-muted)">${formatTime(eventData.timestamp)}</span>
             </div>
@@ -1930,18 +2175,19 @@
       div.className = `speech-card role-${roleType}${isNew ? ' new highlight' : ''}`;
       div.id = `speech-${speech.id}`;
 
-      const initial = escapeHtml((speech.display_name || speech.participant || '?')[0]);
+      const avatar = getParticipantAvatar(speech.participant);
       const speakerName = escapeHtml(speech.display_name || speech.participant);
       const safeRoleName = escapeHtml(roleName);
       const round = speech.round > 0 ? `<span class="round-badge" style="background: var(--rt-role-${roleType}-bg); color: var(--rt-role-${roleType})">R${speech.round}</span>` : '';
+      const roleTagClass = getRoleTagClass(roleType);
 
       div.innerHTML = `
         <div class="flex items-start gap-3">
-          <div class="avatar" style="background: var(--rt-role-${roleType}); color: var(--rt-text-inverse); box-shadow: 0 0 8px var(--rt-role-${roleType}-bg)">${initial}</div>
+          <div class="speaker-avatar" style="background: var(--rt-role-${roleType}-bg); border-color: var(--rt-role-${roleType})" onclick="event.stopPropagation(); showAgentInfo('${escapeHtml(speech.participant)}', this)">${avatar}</div>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="font-semibold text-sm" style="color:var(--rt-text-primary)">${speakerName}</span>
-              ${roleName ? `<span class="text-xs px-2 py-0.5 rounded-full font-medium" style="background: var(--rt-role-${roleType}-bg); color: var(--rt-role-${roleType})">${safeRoleName}</span>` : ''}
+            <div class="speech-header-meta">
+              <span class="speaker-name font-semibold text-sm" style="color:var(--rt-text-primary)">${speakerName}</span>
+              ${roleName ? `<span class="speaker-role-tag ${roleTagClass}">${safeRoleName}</span>` : ''}
               ${round}
               <span class="text-xs ml-auto" style="color:var(--rt-text-muted)">${formatTime(speech.created_at)}</span>
             </div>

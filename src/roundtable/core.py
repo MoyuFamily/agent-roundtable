@@ -109,6 +109,9 @@ class RoundtableCore:
                                 "profile": p["profile"],
                                 "display_name": p.get("display_name", p["profile"]),
                                 "role": p.get("role", ""),
+                                "avatar": p.get("avatar", ""),
+                                "title": p.get("title", ""),
+                                "description": p.get("description", ""),
                             }
                             for p in participants
                         ],
@@ -221,6 +224,8 @@ class RoundtableCore:
                     avatar = publisher._avatar_for_participant(speech.participant)
                     display_name = p_info.display_name if p_info else speech.participant
                     role = p_info.role if p_info else ""
+                    title = publisher._title_for_participant(speech.participant)
+                    description = publisher._description_for_participant(speech.participant)
                     publisher.on_speech_start(
                         speech.id,
                         speech.participant,
@@ -228,6 +233,8 @@ class RoundtableCore:
                         round_num=speech.round,
                         display_name=display_name,
                         role=role,
+                        title=title if title else None,
+                        description=description if description else None,
                     )
                     # 逐 token 推送（中文按 2-4 字符分块，模拟自然流式）
                     content = speech.content
@@ -872,18 +879,27 @@ class RoundtableCore:
             "role": "全栈工程师",
             "display_name": "Alice",
             "perspective": "重视开发效率和生态",
+            "avatar": "👩‍💻",
+            "title": "Senior Full-Stack Engineer",
+            "description": "10 年全栈经验，主导过多个从零到一的产品架构。擅长 Python/TypeScript 全栈，关注开发者体验和交付效率。",
         },
         {
             "profile": "bob",
             "role": "架构师",
             "display_name": "Bob",
             "perspective": "重视性能和可维护性",
+            "avatar": "🏗️",
+            "title": "Principal Architect",
+            "description": "分布式系统架构专家，专注于高可用和水平扩展方案。擅长 Go/Rust 技术栈，推崇简洁的系统设计哲学。",
         },
         {
             "profile": "carol",
             "role": "产品经理",
             "display_name": "Carol",
             "perspective": "重视交付速度和团队学习成本",
+            "avatar": "📊",
+            "title": "Product Director",
+            "description": "5 年 B 端产品经验，关注技术选型对业务交付的影响。擅长平衡技术理想与业务现实，推动敏捷迭代。",
         },
     ]
     _DEMO_SPEECHES: ClassVar[dict[int, dict[str, str]]] = {
@@ -1016,6 +1032,9 @@ class RoundtableCore:
                         "profile": p["profile"],
                         "display_name": p.get("display_name", p["profile"]),
                         "role": p.get("role", ""),
+                        "avatar": p.get("avatar", ""),
+                        "title": p.get("title", ""),
+                        "description": p.get("description", ""),
                     }
                     for p in participants
                 ],

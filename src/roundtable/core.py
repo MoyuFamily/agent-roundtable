@@ -926,6 +926,7 @@ class RoundtableCore:
     def _append_token_stream_jsonl_fallback(self, web_dir: Path, event: dict[str, Any]) -> None:
         """Safely append an event to token_stream.jsonl under exclusive lock."""
         import fcntl as _fcntl
+
         target = web_dir / "token_stream.jsonl"
         try:
             with open(target, "a") as f:
@@ -980,8 +981,8 @@ class RoundtableCore:
             conv_map = {c.round: c.score for c in conv_history}
 
             findings_by_round: dict[int, list[Any]] = {}
-            for f in findings:
-                findings_by_round.setdefault(f.round, []).append(f)
+            for finding in findings:
+                findings_by_round.setdefault(finding.round, []).append(finding)
 
             existing_summaries = data.setdefault("round_summaries", [])
             existing_rounds_map = {s.get("round"): s for s in existing_summaries if "round" in s}
@@ -989,8 +990,12 @@ class RoundtableCore:
             max_round_to_sync = max(findings_by_round.keys()) if findings_by_round else 0
             for r in range(1, max_round_to_sync + 1):
                 round_findings = findings_by_round.get(r, [])
-                consensus_pts = [{"content": f.content} for f in round_findings if f.type == "consensus"]
-                disagreement_pts = [{"content": f.content} for f in round_findings if f.type == "disagreement"]
+                consensus_pts = [
+                    {"content": finding.content} for finding in round_findings if finding.type == "consensus"
+                ]
+                disagreement_pts = [
+                    {"content": finding.content} for finding in round_findings if finding.type == "disagreement"
+                ]
 
                 if not round_findings and r not in existing_rounds_map:
                     continue
@@ -1004,11 +1009,7 @@ class RoundtableCore:
                     ex_consensus = existing.get("consensus", [])
                     ex_disagreement = existing.get("disagreement", [])
                     ex_score = existing.get("convergence_score")
-                    if (
-                        ex_consensus != consensus_pts
-                        or ex_disagreement != disagreement_pts
-                        or ex_score != score
-                    ):
+                    if ex_consensus != consensus_pts or ex_disagreement != disagreement_pts or ex_score != score:
                         needs_update = True
 
                 if needs_update:
@@ -1036,8 +1037,10 @@ class RoundtableCore:
             # Sync final summary if concluded
             if disc.status == "concluded":
                 final_summary = data.get("final_summary")
-                consensus_all = [{"content": f.content} for f in findings if f.type == "consensus"]
-                disagreement_all = [{"content": f.content} for f in findings if f.type == "disagreement"]
+                consensus_all = [{"content": finding.content} for finding in findings if finding.type == "consensus"]
+                disagreement_all = [
+                    {"content": finding.content} for finding in findings if finding.type == "disagreement"
+                ]
 
                 needs_final_summary = False
                 if not final_summary:
@@ -1120,11 +1123,13 @@ class RoundtableCore:
             data.setdefault("speeches", []).append(speech_data)
             # Also append replay event for cross-process replay
             now = int(time.time())
-            data.setdefault("events", []).append({
-                "type": "speech_delta",
-                "speech": speech_data,
-                "timestamp": now,
-            })
+            data.setdefault("events", []).append(
+                {
+                    "type": "speech_delta",
+                    "speech": speech_data,
+                    "timestamp": now,
+                }
+            )
             data["updated_at"] = now
 
             # Write to token_stream.jsonl for replay
@@ -1173,12 +1178,14 @@ class RoundtableCore:
             data["status"] = "concluded"
             # Also append concluded event for cross-process replay
             now = int(time.time())
-            data.setdefault("events", []).append({
-                "type": "status_delta",
-                "status": "concluded",
-                "conclusion": conclusion,
-                "timestamp": now,
-            })
+            data.setdefault("events", []).append(
+                {
+                    "type": "status_delta",
+                    "status": "concluded",
+                    "conclusion": conclusion,
+                    "timestamp": now,
+                }
+            )
             data["updated_at"] = now
 
             # Write to token_stream.jsonl for replay

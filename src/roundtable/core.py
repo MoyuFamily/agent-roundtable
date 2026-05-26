@@ -965,7 +965,8 @@ class RoundtableCore:
             if not disc:
                 return
 
-            if data.get("status") != disc.status:
+            old_status = data.get("status")
+            if old_status != disc.status:
                 data["status"] = disc.status
                 changed = True
 
@@ -1026,6 +1027,7 @@ class RoundtableCore:
                     else:
                         existing_summaries.append(summary_event)
 
+                    data.setdefault("events", []).append(summary_event)
                     changed = True
                     self._append_token_stream_jsonl_fallback(web_dir, summary_event)
 
@@ -1059,10 +1061,10 @@ class RoundtableCore:
                         "timestamp": now,
                     }
                     data["final_summary"] = final_summary_event
+                    data.setdefault("events", []).append(final_summary_event)
                     changed = True
                     self._append_token_stream_jsonl_fallback(web_dir, final_summary_event)
 
-                old_status = data.get("status")
                 if old_status != "concluded":
                     status_event = {
                         "type": "status_delta",
@@ -1070,6 +1072,8 @@ class RoundtableCore:
                         "conclusion": disc.conclusion or "",
                         "timestamp": now,
                     }
+                    data.setdefault("events", []).append(status_event)
+                    changed = True
                     self._append_token_stream_jsonl_fallback(web_dir, status_event)
 
             if changed:

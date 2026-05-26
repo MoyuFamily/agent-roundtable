@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Roundtable v2 — 头像个性化 & 收敛度可视化</title>
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+/* ========== Design Tokens ========== */
+:root {
+  --rt-bg: #0F172A;
+  --rt-bg-deep: #080D1A;
+  --rt-surface: #1E293B;
+  --rt-surface-hover: #253347;
+  --rt-brand: #4F46E5;
+  --rt-brand-hover: #6366F1;
+  --rt-brand-glow: rgba(79,70,229,0.25);
+  --rt-accent-green: #10B981;
+  --rt-accent-amber: #F59E0B;
+  --rt-accent-red: #EF4444;
+  --rt-text-primary: #F8FAFC;
+  --rt-text-secondary: #94A3B8;
+  --rt-text-tertiary: #64748B;
+  --rt-border: rgba(255,255,255,0.08);
+  --rt-border-strong: rgba(255,255,255,0.12);
+  --rt-radius-sm: 6px;
+  --rt-radius-md: 10px;
+  --rt-radius-lg: 16px;
+  --rt-radius-xl: 24px;
+
+  /* Agent 角色色 (Tokyo Night) */
+  --agent-1: #7aa2f7;  /* Tokyo Blue */
+  --agent-2: #bb9af7;  /* Tokyo Purple */
+  --agent-3: #7dcfff;  /* Tokyo Cyan */
+  --agent-4: #9ece6a;  /* Tokyo Green */
+  --agent-5: #ff9e64;  /* Tokyo Orange */
+  --agent-6: #c0caf5;  /* Tokyo Light */
+
+  /* 收敛度色阶 */
+  --conv-low: #EF4444;      /* 0-30% 分歧大 */
+  --conv-mid: #F59E0B;      /* 30-60% 讨论中 */
+  --conv-high: #10B981;     /* 60-85% 趋同 */
+  --conv-full: #4F46E5;     /* 85-100% 共识达成 */
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, 'PingFang SC', 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  background: var(--rt-bg);
+  color: var(--rt-text-primary);
+  min-height: 100vh;
+  line-height: 1.6;
+}
+
+/* ========== 页面布局 ========== */
+.page-header {
+  padding: 48px 24px 32px;
+  text-align: center;
+  border-bottom: 1px solid var(--rt-border);
+  background: linear-gradient(180deg, var(--rt-bg-deep) 0%, var(--rt-bg) 100%);
+}
+.page-header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.page-header h1 span { color: var(--rt-brand-hover); }
+.page-header p {
+  font-size: 15px;
+  color: var(--rt-text-secondary);
+  max-width: 560px;
+  margin: 0 auto;
+}
+.page-badge {
+  display: inline-block;
+  background: rgba(79,70,229,0.15);
+  color: var(--rt-brand-hover);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+  margin-bottom: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.section {
+  padding: 48px 0;
+  border-bottom: 1px solid var(--rt-border);
+}
+.section:last-child { border-bottom: none; }
+.section-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.section-title .num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px; height: 28px;
+  background: var(--rt-brand);
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: var(--rt-radius-sm);
+}
+.section-desc {
+  font-size: 14px;
+  color: var(--rt-text-secondary);
+  margin-bottom: 32px;
+}
+
+
+/* ========== Section 3: 收敛度可视化 ========== */
+.conv-dashboard {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 24px;
+}
+@media (max-width: 768px) {
+  .conv-dashboard { grid-template-columns: 1fr; }
+}
+
+/* 径向仪表盘 */
+.conv-gauge-wrap {
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-lg);
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+.conv-gauge {
+  position: relative;
+  width: 180px; height: 180px;
+}
+.conv-gauge svg {
+  width: 180px; height: 180px;
+  transform: rotate(-90deg);
+}
+.conv-gauge-track {
+  fill: none;
+  stroke: rgba(255,255,255,0.06);
+  stroke-width: 12;
+}
+.conv-gauge-fill {
+  fill: none;
+  stroke-width: 12;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.conv-gauge-value {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+.conv-gauge-number {
+  font-size: 36px;
+  font-weight: 700;
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  line-height: 1;
+}
+.conv-gauge-label {
+  font-size: 12px;
+  color: var(--rt-text-secondary);
+  margin-top: 4px;
+}
+.conv-gauge-status {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 4px 14px;
+  border-radius: 999px;
+}
+
+/* 指标卡片区 */
+.conv-details {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.conv-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .conv-metrics { grid-template-columns: 1fr; }
+}
+.conv-metric-card {
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-md);
+  padding: 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.conv-metric-icon {
+  width: 40px; height: 40px;
+  border-radius: var(--rt-radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.conv-metric-icon svg { width: 20px; height: 20px; }
+.conv-metric-body { flex: 1; }
+.conv-metric-value {
+  font-size: 24px;
+  font-weight: 700;
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.conv-metric-label {
+  font-size: 13px;
+  color: var(--rt-text-secondary);
+}
+
+/* 趋势图 */
+.conv-trend {
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-md);
+  padding: 24px;
+  flex: 1;
+}
+.conv-trend-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--rt-text-secondary);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.conv-trend-chart {
+  position: relative;
+  height: 120px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+.conv-trend-bar {
+  flex: 1;
+  border-radius: 3px 3px 0 0;
+  min-height: 4px;
+  transition: height 600ms cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  cursor: default;
+}
+.conv-trend-bar:hover {
+  filter: brightness(1.3);
+}
+.conv-trend-bar .tooltip {
+  display: none;
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--rt-bg);
+  border: 1px solid var(--rt-border-strong);
+  border-radius: var(--rt-radius-sm);
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--rt-text-primary);
+  white-space: nowrap;
+  z-index: 10;
+  margin-bottom: 6px;
+}
+.conv-trend-bar:hover .tooltip { display: block; }
+.conv-trend-x {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.conv-trend-x span {
+  font-size: 11px;
+  color: var(--rt-text-tertiary);
+}
+
+/* 共识/分歧列表 */
+.conv-points {
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-md);
+  padding: 24px;
+}
+.conv-points-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+@media (max-width: 640px) {
+  .conv-points-grid { grid-template-columns: 1fr; }
+}
+.conv-points-col h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.conv-point-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  font-size: 13px;
+  color: var(--rt-text-secondary);
+  border-bottom: 1px solid var(--rt-border);
+}
+.conv-point-item:last-child { border-bottom: none; }
+.conv-point-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 7px;
+}
+
+
+/* ========== Section 4: 集成预览 ========== */
+.integration-preview {
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-lg);
+  overflow: hidden;
+}
+.integration-header {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--rt-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.integration-body {
+  padding: 24px;
+}
+.integration-minimap {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.integration-minimap-col {
+  flex: 1;
+  min-width: 0;
+}
+.minimap-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--rt-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 12px;
+}
+.minimap-card {
+  background: var(--rt-bg);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-md);
+  padding: 14px;
+  margin-bottom: 10px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.minimap-avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+  flex-shrink: 0;
+}
+.minimap-avatar .mini-dot {
+  position: absolute;
+  bottom: 0; right: 0;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--rt-bg);
+}
+.minimap-body { flex: 1; min-width: 0; }
+.minimap-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rt-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.minimap-tag {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.minimap-text {
+  font-size: 12px;
+  color: var(--rt-text-secondary);
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+/* 集成中的收敛度条 */
+.mini-conv-bar {
+  background: var(--rt-bg);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-md);
+  padding: 14px;
+}
+.mini-conv-track {
+  height: 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 10px 0 6px;
+}
+.mini-conv-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--conv-mid), var(--conv-high));
+  transition: width 1s ease;
+}
+.mini-conv-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--rt-text-tertiary);
+}
+
+/* ========== Section 1: 头像系统升级 ========== */
+.avatar-showcase {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+@media (max-width: 640px) {
+  .avatar-showcase { grid-template-columns: 1fr; }
+}
+
+.avatar-panel {
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-lg);
+  padding: 28px;
+}
+.avatar-panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--rt-text-secondary);
+  margin-bottom: 24px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.avatar-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: center;
+}
+.avatar-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.avatar {
+  position: relative;
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+  color: white;
+  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: default;
+}
+.avatar:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 20px var(--avatar-glow, rgba(255,255,255,0.1));
+}
+.avatar-sm { width: 36px; height: 36px; font-size: 14px; }
+.avatar-lg { width: 56px; height: 56px; font-size: 22px; }
+
+.avatar-name {
+  font-size: 12px;
+  color: var(--rt-text-secondary);
+}
+.avatar-role {
+  font-size: 10px;
+  color: var(--rt-text-tertiary);
+}
+
+/* 在线状态点 */
+.avatar .status-dot {
+  position: absolute;
+  bottom: 0; right: 0;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--rt-surface);
+  background: var(--rt-accent-green);
+}
+.avatar .status-dot.idle {
+  background: var(--rt-accent-amber);
+}
+.avatar .status-dot.offline {
+  background: var(--rt-text-tertiary);
+}
+.avatar .status-dot.speaking {
+  background: var(--rt-accent-green);
+  animation: speaking-pulse 1.2s ease-in-out infinite;
+}
+@keyframes speaking-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(16,185,129,0); }
+}
+
+/* 头像样式变体 */
+.avatar.style-gradient {
+  background: linear-gradient(135deg, var(--agent-1) 0%, var(--agent-2) 100%);
+}
+.avatar.style-ring {
+  box-shadow: 0 0 0 2px var(--rt-bg), 0 0 0 4px var(--agent-1);
+}
+.avatar.style-glow {
+  box-shadow: 0 0 16px 4px rgba(122,162,247,0.3);
+}
+.avatar.style-ring-active {
+  box-shadow: 0 0 0 2px var(--rt-bg), 0 0 0 3px var(--rt-accent-green);
+  animation: ring-breathe 2s ease-in-out infinite;
+}
+@keyframes ring-breathe {
+  0%, 100% { box-shadow: 0 0 0 2px var(--rt-bg), 0 0 0 3px var(--rt-accent-green); }
+  50% { box-shadow: 0 0 0 2px var(--rt-bg), 0 0 0 5px rgba(16,185,129,0.5); }
+}
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <div class="page-badge">v2 · WebViewer Enhancement</div>
+  <h1>头像个性化 &amp; <span>收敛度可视化</span></h1>
+  <p>让每个 Agent 都有辨识度，让讨论进展一目了然</p>
+</div>
+
+<div class="container">
+
+  <!-- Section 1: 头像系统升级 -->
+  <div class="section">
+    <div class="section-title">
+      <span class="num">1</span>
+      Agent 头像系统升级
+    </div>
+    <p class="section-desc">六种角色色 × 四种状态 × 三种尺寸，一眼识别谁在说话</p>
+
+    <div class="avatar-showcase">
+      <!-- 角色色头像 -->
+      <div class="avatar-panel">
+        <div class="avatar-panel-title">角色色头像</div>
+        <div class="avatar-grid">
+          <div class="avatar-item">
+            <div class="avatar" style="background:var(--agent-1);">饼</div>
+            <span class="avatar-name">饼哥</span>
+            <span class="avatar-role">产品</span>
+          </div>
+          <div class="avatar-item">
+            <div class="avatar" style="background:var(--agent-2);">像</div>
+            <span class="avatar-name">像素姐</span>
+            <span class="avatar-role">设计</span>
+          </div>
+          <div class="avatar-item">
+            <div class="avatar" style="background:var(--agent-3);">码</div>
+            <span class="avatar-name">码飞</span>
+            <span class="avatar-role">工程</span>
+          </div>
+          <div class="avatar-item">
+            <div class="avatar" style="background:var(--agent-4);">赫</div>
+            <span class="avatar-name">小赫</span>
+            <span class="avatar-role">协调</span>
+          </div>
+          <div class="avatar-item">
+            <div class="avatar" style="background:var(--agent-5);">研</div>
+            <span class="avatar-name">研究员</span>
+            <span class="avatar-role">研究</span>
+          </div>
+          <div class="avatar-item">
+            <div class="avatar" style="background:var(--agent-6);">客</div>
+            <span class="avatar-name">访客</span>
+            <span class="avatar-role">默认</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 在线状态 -->
+      <div class="avatar-panel">
+        <div class="avatar-panel-title">在线状态指示</div>
+        <div class="avatar-grid">
+          <div class="avatar-item">
+            <div class="avatar" style="background:var(--agent-1);">
+              饼
+              <span class="status-dot speaking"></span>
+            </div>
+            <span class="avatar-name">发言中</span>
+          </div>
+          <div class="avatar-item">
+            <div class="avatar" style="background:var(--agent-2);">
+              像
+              <span class="status-dot"></span>
+            </div>
+            <span class="avatar-name">在线</span>
+          </div>
+          <div class="avatar-item">
+            <div class="avatar" style="background:var(--agent-3);">
+              码
+              <span class="status-dot idle"></span>
+            </div>
+            <span class="avatar-name">等待中</span>
+          </div>
+          <div class="avatar-item">
+            <div class="avatar" style="background:var(--agent-4);">
+              赫
+              <span class="status-dot offline"></span>
+            </div>
+            <span class="avatar-name">已离线</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  
+  <!-- Section 3: 收敛度可视化 -->
+  <div class="section">
+    <div class="section-title">
+      <span class="num">3</span>
+      收敛度可视化
+    </div>
+    <p class="section-desc">实时追踪讨论进展 — 共识点、分歧点、收敛趋势一目了然</p>
+
+    <div class="conv-dashboard">
+      <!-- 径向仪表盘 -->
+      <div class="conv-gauge-wrap">
+        <div class="conv-gauge">
+          <svg viewBox="0 0 180 180">
+            <circle class="conv-gauge-track" cx="90" cy="90" r="78"/>
+            <circle class="conv-gauge-fill" cx="90" cy="90" r="78"
+              stroke="url(#convGradient)"
+              stroke-dasharray="490"
+              stroke-dashoffset="122"/>
+            <defs>
+              <linearGradient id="convGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="var(--conv-mid)"/>
+                <stop offset="100%" stop-color="var(--conv-high)"/>
+              </linearGradient>
+            </defs>
+          </svg>
+          <div class="conv-gauge-value">
+            <div class="conv-gauge-number" style="color:var(--conv-high);">75%</div>
+            <div class="conv-gauge-label">收敛度</div>
+          </div>
+        </div>
+        <div class="conv-gauge-status" style="background:rgba(16,185,129,0.15); color:var(--conv-high);">
+          趋同中
+        </div>
+        <div style="text-align:center; font-size:12px; color:var(--rt-text-tertiary);">
+          Round 3 / 5
+        </div>
+      </div>
+
+      <!-- 右侧详情 -->
+      <div class="conv-details">
+        <!-- 三个指标卡 -->
+        <div class="conv-metrics">
+          <div class="conv-metric-card">
+            <div class="conv-metric-icon" style="background:rgba(16,185,129,0.15); color:var(--rt-accent-green);">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div class="conv-metric-body">
+              <div class="conv-metric-value" style="color:var(--rt-accent-green);">6</div>
+              <div class="conv-metric-label">共识点</div>
+            </div>
+          </div>
+          <div class="conv-metric-card">
+            <div class="conv-metric-icon" style="background:rgba(239,68,68,0.15); color:var(--rt-accent-red);">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </div>
+            <div class="conv-metric-body">
+              <div class="conv-metric-value" style="color:var(--rt-accent-red);">2</div>
+              <div class="conv-metric-label">分歧点</div>
+            </div>
+          </div>
+          <div class="conv-metric-card">
+            <div class="conv-metric-icon" style="background:rgba(122,162,247,0.15); color:var(--agent-1);">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            </div>
+            <div class="conv-metric-body">
+              <div class="conv-metric-value" style="color:var(--agent-1);">12</div>
+              <div class="conv-metric-label">总发言</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 趋势图 -->
+        <div class="conv-trend">
+          <div class="conv-trend-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            收敛趋势
+          </div>
+          <div class="conv-trend-chart">
+            <div class="conv-trend-bar" style="height:15%; background:var(--conv-low);"><span class="tooltip">R1: 15% (开场)</span></div>
+            <div class="conv-trend-bar" style="height:35%; background:var(--conv-mid);"><span class="tooltip">R2: 35% (观点碰撞)</span></div>
+            <div class="conv-trend-bar" style="height:55%; background:var(--conv-mid);"><span class="tooltip">R3: 55% (初步趋同)</span></div>
+            <div class="conv-trend-bar" style="height:75%; background:var(--conv-high);"><span class="tooltip">R4: 75% (深度共识)</span></div>
+            <div class="conv-trend-bar" style="height:92%; background:var(--conv-full);"><span class="tooltip">R5: 92% (达成共识)</span></div>
+          </div>
+          <div class="conv-trend-x">
+            <span>Round 1</span>
+            <span>Round 2</span>
+            <span>Round 3</span>
+            <span>Round 4</span>
+            <span>Round 5</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 共识/分歧列表 -->
+    <div class="conv-points" style="margin-top:24px;">
+      <div class="conv-points-grid">
+        <div class="conv-points-col">
+          <h4 style="color:var(--rt-accent-green);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            共识点 (6)
+          </h4>
+          <div class="conv-point-item">
+            <div class="conv-point-dot" style="background:var(--rt-accent-green);"></div>
+            <span>采用 SSE 实时推送方案，微信端降级长轮询</span>
+          </div>
+          <div class="conv-point-item">
+            <div class="conv-point-dot" style="background:var(--rt-accent-green);"></div>
+            <span>单文件 SPA + Tailwind CDN，零构建依赖</span>
+          </div>
+          <div class="conv-point-item">
+            <div class="conv-point-dot" style="background:var(--rt-accent-green);"></div>
+            <span>结论卡片用品牌蓝辉光 + 脉动动画突出</span>
+          </div>
+          <div class="conv-point-item">
+            <div class="conv-point-dot" style="background:var(--rt-accent-green);"></div>
+            <span>移动端断点 768px，最小触控 44px</span>
+          </div>
+          <div class="conv-point-item">
+            <div class="conv-point-dot" style="background:var(--rt-accent-green);"></div>
+            <span>链接过期 + 密码保护分阶段实现</span>
+          </div>
+          <div class="conv-point-item">
+            <div class="conv-point-dot" style="background:var(--rt-accent-green);"></div>
+            <span>nanoid 21位 token 作为分享链接标识</span>
+          </div>
+        </div>
+        <div class="conv-points-col">
+          <h4 style="color:var(--rt-accent-red);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            分歧点 (2)
+          </h4>
+          <div class="conv-point-item">
+            <div class="conv-point-dot" style="background:var(--rt-accent-red);"></div>
+            <span>回放模式：逐条回放 vs 按轮次快进 — 尚未定论</span>
+          </div>
+          <div class="conv-point-item">
+            <div class="conv-point-dot" style="background:var(--rt-accent-red);"></div>
+            <span>适配器热加载：CLI 参数 vs 配置文件 — 待技术验证</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+  <!-- Section 4: 集成预览 -->
+  <div class="section">
+    <div class="section-title">
+      <span class="num">4</span>
+      集成预览 — 实际效果
+    </div>
+    <p class="section-desc">头像个性化 + 收敛度条在 WebViewer 讨论结束页的实际呈现效果</p>
+
+    <div class="integration-preview">
+      <div class="integration-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="display:inline-flex; align-items:center; gap:5px; background:rgba(34,197,94,0.15); color:#22C55E; font-size:11px; font-weight:600; padding:3px 10px; border-radius:999px; text-transform:uppercase; letter-spacing:0.05em;">✓ 已结束</span>
+          <span style="font-size:14px; font-weight:600;">圆桌讨论</span>
+        </div>
+        <span style="font-size:12px; color:var(--rt-text-tertiary);">时长 18 分钟 · 12 条发言</span>
+      </div>
+      <div class="integration-body">
+
+        <!-- 收敛度进度条（紧凑版） -->
+        <div class="mini-conv-bar" style="margin-bottom:20px;">
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <span style="font-size:13px; font-weight:600;">讨论收敛度</span>
+            <span style="font-size:14px; font-weight:700; color:var(--conv-high); font-family:'SF Mono',monospace;">92%</span>
+          </div>
+          <div class="mini-conv-track">
+            <div class="mini-conv-fill" style="width:92%;"></div>
+          </div>
+          <div class="mini-conv-labels">
+            <span>6 共识 · 2 分歧</span>
+            <span>5 轮讨论</span>
+          </div>
+        </div>
+
+        <div class="integration-minimap">
+          <!-- 发言卡片预览 -->
+          <div class="integration-minimap-col">
+            <div class="minimap-label">发言卡片 (头像增强)</div>
+            <div class="minimap-card" style="border-left:3px solid var(--agent-1);">
+              <div class="minimap-avatar" style="background:var(--agent-1); position:relative;">饼<span class="mini-dot" style="background:var(--rt-accent-green);"></span></div>
+              <div class="minimap-body">
+                <div class="minimap-name">
+                  饼哥
+                  <span class="minimap-tag" style="background:rgba(122,162,247,0.15); color:var(--agent-1);">产品</span>
+                </div>
+                <div class="minimap-text">就这么定了，混合方案。像素姐出设计稿，码飞写后端。</div>
+              </div>
+            </div>
+            <div class="minimap-card" style="border-left:3px solid var(--agent-3);">
+              <div class="minimap-avatar" style="background:var(--agent-3); position:relative;">码<span class="mini-dot" style="background:var(--rt-accent-green);"></span></div>
+              <div class="minimap-body">
+                <div class="minimap-name">
+                  码飞
+                  <span class="minimap-tag" style="background:rgba(125,207,255,0.15); color:var(--agent-3);">工程</span>
+                </div>
+                <div class="minimap-text">没问题，Express 单文件方案两天搞定。</div>
+              </div>
+            </div>
+            <div class="minimap-card" style="border-left:3px solid var(--agent-2);">
+              <div class="minimap-avatar" style="background:var(--agent-2); position:relative;">像<span class="mini-dot" style="background:var(--rt-accent-amber);"></span></div>
+              <div class="minimap-body">
+                <div class="minimap-name">
+                  像素姐
+                  <span class="minimap-tag" style="background:rgba(187,154,247,0.15); color:var(--agent-2);">设计</span>
+                </div>
+                <div class="minimap-text">设计稿明天出，暗色主题 + 8px 网格。</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 参与者列表预览 -->
+          <div class="integration-minimap-col">
+            <div class="minimap-label">参与者列表</div>
+            <div style="background:var(--rt-bg); border:1px solid var(--rt-border); border-radius:var(--rt-radius-md); padding:14px;">
+              <div style="display:flex; flex-direction:column; gap:12px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <div style="width:28px;height:28px;border-radius:50%;background:var(--agent-1);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:white;">饼</div>
+                  <div style="flex:1;">
+                    <div style="font-size:13px; font-weight:600;">饼哥</div>
+                    <div style="font-size:11px; color:var(--rt-text-tertiary);">产品 · 4 条发言</div>
+                  </div>
+                  <div style="width:8px;height:8px;border-radius:50%;background:var(--rt-accent-green);"></div>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <div style="width:28px;height:28px;border-radius:50%;background:var(--agent-2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:white;">像</div>
+                  <div style="flex:1;">
+                    <div style="font-size:13px; font-weight:600;">像素姐</div>
+                    <div style="font-size:11px; color:var(--rt-text-tertiary);">设计 · 3 条发言</div>
+                  </div>
+                  <div style="width:8px;height:8px;border-radius:50%;background:var(--rt-accent-amber);"></div>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <div style="width:28px;height:28px;border-radius:50%;background:var(--agent-3);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:white;">码</div>
+                  <div style="flex:1;">
+                    <div style="font-size:13px; font-weight:600;">码飞</div>
+                    <div style="font-size:11px; color:var(--rt-text-tertiary);">工程 · 5 条发言</div>
+                  </div>
+                  <div style="width:8px;height:8px;border-radius:50%;background:var(--rt-accent-green);"></div>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <div style="width:28px;height:28px;border-radius:50%;background:var(--agent-4);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:white;">赫</div>
+                  <div style="flex:1;">
+                    <div style="font-size:13px; font-weight:600;">小赫</div>
+                    <div style="font-size:11px; color:var(--rt-text-tertiary);">协调 · 0 条发言</div>
+                  </div>
+                  <div style="width:8px;height:8px;border-radius:50%;background:var(--rt-text-tertiary);"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 5: 开发对接 -->
+  <div class="section">
+    <div class="section-title">
+      <span class="num">5</span>
+      给码飞的开发提示
+    </div>
+    <p class="section-desc">关键实现细节，帮助前端快速对接</p>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+      <div style="background:var(--rt-surface); border:1px solid var(--rt-border); border-radius:var(--rt-radius-md); padding:20px;">
+        <h4 style="font-size:14px; font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--agent-1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          头像系统
+        </h4>
+        <ul style="font-size:13px; color:var(--rt-text-secondary); line-height:2; padding-left:16px;">
+          <li>头像用 <code style="background:rgba(255,255,255,0.08); padding:1px 5px; border-radius:3px; font-size:12px;">background: var(--agent-N)</code> 纯色填充</li>
+          <li>取发言人名字的<strong style="color:var(--rt-text-primary);">第一个汉字</strong></li>
+          <li>状态点：绝对定位右下角，border 遮盖头像边缘</li>
+          <li>发言中状态：CSS animation + box-shadow 脉动</li>
+          <li>新增 <code style="background:rgba(255,255,255,0.08); padding:1px 5px; border-radius:3px; font-size:12px;">.style-ring-active</code> 给当前轮次发言者</li>
+        </ul>
+      </div>
+      <div style="background:var(--rt-surface); border:1px solid var(--rt-border); border-radius:var(--rt-radius-md); padding:20px;">
+        <h4 style="font-size:14px; font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--conv-high)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          收敛度
+        </h4>
+        <ul style="font-size:13px; color:var(--rt-text-secondary); line-height:2; padding-left:16px;">
+          <li>数据源：<code style="background:rgba(255,255,255,0.08); padding:1px 5px; border-radius:3px; font-size:12px;">roundtable_status()</code> 返回 convergence_score</li>
+          <li>SVG 圆环用 <code style="background:rgba(255,255,255,0.08); padding:1px 5px; border-radius:3px; font-size:12px;">stroke-dashoffset</code> 控制进度</li>
+          <li>色阶：<span style="color:var(--conv-low);">红</span>(低) → <span style="color:var(--conv-mid);">黄</span>(中) → <span style="color:var(--conv-high);">绿</span>(高) → <span style="color:var(--conv-full);">蓝</span>(达成)</li>
+          <li>紧凑版用线性进度条（8px 高），详细版用径向仪表盘</li>
+          <li>讨论结束后固定显示最终收敛度，不需要动画</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+  lucide.createIcons();
+</script>
+</body>
+</html>

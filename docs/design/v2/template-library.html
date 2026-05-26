@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Roundtable v2 — 讨论模板库 UI 设计</title>
+<style>
+  /* ========================================
+     Design Tokens (沿用 v2 规范)
+     ======================================== */
+  :root {
+    --rt-bg: #0F172A;
+    --rt-surface: #1E293B;
+    --rt-surface-hover: #253347;
+    --rt-brand: #4F46E5;
+    --rt-brand-hover: #6366F1;
+    --rt-accent-green: #10B981;
+    --rt-accent-amber: #F59E0B;
+    --rt-accent-red: #EF4444;
+    --rt-text-primary: #F8FAFC;
+    --rt-text-secondary: #94A3B8;
+    --rt-text-tertiary: #64748B;
+    --rt-border: rgba(255,255,255,0.08);
+
+    /* Agent 角色色 */
+    --agent-1: #7aa2f7;
+    --agent-2: #bb9af7;
+    --agent-3: #7dcfff;
+    --agent-4: #9ece6a;
+    --agent-5: #ff9e64;
+    --agent-6: #c0caf5;
+
+    /* 间距 */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --space-2xl: 48px;
+
+    /* 圆角 */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+
+    /* 字体 */
+    --font-sans: -apple-system, 'PingFang SC', 'SF Pro Text', 'Helvetica Neue', sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+    /* 动效 */
+    --ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+    --duration-fast: 150ms;
+    --duration-normal: 250ms;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--rt-bg);
+    color: var(--rt-text-primary);
+    font-family: var(--font-sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ========================================
+     设计稿标注头
+     ======================================== */
+  .design-header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(15,23,42,0.95);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--rt-border);
+    padding: var(--space-md) var(--space-xl);
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+  }
+  .design-header h1 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--rt-text-secondary);
+  }
+  .design-badge {
+    background: var(--rt-brand);
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 99px;
+  }
+  .design-spec {
+    background: var(--rt-surface);
+    border: 1px solid var(--rt-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-lg);
+    margin: var(--space-xl);
+    font-size: 13px;
+    color: var(--rt-text-secondary);
+    line-height: 1.8;
+  }
+  .design-spec code {
+    background: rgba(79,70,229,0.15);
+    color: var(--agent-3);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  /* ========================================
+     页面整体布局
+     ======================================== */
+  .page-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: var(--space-xl) var(--space-lg);
+  }
+
+  /* ========================================
+     顶部导航栏 (模板库页面)
+     ======================================== */
+  .top-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-md) 0;
+    margin-bottom: var(--space-lg);
+  }
+  .nav-brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--rt-text-primary);
+  }
+  .nav-brand svg { width: 24px; height: 24px; color: var(--rt-brand); }
+  .nav-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+  }
+  .nav-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border: 1px solid var(--rt-border);
+    color: var(--rt-text-secondary);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-out);
+  }
+  .nav-btn:hover {
+    border-color: var(--rt-brand);
+    color: var(--rt-text-primary);
+  }
+  .nav-btn.primary {
+    background: var(--rt-brand);
+    border-color: var(--rt-brand);
+    color: white;
+  }
+  .nav-btn.primary:hover { background: var(--rt-brand-hover); }
+  .nav-btn svg { width: 16px; height: 16px; }
+
+  /* ========================================
+     Hero 区域
+     ======================================== */
+  .hero-section {
+    text-align: center;
+    padding: var(--space-2xl) 0 var(--space-xl);
+  }
+  .hero-title {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--rt-text-primary);
+    margin-bottom: var(--space-sm);
+    letter-spacing: -0.5px;
+  }
+  .hero-subtitle {
+    font-size: 16px;
+    color: var(--rt-text-secondary);
+    max-width: 520px;
+    margin: 0 auto var(--space-lg);
+  }
+  .hero-search {
+    max-width: 480px;
+    margin: 0 auto;
+    position: relative;
+  }
+  .hero-search input {
+    width: 100%;
+    background: var(--rt-surface);
+    border: 1px solid var(--rt-border);
+    border-radius: var(--radius-md);
+    padding: 12px 16px 12px 44px;
+    color: var(--rt-text-primary);
+    font-size: 15px;
+    outline: none;
+    transition: border-color var(--duration-fast) var(--ease-out);
+  }
+  .hero-search input::placeholder { color: var(--rt-text-tertiary); }
+  .hero-search input:focus { border-color: var(--rt-brand); }
+  .hero-search .search-icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--rt-text-tertiary);
+    width: 18px;
+    height: 18px;
+  }
+
+  /* ========================================
+     分类标签筛选
+     ======================================== */
+  .category-filters {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-xl);
+    flex-wrap: wrap;
+  }
+  .filter-chip {
+    padding: 6px 14px;
+    background: var(--rt-surface);
+    border: 1px solid var(--rt-border);
+    border-radius: 99px;
+    font-size: 13px;
+    color: var(--rt-text-secondary);
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-out);
+    white-space: nowrap;
+  }
+  .filter-chip:hover {
+    border-color: var(--rt-brand);
+    color: var(--rt-text-primary);
+  }
+  .filter-chip.active {
+    background: var(--rt-brand);
+    border-color: var(--rt-brand);
+    color: white;
+  }
+  .filter-chip .chip-count {
+    display: inline-block;
+    background: rgba(255,255,255,0.15);
+    padding: 0 6px;
+    border-radius: 99px;
+    font-size: 11px;
+    margin-left: 4px;
+  }
+
+  /* ========================================
+     模板卡片网格
+     ======================================== */
+  .template-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-md);
+    margin-bottom: var(--space-2xl);
+  }
+  @media (max-width: 1024px) {
+    .template-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .template-grid { grid-template-columns: 1fr; }
+  }
+
+  /* 模板卡片 */
+  .template-card {
+    background: var(--rt-surface);
+    border: 1px solid var(--rt-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    cursor: pointer;
+    transition: all var(--duration-normal) var(--ease-out);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .template-card:hover {
+    border-color: var(--rt-brand);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  }
+
+  /* 卡片顶部色条 */
+  .template-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--card-accent, var(--rt-brand));
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-out);
+  }
+  .template-card:hover::before { opacity: 1; }
+
+  /* 卡片头 */
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+  }
+  .card-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+  .card-title-area {
+    flex: 1;
+    min-width: 0;
+  }
+  .card-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--rt-text-primary);
+    margin-bottom: 2px;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .card-author {
+    font-size: 12px;
+    color: var(--rt-text-tertiary);
+  }
+  .card-featured {
+    background: var(--rt-accent-amber);
+    color: #000;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+
+  /* 卡片描述 */
+  .card-desc {
+    font-size: 13px;
+    color: var(--rt-text-secondary);
+    line-height: 1.6;
+    margin-bottom: var(--space-md);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    flex: 1;
+  }
+
+  /* 卡片标签 */
+  .card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: var(--space-md);
+  }
+  .card-tag {
+    font-size: 11px;
+    color: var(--rt-text-tertiary);
+    background: rgba(255,255,255,0.05);
+    padding: 2px 8px;
+    border-radius: 99px;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  /* 卡片底部信息 */
+  .card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--rt-border);
+  }
+  .card-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    font-size: 12px;
+    color: var(--rt-text-tertiary);
+  }
+  .card-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .card-meta-item svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* 导入按钮 */
+  .import-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    border: 1px solid var(--rt-brand);
+    color: var(--rt-brand);
+    padding: 4px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    opacity: 0;
+    transform: translateX(8px);
+    transition: all var(--duration-fast) var(--ease-out);
+  }
+  .template-card:hover .import-btn {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .import-btn:hover {
+    background: var(--rt-brand);
+    color: white;
+  }
+  .import-btn svg { width: 14px; height: 14px; }
+
+  /* 预置 Agent 标签 */
+  .agent-tags {
+    display: flex;
+    align-items: center;
+    gap: -4px;
+    margin-bottom: var(--space-sm);
+  }
+  .agent-tag {
+    width: 24px;
+    height: 24px;
+    border-radius: 99px;
+    border: 2px solid var(--rt-surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    color: white;
+    margin-left: -6px;
+  }
+  .agent-tag:first-child { margin-left: 0; }
+  .agent-tag.more {
+    background: var(--rt-text-tertiary);
+    font-size: 9px;
+  }
+</style>
+</head>
+<body>
+
+<!-- 设计稿标注头 -->
+<div class="design-header">
+  <h1>Agent Roundtable v2 设计稿</h1>
+  <span class="design-badge">v2.2</span>
+  <span style="color: var(--rt-text-tertiary); font-size: 13px;">讨论模板库 UI — 卡片布局 + 一键导入</span>
+</div>
+
+<!-- 设计规范说明 -->
+<div class="design-spec">
+  <strong>📐 设计规格说明</strong><br>
+  • 画布宽度：<code>1200px</code>（桌面端）/ 自适应 <code>375px</code>（移动端）<br>
+  • 卡片网格：<code>3 列</code>（≥1024px）→ <code>2 列</code>（≥640px）→ <code>1 列</code>（&lt;640px）<br>
+  • 搜索框：全局搜索模板名称 / 标签 / 描述<br>
+  • 分类筛选：横向 Chip 滚动，支持多选<br>
+  • 一键导入：Hover 显示操作栏，点击后弹出确认 Sheet<br>
+  • 图标：Lucide Icons 20px / stroke-width 1.5
+</div>
+
+<!-- ===================== 模板库页面 ===================== -->
+<div class="page-container">
+
+  <!-- 顶部导航 -->
+  <nav class="top-nav">
+    <div class="nav-brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+      Agent Roundtable
+    </div>
+    <div class="nav-actions">
+      <button class="nav-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="m8 8 4-4 4 4"/></svg>
+        我的模板
+      </button>
+      <button class="nav-btn primary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        创建模板
+      </button>
+    </div>
+  </nav>
+
+  <!-- Hero 区域 -->
+  <section class="hero-section">
+    <h2 class="hero-title">🎭 讨论模板库</h2>
+    <p class="hero-subtitle">选择一个模板，快速启动多 Agent 讨论。从技术选型到创意头脑风暴，一应俱全。</p>
+    <div class="hero-search">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+      </svg>
+      <input type="text" placeholder="搜索模板名称、标签或描述..." />
+    </div>
+  </section>
+
+  <!-- 分类标签 -->
+  <div class="category-filters">
+    <div class="filter-chip active">全部 <span class="chip-count">24</span></div>
+    <div class="filter-chip">技术选型 <span class="chip-count">6</span></div>
+    <div class="filter-chip">代码审查 <span class="chip-count">4</span></div>
+    <div class="filter-chip">头脑风暴 <span class="chip-count">5</span></div>
+    <div class="filter-chip">方案评审 <span class="chip-count">3</span></div>
+    <div class="filter-chip">文档撰写 <span class="chip-count">3</span></div>
+    <div class="filter-chip">辩论赛 <span class="chip-count">2</span></div>
+    <div class="filter-chip">自定义 <span class="chip-count">1</span></div>
+  </div>

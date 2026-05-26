@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Roundtable — 安全状态页设计</title>
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+/* ========== Design Tokens ========== */
+:root {
+  --rt-bg: #0F172A;
+  --rt-security-bg: #0D1525;
+  --rt-surface: #1E293B;
+  --rt-surface-light: rgba(255,255,255,0.06);
+  --rt-border: rgba(255,255,255,0.08);
+  --rt-text-primary: #F8FAFC;
+  --rt-text-secondary: #94A3B8;
+  --rt-text-tertiary: #64748B;
+  --rt-brand: #4F46E5;
+  --rt-brand-hover: #6366F1;
+  --rt-expired: #EF4444;
+  --rt-expired-glow: rgba(239,68,68,0.15);
+  --rt-password: #6366F1;
+  --rt-password-glow: rgba(99,102,241,0.15);
+  --rt-revoked: #F59E0B;
+  --rt-revoked-glow: rgba(245,158,11,0.15);
+  --rt-error: #EF4444;
+  --rt-radius-sm: 6px;
+  --rt-radius-md: 10px;
+  --rt-radius-lg: 16px;
+  --rt-font: -apple-system, 'PingFang SC', 'SF Pro Text', 'Helvetica Neue', sans-serif;
+}
+
+/* ========== Reset ========== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; }
+body {
+  font-family: var(--rt-font);
+  background: var(--rt-bg);
+  color: var(--rt-text-primary);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ========== Tab Switcher ========== */
+.design-tabs {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  display: flex; gap: 4px; padding: 12px 16px;
+  background: rgba(15,23,42,0.95); backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--rt-border);
+}
+.design-tabs .tab-label {
+  font-size: 11px; color: var(--rt-text-tertiary);
+  text-transform: uppercase; letter-spacing: 1px;
+  padding: 4px 12px; align-self: center;
+}
+.tab-btn {
+  padding: 8px 20px; border-radius: 8px; border: 1px solid var(--rt-border);
+  background: transparent; color: var(--rt-text-secondary);
+  font-family: var(--rt-font); font-size: 14px; cursor: pointer;
+  transition: all 0.2s ease;
+}
+.tab-btn:hover { background: var(--rt-surface-light); color: var(--rt-text-primary); }
+.tab-btn.active { background: var(--rt-brand); color: #fff; border-color: var(--rt-brand); }
+
+/* ========== Page Container ========== */
+.page { display: none; min-height: 100vh; padding-top: 64px; }
+.page.active { display: flex; }
+
+/* ========== Security Card ========== */
+.security-page {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: calc(100vh - 64px); width: 100%;
+  padding: 32px 16px;
+}
+.security-card {
+  width: 100%; max-width: 420px; text-align: center;
+  animation: fadeInUp 0.4s ease both;
+}
+
+/* Icon Container */
+.icon-wrap {
+  width: 120px; height: 120px; margin: 0 auto 32px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; position: relative;
+}
+.icon-wrap::before {
+  content: ''; position: absolute; inset: -20px;
+  border-radius: 50%; filter: blur(40px);
+  animation: pulse 3s ease-in-out infinite;
+}
+.icon-wrap i { width: 64px; height: 64px; stroke-width: 1.5; position: relative; z-index: 1; }
+
+/* Color Variants */
+.icon-wrap.expired { background: rgba(239,68,68,0.1); }
+.icon-wrap.expired::before { background: var(--rt-expired-glow); }
+.icon-wrap.expired i { color: var(--rt-expired); }
+
+.icon-wrap.password { background: rgba(99,102,241,0.1); }
+.icon-wrap.password::before { background: var(--rt-password-glow); }
+.icon-wrap.password i { color: var(--rt-password); }
+
+.icon-wrap.revoked { background: rgba(245,158,11,0.1); }
+.icon-wrap.revoked::before { background: var(--rt-revoked-glow); }
+.icon-wrap.revoked i { color: var(--rt-revoked); }
+
+/* Text */
+.security-title {
+  font-size: 24px; font-weight: 600; margin-bottom: 12px;
+  letter-spacing: -0.02em;
+}
+.security-desc {
+  font-size: 16px; color: var(--rt-text-secondary);
+  line-height: 1.6; margin-bottom: 40px; max-width: 340px;
+  margin-left: auto; margin-right: auto;
+}
+
+/* ========== Action Buttons ========== */
+.action-area { width: 100%; margin-bottom: 32px; }
+
+/* Ghost Button (expired/revoked) */
+.btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; height: 48px; padding: 0 24px;
+  border: 1.5px dashed var(--rt-border); border-radius: var(--rt-radius-md);
+  background: transparent; color: var(--rt-text-secondary);
+  font-family: var(--rt-font); font-size: 15px; cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-ghost:hover {
+  border-style: solid; color: var(--rt-text-primary);
+  background: var(--rt-surface-light);
+}
+
+/* Password Input + Submit */
+.password-form { display: flex; flex-direction: column; gap: 12px; }
+.password-input-wrap {
+  position: relative; width: 100%;
+}
+.password-input-wrap i {
+  position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
+  width: 18px; height: 18px; color: var(--rt-text-tertiary);
+  pointer-events: none;
+}
+.password-input {
+  width: 100%; height: 48px; padding: 0 16px 0 44px;
+  border: 1.5px solid var(--rt-border); border-radius: var(--rt-radius-md);
+  background: var(--rt-surface); color: var(--rt-text-primary);
+  font-family: var(--rt-font); font-size: 15px;
+  outline: none; transition: border-color 0.2s ease;
+}
+.password-input::placeholder { color: var(--rt-text-tertiary); }
+.password-input:focus { border-color: var(--rt-password); }
+
+/* Error State */
+.password-input.error {
+  border-color: var(--rt-error);
+  animation: shake 0.3s ease;
+}
+.error-msg {
+  font-size: 13px; color: var(--rt-error);
+  text-align: left; padding-left: 4px;
+  display: none;
+}
+.error-msg.show { display: block; }
+
+/* Submit Button */
+.btn-primary {
+  width: 100%; height: 48px;
+  border: none; border-radius: var(--rt-radius-md);
+  background: var(--rt-brand); color: #fff;
+  font-family: var(--rt-font); font-size: 15px; font-weight: 500;
+  cursor: pointer; transition: all 0.2s ease;
+}
+.btn-primary:hover { background: var(--rt-brand-hover); box-shadow: 0 0 20px rgba(79,70,229,0.3); }
+
+/* Footer Link */
+.back-link {
+  font-size: 14px; color: var(--rt-text-tertiary);
+  text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
+  transition: color 0.2s ease;
+}
+.back-link:hover { color: var(--rt-text-secondary); }
+
+/* ========== Brand Logo ========== */
+.brand-logo {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 48px; opacity: 0.6;
+}
+.brand-logo-icon {
+  width: 28px; height: 28px; border-radius: 6px;
+  background: var(--rt-brand); display: flex; align-items: center; justify-content: center;
+}
+.brand-logo-icon i { width: 16px; height: 16px; color: #fff; }
+.brand-logo-text { font-size: 14px; font-weight: 500; color: var(--rt-text-secondary); }
+
+/* ========== Animations ========== */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px); }
+  40% { transform: translateX(8px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+/* ========== Annotations ========== */
+.annotation {
+  position: fixed; bottom: 16px; right: 16px; z-index: 100;
+  background: var(--rt-surface); border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-md); padding: 12px 16px;
+  font-size: 12px; color: var(--rt-text-tertiary);
+  max-width: 280px; line-height: 1.5;
+}
+.annotation strong { color: var(--rt-text-secondary); }
+</style>
+</head>
+<body>
+
+<!-- Tab Switcher -->
+<div class="design-tabs">
+  <span class="tab-label">状态：</span>
+  <button class="tab-btn active" onclick="switchPage('expired')">⏰ 链接过期</button>
+  <button class="tab-btn" onclick="switchPage('password')">🔒 密码验证</button>
+  <button class="tab-btn" onclick="switchPage('revoked')">🛡️ 链接撤销</button>
+  <button class="tab-btn" onclick="switchPage('password-error')">❌ 密码错误</button>
+</div>
+
+<!-- ===== 链接过期 ===== -->
+<div class="page active" id="page-expired">
+  <div class="security-page">
+    <div class="security-card">
+      <div class="brand-logo">
+        <div class="brand-logo-icon"><i data-lucide="message-circle"></i></div>
+        <span class="brand-logo-text">Agent Roundtable</span>
+      </div>
+      <div class="icon-wrap expired">
+        <i data-lucide="clock"></i>
+      </div>
+      <h1 class="security-title">链接已过期</h1>
+      <p class="security-desc">该讨论链接已失效。讨论内容可能已被归档或设置了访问期限。</p>
+      <div class="action-area">
+        <button class="btn-ghost">
+          <i data-lucide="external-link" style="width:16px;height:16px"></i>
+          查看最新讨论
+        </button>
+      </div>
+      <a href="#" class="back-link">
+        <i data-lucide="arrow-left" style="width:14px;height:14px"></i>
+        返回首页
+      </a>
+    </div>
+  </div>
+  <div class="annotation">
+    <strong>设计说明</strong>：红色时钟图标 + 60px 光晕呼吸动画。虚线按钮暗示"不可用但仍可探索"。
+  </div>
+</div>
+
+<!-- ===== 密码验证 ===== -->
+<div class="page" id="page-password">
+  <div class="security-page">
+    <div class="security-card">
+      <div class="brand-logo">
+        <div class="brand-logo-icon"><i data-lucide="message-circle"></i></div>
+        <span class="brand-logo-text">Agent Roundtable</span>
+      </div>
+      <div class="icon-wrap password">
+        <i data-lucide="lock"></i>
+      </div>
+      <h1 class="security-title">需要访问密码</h1>
+      <p class="security-desc">该讨论已设置访问保护，请输入密码查看。</p>
+      <div class="action-area">
+        <div class="password-form">
+          <div class="password-input-wrap">
+            <i data-lucide="key-round"></i>
+            <input type="password" class="password-input" placeholder="输入密码..." />
+          </div>
+          <button class="btn-primary">进入讨论</button>
+        </div>
+      </div>
+      <a href="#" class="back-link">
+        <i data-lucide="arrow-left" style="width:14px;height:14px"></i>
+        返回首页
+      </a>
+    </div>
+  </div>
+  <div class="annotation">
+    <strong>设计说明</strong>：靛蓝色锁图标 + 输入框。focus 时边框变为品牌色，提交按钮 hover 有光晕效果。
+  </div>
+</div>
+
+<!-- ===== 链接撤销 ===== -->
+<div class="page" id="page-revoked">
+  <div class="security-page">
+    <div class="security-card">
+      <div class="brand-logo">
+        <div class="brand-logo-icon"><i data-lucide="message-circle"></i></div>
+        <span class="brand-logo-text">Agent Roundtable</span>
+      </div>
+      <div class="icon-wrap revoked">
+        <i data-lucide="shield-off"></i>
+      </div>
+      <h1 class="security-title">链接已撤销</h1>
+      <p class="security-desc">该讨论的分享链接已被创建者撤销，无法继续访问。</p>
+      <div class="action-area">
+        <button class="btn-ghost">
+          <i data-lucide="external-link" style="width:16px;height:16px"></i>
+          浏览其他讨论
+        </button>
+      </div>
+      <a href="#" class="back-link">
+        <i data-lucide="arrow-left" style="width:14px;height:14px"></i>
+        返回首页
+      </a>
+    </div>
+  </div>
+  <div class="annotation">
+    <strong>设计说明</strong>：橙色盾牌图标，传达"主动撤销"语义，区别于"自然过期"。
+  </div>
+</div>
+
+<!-- ===== 密码错误 ===== -->
+<div class="page" id="page-password-error">
+  <div class="security-page">
+    <div class="security-card">
+      <div class="brand-logo">
+        <div class="brand-logo-icon"><i data-lucide="message-circle"></i></div>
+        <span class="brand-logo-text">Agent Roundtable</span>
+      </div>
+      <div class="icon-wrap password">
+        <i data-lucide="lock"></i>
+      </div>
+      <h1 class="security-title">需要访问密码</h1>
+      <p class="security-desc">该讨论已设置访问保护，请输入密码查看。</p>
+      <div class="action-area">
+        <div class="password-form">
+          <div class="password-input-wrap">
+            <i data-lucide="key-round"></i>
+            <input type="password" class="password-input error" value="wrong123" />
+          </div>
+          <span class="error-msg show">密码不正确，请重试</span>
+          <button class="btn-primary">进入讨论</button>
+        </div>
+      </div>
+      <a href="#" class="back-link">
+        <i data-lucide="arrow-left" style="width:14px;height:14px"></i>
+        返回首页
+      </a>
+    </div>
+  </div>
+  <div class="annotation">
+    <strong>设计说明</strong>：错误状态下输入框边框变红 + shake 动画，下方显示红色错误提示文字。
+  </div>
+</div>
+
+<script>
+// Initialize Lucide icons
+lucide.createIcons();
+
+// Tab switching
+function switchPage(pageId) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + pageId).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

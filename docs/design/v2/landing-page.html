@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Roundtable — Landing Page v2 设计稿</title>
+<meta name="description" content="多 Agent 圆桌讨论引擎 — 让 AI 像开会一样讨论、追踪共识、生成决策记录">
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+/* ========== Design Tokens ========== */
+:root {
+  --rt-bg: #0F172A;
+  --rt-bg-deep: #080D1A;
+  --rt-surface: #1E293B;
+  --rt-surface-hover: #253347;
+  --rt-brand: #4F46E5;
+  --rt-brand-hover: #6366F1;
+  --rt-brand-glow: rgba(79,70,229,0.25);
+  --rt-accent-green: #10B981;
+  --rt-accent-amber: #F59E0B;
+  --rt-accent-red: #EF4444;
+  --rt-text-primary: #F8FAFC;
+  --rt-text-secondary: #94A3B8;
+  --rt-text-tertiary: #64748B;
+  --rt-border: rgba(255,255,255,0.08);
+  --rt-border-strong: rgba(255,255,255,0.12);
+  --rt-radius-sm: 6px;
+  --rt-radius-md: 10px;
+  --rt-radius-lg: 16px;
+  --rt-radius-xl: 24px;
+  --rt-font: -apple-system, 'PingFang SC', 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  --rt-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  /* Agent 角色色 (Tokyo Night) */
+  --agent-1: #7aa2f7;
+  --agent-2: #bb9af7;
+  --agent-3: #7dcfff;
+  --agent-4: #9ece6a;
+  --agent-5: #ff9e64;
+  --agent-6: #c0caf5;
+}
+
+/* ========== Reset ========== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; scroll-behavior: smooth; }
+body {
+  font-family: var(--rt-font);
+  background: var(--rt-bg);
+  color: var(--rt-text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--rt-brand); text-decoration: none; }
+code { font-family: var(--rt-mono); }
+
+/* ========== Layout ========== */
+.container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+.section { padding: 96px 0; }
+.section-title {
+  font-size: clamp(28px, 4vw, 42px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin-bottom: 12px;
+}
+.section-subtitle {
+  font-size: 17px;
+  color: var(--rt-text-secondary);
+  max-width: 560px;
+  line-height: 1.6;
+}
+.section-header {
+  text-align: center;
+  margin-bottom: 56px;
+}
+.section-header .section-subtitle {
+  margin: 0 auto;
+}
+
+/* ========== Design Note Banner ========== */
+.design-note {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: linear-gradient(135deg, var(--rt-brand), #7c3aed);
+  color: white;
+  text-align: center;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+.design-note code {
+  background: rgba(255,255,255,0.2);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* ========== Nav ========== */
+.nav {
+  position: sticky;
+  top: 40px;
+  z-index: 100;
+  background: rgba(15,23,42,0.85);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--rt-border);
+  padding: 0 24px;
+}
+.nav-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+}
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--rt-text-primary);
+}
+.nav-brand svg { width: 28px; height: 28px; }
+.nav-links { display: flex; gap: 32px; }
+.nav-links a {
+  color: var(--rt-text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  transition: color 0.15s;
+}
+.nav-links a:hover { color: var(--rt-text-primary); }
+.nav-cta {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* ========== Buttons ========== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: var(--rt-radius-md);
+  font-size: 14px;
+  font-weight: 600;
+  border: 1px solid var(--rt-border-strong);
+  background: var(--rt-surface);
+  color: var(--rt-text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-decoration: none;
+}
+.btn:hover {
+  background: var(--rt-surface-hover);
+  border-color: rgba(255,255,255,0.16);
+}
+.btn-primary {
+  background: var(--rt-brand);
+  border-color: var(--rt-brand);
+  color: white;
+}
+.btn-primary:hover {
+  background: var(--rt-brand-hover);
+  box-shadow: 0 0 24px var(--rt-brand-glow);
+}
+.btn-lg {
+  padding: 14px 28px;
+  font-size: 16px;
+  border-radius: var(--rt-radius-lg);
+}
+.btn-sm {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+.btn-ghost {
+  background: transparent;
+  border-color: var(--rt-border);
+}
+.btn i { width: 18px; height: 18px; }
+
+/* ========== Hero ========== */
+.hero {
+  padding: 80px 0 64px;
+  position: relative;
+  overflow: hidden;
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -200px;
+  right: -200px;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, var(--rt-brand-glow) 0%, transparent 70%);
+  pointer-events: none;
+}
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  align-items: center;
+}
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 13px;
+  color: var(--rt-text-secondary);
+  margin-bottom: 24px;
+}
+.badge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--rt-accent-green);
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.hero-title {
+  font-size: clamp(36px, 5vw, 56px);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+  margin-bottom: 20px;
+  background: linear-gradient(135deg, var(--rt-text-primary) 0%, var(--rt-text-secondary) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.hero-lead {
+  font-size: 18px;
+  color: var(--rt-text-secondary);
+  line-height: 1.7;
+  margin-bottom: 32px;
+  max-width: 500px;
+}
+.hero-install {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-md);
+  padding: 4px;
+  margin-bottom: 24px;
+}
+.hero-install code {
+  padding: 10px 16px;
+  font-size: 14px;
+  color: var(--rt-accent-green);
+  user-select: all;
+}
+.copy-btn {
+  background: var(--rt-surface-hover);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-sm);
+  padding: 8px 12px;
+  color: var(--rt-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+}
+.copy-btn:hover { color: var(--rt-text-primary); background: var(--rt-brand); }
+.hero-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.hero-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+.tag {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--rt-border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--rt-text-tertiary);
+}
+
+/* ========== Roundtable Visualization ========== */
+.hero-visual { position: relative; }
+.roundtable-viz {
+  position: relative;
+  width: 320px;
+  height: 320px;
+  margin: 0 auto;
+}
+.viz-glow {
+  position: absolute;
+  inset: -40px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--rt-brand-glow) 0%, transparent 70%);
+  animation: glow-pulse 3s ease-in-out infinite;
+}
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+.viz-ring {
+  position: absolute;
+  inset: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--rt-border);
+  animation: ring-rotate 20s linear infinite;
+}
+@keyframes ring-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.viz-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+.viz-score {
+  display: block;
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--rt-accent-green);
+  line-height: 1;
+}
+.viz-label {
+  display: block;
+  font-size: 11px;
+  color: var(--rt-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-top: 4px;
+}
+.viz-node {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--rt-surface);
+  border: 2px solid var(--c, var(--rt-brand));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c, var(--rt-text-primary));
+  box-shadow: 0 0 16px rgba(0,0,0,0.3);
+  transition: transform 0.3s, box-shadow 0.3s;
+}
+.viz-node:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--c) 40%, transparent);
+}
+/* Position nodes around the circle */
+.n1 { top: 0; left: 50%; transform: translateX(-50%); }
+.n2 { top: 25%; right: 0; }
+.n3 { bottom: 25%; right: 0; }
+.n4 { bottom: 0; left: 50%; transform: translateX(-50%); }
+.n5 { bottom: 25%; left: 0; }
+.n6 { top: 25%; left: 0; }
+
+.viz-panel {
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-lg);
+  padding: 20px;
+  margin-top: 24px;
+  max-width: 320px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.viz-panel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rt-border);
+  font-size: 14px;
+}
+.viz-panel-row:last-child { border-bottom: none; }
+.viz-panel-row .label { color: var(--rt-text-secondary); }
+.convergence-bar {
+  width: 100px;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.convergence-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--rt-brand), var(--rt-accent-green));
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+.consensus-badge { color: var(--rt-accent-green); font-weight: 600; }
+.disagree-badge { color: var(--rt-accent-amber); font-weight: 600; }
+.output-badge { font-size: 13px; }
+
+/* ========== Pain Points ========== */
+.pain-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+.pain-card {
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-lg);
+  padding: 32px 24px;
+  transition: border-color 0.25s, transform 0.25s;
+}
+.pain-card:hover {
+  border-color: var(--rt-border-strong);
+  transform: translateY(-4px);
+}
+.pain-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--rt-radius-md);
+  background: color-mix(in srgb, var(--c) 12%, transparent);
+  color: var(--c);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+.pain-num {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--rt-text-tertiary);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.pain-card h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 8px 0 10px;
+}
+.pain-card p {
+  font-size: 14px;
+  color: var(--rt-text-secondary);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+.pain-terminal {
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-sm);
+  padding: 10px 14px;
+  font-family: var(--rt-mono);
+  font-size: 12px;
+  color: var(--rt-text-tertiary);
+}
+.term-prompt { color: var(--rt-accent-green); margin-right: 6px; }
+
+/* ========== Features ========== */
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+}
+.feature-card {
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-lg);
+  padding: 28px 20px;
+  transition: border-color 0.25s, transform 0.25s;
+  position: relative;
+}
+.feature-card:hover {
+  border-color: var(--rt-brand);
+  transform: translateY(-4px);
+}
+.feature-num {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--rt-brand);
+  opacity: 0.5;
+  margin-bottom: 12px;
+}
+.feature-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--rt-radius-md);
+  background: var(--rt-brand-glow);
+  color: var(--rt-brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+.feature-card h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.feature-card p {
+  font-size: 14px;
+  color: var(--rt-text-secondary);
+  line-height: 1.5;
+}
+
+/* ========== Workflow ========== */
+.workflow-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.workflow-step {
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-lg);
+  padding: 28px 32px;
+  text-align: center;
+  min-width: 180px;
+  transition: border-color 0.25s;
+}
+.workflow-step:hover { border-color: var(--rt-brand); }
+.step-num {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--rt-brand);
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+.workflow-step h3 { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+.workflow-step code {
+  font-size: 12px;
+  color: var(--rt-text-tertiary);
+}
+.workflow-arrow {
+  color: var(--rt-text-tertiary);
+  flex-shrink: 0;
+}
+
+/* ========== Quickstart ========== */
+.quickstart-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  align-items: center;
+}
+.code-card {
+  background: #0d1117;
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-lg);
+  overflow: hidden;
+}
+.code-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.03);
+  border-bottom: 1px solid var(--rt-border);
+  font-size: 13px;
+  color: var(--rt-text-tertiary);
+}
+.code-lights { display: flex; gap: 6px; }
+.code-lights i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ff5f57;
+}
+.code-lights i:nth-child(2) { background: #ffbd2e; }
+.code-lights i:nth-child(3) { background: #28c840; }
+.code-card pre {
+  padding: 20px;
+  font-family: var(--rt-mono);
+  font-size: 13px;
+  line-height: 1.7;
+  color: #c9d1d9;
+  overflow-x: auto;
+}
+.hl-kw { color: #ff7b72; }
+.hl-str { color: #a5d6ff; }
+.hl-fn { color: #d2a8ff; }
+.hl-num { color: #79c0ff; }
+
+/* ========== Use Cases ========== */
+.cases-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+}
+.case-card {
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-lg);
+  padding: 24px 20px;
+  transition: border-color 0.25s;
+}
+.case-card:hover { border-color: var(--rt-brand); }
+.case-tag {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--rt-brand);
+  letter-spacing: 0.12em;
+}
+.case-card h3 { font-size: 15px; font-weight: 700; margin: 8px 0 6px; }
+.case-card p { font-size: 13px; color: var(--rt-text-secondary); line-height: 1.5; }
+
+/* ========== Channels ========== */
+.channels-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+}
+.channel-card {
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-lg);
+  padding: 24px;
+  transition: border-color 0.25s;
+}
+.channel-card:hover { border-color: var(--rt-brand); }
+.channel-tag {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--rt-text-tertiary);
+  letter-spacing: 0.12em;
+}
+.channel-card h3 { font-size: 16px; font-weight: 700; margin: 8px 0 6px; }
+.channel-card p { font-size: 13px; color: var(--rt-text-secondary); margin-bottom: 16px; }
+.channel-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.channel-status .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.channel-status.available { color: var(--rt-accent-green); }
+.channel-status.available .status-dot { background: var(--rt-accent-green); }
+.channel-status.soon { color: var(--rt-accent-amber); }
+.channel-status.soon .status-dot { background: var(--rt-accent-amber); }
+.channel-status.planned { color: var(--rt-text-tertiary); }
+.channel-status.planned .status-dot { background: var(--rt-text-tertiary); }
+.channel-card a {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--rt-brand);
+}
+
+/* ========== CTA ========== */
+.cta-section { padding: 80px 0; }
+.cta-box {
+  background: linear-gradient(135deg, var(--rt-surface) 0%, rgba(79,70,229,0.1) 100%);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--rt-radius-xl);
+  padding: 56px 48px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 40px;
+  align-items: center;
+}
+.cta-box h2 {
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 700;
+  line-height: 1.3;
+  margin-bottom: 12px;
+}
+.cta-box p {
+  font-size: 16px;
+  color: var(--rt-text-secondary);
+}
+
+/* ========== Footer ========== */
+.footer {
+  border-top: 1px solid var(--rt-border);
+  padding: 24px 0;
+}
+.footer-inner {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--rt-text-tertiary);
+}
+
+/* ========== Responsive ========== */
+@media (max-width: 1024px) {
+  .hero-grid { grid-template-columns: 1fr; text-align: center; }
+  .hero-lead { max-width: 100%; }
+  .hero-actions { justify-content: center; }
+  .hero-tags { justify-content: center; }
+  .pain-grid { grid-template-columns: 1fr; }
+  .features-grid { grid-template-columns: repeat(2, 1fr); }
+  .quickstart-grid { grid-template-columns: 1fr; }
+  .cases-grid { grid-template-columns: repeat(2, 1fr); }
+  .channels-grid { grid-template-columns: repeat(2, 1fr); }
+  .cta-box { grid-template-columns: 1fr; text-align: center; }
+  .footer-inner { flex-direction: column; gap: 4px; text-align: center; }
+}
+@media (max-width: 640px) {
+  .nav-links { display: none; }
+  .features-grid { grid-template-columns: 1fr; }
+  .workflow-steps { flex-direction: column; }
+  .workflow-arrow { transform: rotate(90deg); }
+  .cases-grid { grid-template-columns: 1fr; }
+  .channels-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<!-- Design Note Banner -->
+<div class="design-note">
+  🎨 设计稿 — Agent Roundtable v2 Landing Page &nbsp;|&nbsp; 设计师: 像素姐 &nbsp;|&nbsp; <code>v2/landing-page.html</code>
+</div>
+
+<!-- Navigation -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="nav-brand" href="#">
+      <svg viewBox="0 0 64 64" fill="none">
+        <circle cx="32" cy="32" r="20" stroke="var(--rt-brand)" stroke-width="4"/>
+        <circle cx="32" cy="12" r="5" fill="var(--agent-1)"/>
+        <circle cx="49" cy="42" r="5" fill="var(--agent-2)"/>
+        <circle cx="15" cy="42" r="5" fill="var(--agent-3)"/>
+        <path d="M32 23l9 9-9 9-9-9 9-9z" fill="var(--rt-brand)" opacity="0.6"/>
+      </svg>
+      Roundtable
+    </a>
+    <div class="nav-links">
+      <a href="#features">功能</a>
+      <a href="#workflow">工作流</a>
+      <a href="#templates">模板库</a>
+      <a href="#community">社区</a>
+    </div>
+    <div class="nav-cta">
+      <a class="btn btn-sm btn-ghost" href="https://github.com/MoyuFamily/agent-roundtable">
+        <i data-lucide="github" style="width:16px;height:16px"></i> GitHub
+      </a>
+      <a class="btn btn-sm btn-primary" href="#quickstart">快速开始</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ==================== PAIN POINTS ==================== -->
+<section class="section" id="features">
+  <div class="container">
+    <div class="section-header">
+      <h2 class="section-title">多 Agent 不缺发言，缺的是一张能收敛的圆桌</h2>
+      <p class="section-subtitle">当多个 Agent 同时参与产品、技术或代码评审时，Roundtable 提供讨论边界、发言顺序、分歧记录和结论沉淀。</p>
+    </div>
+    <div class="pain-grid">
+      <article class="pain-card">
+        <div class="pain-icon" style="--c: var(--rt-accent-red)">
+          <i data-lucide="message-circle-warning" style="width:24px;height:24px"></i>
+        </div>
+        <span class="pain-num">PAIN 01</span>
+        <h3>会说话，但不会"开会"</h3>
+        <p>多个 Agent 的输出容易变成平行独白，缺少 topic、participants、rounds 这些会议边界。</p>
+        <div class="pain-terminal">
+          <span class="term-prompt">$</span> agents speak... but no protocol
+        </div>
+      </article>
+      <article class="pain-card">
+        <div class="pain-icon" style="--c: var(--rt-accent-amber)">
+          <i data-lucide="search" style="width:24px;height:24px"></i>
+        </div>
+        <span class="pain-num">PAIN 02</span>
+        <h3>讨论过程难复盘</h3>
+        <p>观点和反驳散落在聊天记录里，缺少结构化 consensus / disagreement 供后续查询。</p>
+        <div class="pain-terminal">
+          <span class="term-prompt">$</span> status: context fragmented
+        </div>
+      </article>
+      <article class="pain-card">
+        <div class="pain-icon" style="--c: var(--rt-accent-amber)">
+          <i data-lucide="file-output" style="width:24px;height:24px"></i>
+        </div>
+        <span class="pain-num">PAIN 03</span>
+        <h3>结论难沉淀到工作流</h3>
+        <p>产品决策、技术评审、代码 Review 都需要可追溯 summary，而不是人工再整理一次。</p>
+        <div class="pain-terminal">
+          <span class="term-prompt">$</span> output: decision-ready notes
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== FEATURES ==================== -->
+<section class="section" style="background: var(--rt-bg-deep)">
+  <div class="container">
+    <div class="section-header">
+      <h2 class="section-title">从讨论生命周期到结构化纪要</h2>
+      <p class="section-subtitle">Roundtable 是轻量会议协议层：创建 discussion、组织 turns、追踪 convergence，并输出可复盘的 meeting notes。</p>
+    </div>
+    <div class="features-grid">
+      <article class="feature-card">
+        <div class="feature-num">01</div>
+        <div class="feature-icon"><i data-lucide="plus-circle" style="width:28px;height:28px"></i></div>
+        <h3>Create Discussion</h3>
+        <p>输入 topic、participants、max_rounds，获得有边界的 discussion 状态。</p>
+      </article>
+      <article class="feature-card">
+        <div class="feature-num">02</div>
+        <div class="feature-icon"><i data-lucide="message-square" style="width:28px;height:28px"></i></div>
+        <h3>Speak in Turns</h3>
+        <p>按角色和轮次记录每次发言，让多方观点不再混作一团。</p>
+      </article>
+      <article class="feature-card">
+        <div class="feature-num">03</div>
+        <div class="feature-icon"><i data-lucide="trending-up" style="width:28px;height:28px"></i></div>
+        <h3>Track Convergence</h3>
+        <p>区分 consensus points 与 disagreement points，展示讨论是否正在收敛。</p>
+      </article>
+      <article class="feature-card">
+        <div class="feature-num">04</div>
+        <div class="feature-icon"><i data-lucide="file-check" style="width:28px;height:28px"></i></div>
+        <h3>Summarize Decisions</h3>
+        <p>输出 summary 与 conclusion，形成可复盘、可嵌入工作流的决策资产。</p>
+      </article>
+    </div>
+  </div>
+<!-- ==================== WORKFLOW ==================== -->
+<section class="section" id="workflow">
+  <div class="container">
+    <div class="section-header">
+      <h2 class="section-title">一条清晰的会议协议流</h2>
+      <p class="section-subtitle">从初始化议题到结论沉淀，每一步都有可追踪状态，适合嵌入现有 Agent runtime。</p>
+    </div>
+    <div class="workflow-steps">
+      <article class="workflow-step">
+        <div class="step-num">1</div>
+        <h3>Initialize</h3>
+        <code>topic + participants</code>
+      </article>
+      <div class="workflow-arrow"><i data-lucide="chevron-right" style="width:24px;height:24px"></i></div>
+      <article class="workflow-step">
+        <div class="step-num">2</div>
+        <h3>Round-based Speaking</h3>
+        <code>ordered turns</code>
+      </article>
+      <div class="workflow-arrow"><i data-lucide="chevron-right" style="width:24px;height:24px"></i></div>
+      <article class="workflow-step">
+        <div class="step-num">3</div>
+        <h3>Track Status</h3>
+        <code>consensus / risks</code>
+      </article>
+      <div class="workflow-arrow"><i data-lucide="chevron-right" style="width:24px;height:24px"></i></div>
+      <article class="workflow-step">
+        <div class="step-num">4</div>
+        <h3>Conclude</h3>
+        <code>summary + notes</code>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== QUICKSTART ==================== -->
+<section class="section" id="quickstart" style="background: var(--rt-bg-deep)">
+  <div class="container quickstart-grid">
+    <div>
+      <span class="hero-badge"><span class="badge-dot"></span>Developer-first CTA</span>
+      <h2 class="section-title" style="margin-top:16px">用一条 pip 命令接入现有 Agent 系统</h2>
+      <p class="section-subtitle" style="margin-bottom:20px">包名是 <code style="color:var(--rt-accent-green)">agent-roundtable</code>，导入名是 <code style="color:var(--rt-accent-green)">roundtable</code>。核心采用标准库与 SQLite 持久化。</p>
+      <div class="hero-tags">
+        <span class="tag">Package: agent-roundtable</span>
+        <span class="tag">Import: roundtable</span>
+        <span class="tag">pip install -e .</span>
+      </div>
+    </div>
+    <div class="code-card">
+      <div class="code-header">
+        <div class="code-lights"><i></i><i></i><i></i></div>
+        <span>quickstart.py</span>
+      </div>
+      <pre><code><span class="hl-kw">pip</span> install <span class="hl-str">agent-roundtable</span>
+
+<span class="hl-kw">from</span> roundtable <span class="hl-kw">import</span> RoundtableCore
+
+core = <span class="hl-fn">RoundtableCore</span>()
+result = core.create_discussion(
+    topic=<span class="hl-str">"选择数据库：PostgreSQL vs MySQL vs TiDB"</span>,
+    participants=[
+        {<span class="hl-str">"profile"</span>: <span class="hl-str">"architect"</span>, <span class="hl-str">"role"</span>: <span class="hl-str">"架构师"</span>},
+        {<span class="hl-str">"profile"</span>: <span class="hl-str">"ops"</span>, <span class="hl-str">"role"</span>: <span class="hl-str">"运维工程师"</span>},
+        {<span class="hl-str">"profile"</span>: <span class="hl-str">"product"</span>, <span class="hl-str">"role"</span>: <span class="hl-str">"产品经理"</span>},
+    ],
+    max_rounds=<span class="hl-num">3</span>,
+)</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== USE CASES ==================== -->
+<section class="section">
+  <div class="container">
+    <div class="section-header">
+      <h2 class="section-title">适合被讨论，而不是只被回答的问题</h2>
+      <p class="section-subtitle">适合需要多角色观点碰撞、分歧可见、结论可追溯的复杂问题。</p>
+    </div>
+    <div class="cases-grid">
+      <article class="case-card"><span class="case-tag">USE</span><h3>产品决策</h3><p>产品、设计、开发、增长讨论 MVP 边界，输出优先级和暂缓项。</p></article>
+      <article class="case-card"><span class="case-tag">USE</span><h3>技术评审</h3><p>架构、后端、运维、安全收敛数据库、部署与权限方案。</p></article>
+      <article class="case-card"><span class="case-tag">USE</span><h3>代码 Review</h3><p>质量、安全、性能、可维护性多角度审查，输出阻塞问题。</p></article>
+      <article class="case-card"><span class="case-tag">USE</span><h3>需求澄清</h3><p>多个专家角色追问模糊需求，沉淀共识、风险与未决问题。</p></article>
+      <article class="case-card"><span class="case-tag">USE</span><h3>Agent 工作流</h3><p>作为 coordinator 的讨论协议层，留下可查询会议记录。</p></article>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== COMMUNITY ==================== -->
+<section class="section" id="community" style="background: var(--rt-bg-deep)">
+  <div class="container">
+    <div class="section-header">
+      <h2 class="section-title">一套圆桌协议，多处 Agent 生态可用</h2>
+      <p class="section-subtitle">从 GitHub 源码到 PyPI 包，再到 Hermes Skill Hub 与 OpenClaw Skill Hub，统一作为多 Agent 圆桌协议入口。</p>
+    </div>
+    <div class="channels-grid">
+      <article class="channel-card">
+        <span class="channel-tag">SOURCE</span>
+        <h3>GitHub</h3>
+        <p>源码、README、Issue 与贡献入口。</p>
+        <div class="channel-status available"><span class="status-dot"></span>Available</div>
+        <a href="https://github.com/MoyuFamily/agent-roundtable">Open repository →</a>
+      </article>
+      <article class="channel-card">
+        <span class="channel-tag">PACKAGE</span>
+        <h3>PyPI</h3>
+        <p>面向 Python 开发者的正式安装入口。</p>
+        <div class="channel-status soon"><span class="status-dot"></span>Coming soon</div>
+      </article>
+      <article class="channel-card">
+        <span class="channel-tag">ECOSYSTEM</span>
+        <h3>Hermes Skill Hub</h3>
+        <p>面向 Hermes Agent 用户的技能生态入口。</p>
+        <div class="channel-status planned"><span class="status-dot"></span>Planned</div>
+      </article>
+      <article class="channel-card">
+        <span class="channel-tag">ECOSYSTEM</span>
+        <h3>OpenClaw Skill Hub</h3>
+        <p>面向 OpenClaw 用户的技能生态入口。</p>
+        <div class="channel-status planned"><span class="status-dot"></span>Planned</div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== CTA ==================== -->
+<section class="cta-section">
+  <div class="container cta-box">
+    <div>
+      <h2>把一次性的多 Agent 对话，变成可追踪、可复盘、可沉淀的圆桌讨论。</h2>
+      <p>用 Roundtable 给产品决策、技术评审、代码 Review 和多 Agent 工作流留下一份结构化决策资产。</p>
+    </div>
+    <div>
+      <div class="hero-install" style="margin-bottom:16px">
+        <code>pip install agent-roundtable</code>
+        <button class="copy-btn" onclick="navigator.clipboard.writeText('pip install agent-roundtable')"><i data-lucide="copy" style="width:16px;height:16px"></i></button>
+      </div>
+      <div class="hero-actions">
+        <a class="btn btn-primary btn-lg" href="#quickstart"><i data-lucide="download" style="width:20px;height:20px"></i> Install with pip</a>
+        <a class="btn btn-lg" href="https://github.com/MoyuFamily/agent-roundtable#readme"><i data-lucide="book-open" style="width:20px;height:20px"></i> Read README</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="container footer-inner">
+    <span>Roundtable · Multi-Agent Discussion Engine</span>
+    <span>Designed for AI Agent teams, open-source tools, and developer workflows.</span>
+  </div>
+</footer>
+
+<script>lucide.createIcons();</script>
+</body>
+</html>

@@ -16,6 +16,12 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from roundtable.db import RoundtableDB
+from roundtable.demo import (
+    DEMO_FINDINGS,
+    DEMO_PARTICIPANTS,
+    DEMO_SPEECHES,
+    DEMO_TOPIC,
+)
 from roundtable.exceptions import (
     DiscussionNotActiveError,
     DiscussionNotFoundError,
@@ -42,6 +48,7 @@ class RoundtableCore:
         self.db = db or RoundtableDB()
         self._send_fn = send_fn
         self._publishers: dict[str, Any] = {}  # discussion_id → WebPublisher
+        self._stream_delay: float = 0.0  # 每个 token chunk 之间的延迟（秒）
 
     # ------------------------------------------------------------------
     # Public API
@@ -108,6 +115,9 @@ class RoundtableCore:
                                 "profile": p["profile"],
                                 "display_name": p.get("display_name", p["profile"]),
                                 "role": p.get("role", ""),
+                                "avatar": p.get("avatar", ""),
+                                "title": p.get("title", ""),
+                                "description": p.get("description", ""),
                             }
                             for p in participants
                         ],
@@ -203,7 +213,7 @@ class RoundtableCore:
             participants = self.db.get_participants(conn, discussion_id)
             p_map = {p.participant: p for p in participants}
 
-            # --- Web publisher hook ---
+            # --- Web publisher hook (streaming + v1 兼容) ---
             publisher = self._publishers.get(discussion_id)
             p_info = p_map.get(speech.participant)
             speech_data = {
@@ -216,9 +226,39 @@ class RoundtableCore:
             }
             if publisher:
                 try:
+                    # 流式推送：speech_start → speech_token(s) → speech_end
+                    avatar = publisher._avatar_for_participant(speech.participant)
+                    display_name = p_info.display_name if p_info else speech.participant
+                    role = p_info.role if p_info else ""
+                    title = publisher._title_for_participant(speech.participant)
+                    description = publisher._description_for_participant(speech.participant)
+                    publisher.on_speech_start(
+                        speech.id,
+                        speech.participant,
+                        avatar=avatar,
+                        round_num=speech.round,
+                        display_name=display_name,
+                        role=role,
+                        title=title if title else None,
+                        description=description if description else None,
+                    )
+                    # 逐 token 推送（中文按 2-4 字符分块，模拟自然流式）
+                    content = speech.content
+                    chunk_size = 3  # 每次推送 3 个字符
+                    token_seq = 0
+                    import time as _time
+
+                    for i in range(0, len(content), chunk_size):
+                        token_seq += 1
+                        publisher.on_speech_token(speech.id, content[i : i + chunk_size], seq=token_seq)
+                        if self._stream_delay > 0:
+                            _time.sleep(self._stream_delay)
+                    publisher.on_speech_end(speech.id, total_tokens=token_seq)
+
+                    # 保留 v1 兼容：也推送完整 speech 事件
                     publisher.on_speech(speech_data)
                 except Exception:
-                    logger.exception(f"Web publisher on_speech failed for {discussion_id}")
+                    logger.exception(f"Web publisher streaming failed for {discussion_id}")
             else:
                 # Publisher not in memory (cross-process) — update discussion.json directly
                 self._update_web_discussion_json(discussion_id, speech_data, disc.topic, participants)
@@ -250,7 +290,7 @@ class RoundtableCore:
                         round_num=speech.round,
                     )
 
-            # Round complete notification
+            # Round complete notification + streaming viewpoint event
             if round_complete and speech.round > 0:
                 # Get key points from this round
                 findings = self.db.get_findings(conn, discussion_id)
@@ -264,6 +304,20 @@ class RoundtableCore:
                     convergence=convergence_score,
                     key_points=key_points,
                 )
+
+                # 流式推送：轮次观点汇总
+                publisher = self._publishers.get(discussion_id)
+                if publisher:
+                    try:
+                        consensus_pts = [f.content for f in round_findings if f.type == "consensus"]
+                        disagreement_pts = [f.content for f in round_findings if f.type == "disagreement"]
+                        publisher.on_round_summary(
+                            round_num=speech.round,
+                            consensus=[{"content": p} for p in consensus_pts],
+                            disagreement=[{"content": p} for p in disagreement_pts],
+                        )
+                    except Exception:
+                        logger.exception("Web publisher on_round_summary failed for %s", discussion_id)
 
             # Discussion auto-concluded notification
             if discussion_complete:
@@ -279,6 +333,15 @@ class RoundtableCore:
                     publisher = self._publishers.get(discussion_id)
                     if publisher:
                         try:
+                            # 流式推送：最终观点总结
+                            findings = self.db.get_findings(conn, discussion_id)
+                            consensus_pts = [f.content for f in findings if f.type == "consensus"]
+                            disagreement_pts = [f.content for f in findings if f.type == "disagreement"]
+                            publisher.on_final_summary(
+                                consensus=[{"content": p} for p in consensus_pts],
+                                disagreement=[{"content": p} for p in disagreement_pts],
+                                verdict=disc_after.conclusion or "",
+                            )
                             publisher.conclude(disc_after.conclusion or "")
                         except Exception:
                             logger.exception("Web publisher conclude failed for auto-concluded %s", discussion_id)
@@ -573,6 +636,15 @@ class RoundtableCore:
                     web_retained = False
                     if publisher:
                         try:
+                            # 流式推送：最终观点总结
+                            findings = self.db.get_findings(conn, discussion_id)
+                            consensus_pts = [f.content for f in findings if f.type == "consensus"]
+                            disagreement_pts = [f.content for f in findings if f.type == "disagreement"]
+                            publisher.on_final_summary(
+                                consensus=[{"content": p} for p in consensus_pts],
+                                disagreement=[{"content": p} for p in disagreement_pts],
+                                verdict=conclusion or "",
+                            )
                             publisher.conclude(conclusion)
                             web_retained = True
                         except Exception:
@@ -620,6 +692,14 @@ class RoundtableCore:
             if publisher:
                 try:
                     if action == "concluded" and disc_after:
+                        # 流式推送：最终观点总结
+                        findings = self.db.get_findings(conn, discussion_id)
+                        all_points = [f.content for f in findings]
+                        publisher.on_final_summary(
+                            consensus=[{"content": p} for p in all_points],
+                            disagreement=[],
+                            verdict=disc_after.conclusion or "",
+                        )
                         publisher.conclude(disc_after.conclusion or "")
                         web_retained = True
                         logger.info("Web publisher retained for concluded discussion %s", discussion_id)
@@ -799,95 +879,10 @@ class RoundtableCore:
     # ------------------------------------------------------------------
 
     # Default demo scenario — topic, participants, speeches, findings
-    _DEMO_TOPIC: ClassVar[str] = "选择后端框架：FastAPI vs Go Gin vs Node Express"
-    _DEMO_PARTICIPANTS: ClassVar[list[dict[str, Any]]] = [
-        {
-            "profile": "alice",
-            "role": "全栈工程师",
-            "display_name": "Alice",
-            "perspective": "重视开发效率和生态",
-        },
-        {
-            "profile": "bob",
-            "role": "架构师",
-            "display_name": "Bob",
-            "perspective": "重视性能和可维护性",
-        },
-        {
-            "profile": "carol",
-            "role": "产品经理",
-            "display_name": "Carol",
-            "perspective": "重视交付速度和团队学习成本",
-        },
-    ]
-    _DEMO_SPEECHES: ClassVar[dict[int, dict[str, str]]] = {
-        1: {
-            "alice": (
-                "FastAPI 的类型提示和自动生成 OpenAPI 文档太香了，"
-                "开发效率至少提升 30%。而且 async 原生支持，"
-                "性能也不差。"
-            ),
-            "bob": (
-                "Go Gin 编译后是原生二进制，内存占用只有 Python 的 1/10。"
-                "对于我们这种高并发场景，性能优势明显。"
-                "而且 Go 的 goroutine 天然适合并发。"
-            ),
-            "carol": (
-                "从产品角度看，团队 80% 是 Python 背景。"
-                "切 Go 需要 3 个月学习周期，这段时间功能迭代会停滞。"
-                "FastAPI 能让我们更快交付 MVP。"
-            ),
-        },
-        2: {
-            "alice": (
-                "同意 Carol 的观点。而且 FastAPI + Pydantic 的数据校验"
-                "几乎是零成本的，Go 里要写大量 struct tag 和 binding 代码。"
-                "维护成本 FastAPI 更低。"
-            ),
-            "bob": (
-                "性能不能只看 hello world。FastAPI 在 CPU 密集型任务上"
-                "还是有 GIL 瓶颈。不过我承认，如果用 asyncio + uvicorn，"
-                "IO 密集场景差距没那么大。可以考虑 FastAPI + 分层架构。"
-            ),
-            "carol": (
-                "Bob 说的分层架构我支持。先用 FastAPI 快速上线，"
-                "性能瓶颈模块后续可以用 Go 重写微服务。"
-                "这才是务实的技术选型策略。"
-            ),
-        },
-        3: {
-            "alice": (
-                "最终方案：FastAPI 作为主力框架，搭配 Celery 处理异步任务。"
-                "性能关键路径预留 Go 微服务接口。这样既保证了开发效率，"
-                "又不堵死性能优化的路。"
-            ),
-            "bob": (
-                "我同意这个折中方案。但需要在架构设计阶段就定义好"
-                "服务边界和 API 契约，避免后面拆分时返工。"
-                "建议第一周就定好领域模型。"
-            ),
-            "carol": (
-                "完美！这样我们两周内就能出 MVP。技术风险可控，团队也不需要额外学习成本。我会把这个方案同步给管理层。"
-            ),
-        },
-    }
-    _DEMO_FINDINGS: ClassVar[dict[int, list[tuple[str, str]]]] = {
-        1: [
-            ("consensus", "团队熟悉 Python，学习成本是关键考量因素"),
-            ("disagreement", "Go 性能优势 vs FastAPI 开发效率，优先级不同"),
-            ("new_point", "需要评估 IO 密集 vs CPU 密集的实际占比"),
-        ],
-        2: [
-            ("consensus", "IO 密集场景下 FastAPI 性能差距可接受"),
-            ("consensus", "分层架构是合理的折中方案"),
-            ("disagreement", "是否需要在第一阶段就引入 Go 微服务"),
-        ],
-        3: [
-            ("consensus", "采用 FastAPI 主框架 + 预留 Go 微服务扩展"),
-            ("consensus", "第一周完成领域模型和 API 契约设计"),
-            ("consensus", "两周内交付 MVP，性能瓶颈模块后续迭代"),
-        ],
-    }
+    _DEMO_TOPIC: ClassVar[str] = DEMO_TOPIC
+    _DEMO_PARTICIPANTS: ClassVar[list[dict[str, Any]]] = DEMO_PARTICIPANTS
+    _DEMO_SPEECHES: ClassVar[dict[int, dict[str, str]]] = DEMO_SPEECHES
+    _DEMO_FINDINGS: ClassVar[dict[int, list[tuple[str, str]]]] = DEMO_FINDINGS
 
     def run_demo(
         self,
@@ -898,228 +893,21 @@ class RoundtableCore:
         verbose: bool = True,
         web: bool = False,
         web_port: int = 8199,
+        stream_delay: float = 0.0,
     ) -> dict[str, Any]:
-        """Run a complete demo discussion with pre-scripted content.
+        """Run a complete demo discussion with pre-scripted content."""
+        from roundtable.demo import DemoRunner
 
-        Simulates a realistic multi-round discussion with participants,
-        speeches, findings, and convergence tracking. Prints formatted
-        output to terminal when verbose=True.
-
-        Args:
-            topic: Custom topic (uses default demo topic if None).
-            participants: Custom participants (uses default if None).
-            max_rounds: Number of rounds (default 3).
-            verbose: Print formatted output to stdout.
-            web: If True, start a web viewer and publish speeches live.
-            web_port: Preferred port for the web viewer (default 8199).
-
-        Returns:
-            Dict with discussion result, summary, and convergence data.
-        """
-        topic = topic or self._DEMO_TOPIC
-        participants = participants or self._DEMO_PARTICIPANTS
-        p_map = {p["profile"]: p for p in participants}
-        p_names = [p["profile"] for p in participants]
-
-        if verbose:
-            self._demo_print_header(topic, participants, max_rounds)
-
-        # 1. Create discussion
-        result = self.create_discussion(
+        runner = DemoRunner(self)
+        return runner.run(
             topic=topic,
             participants=participants,
             max_rounds=max_rounds,
+            verbose=verbose,
+            web=web,
+            web_port=web_port,
+            stream_delay=stream_delay,
         )
-        disc_id = result["discussion_id"]
-
-        # 1b. Optionally start web viewer
-        publisher = None
-        if web:
-            import os
-
-            from roundtable.web_publisher import WebPublisher
-
-            output_dir = os.path.join("/tmp", "roundtable_web", disc_id)
-            publisher = WebPublisher(output_dir, port=web_port)
-            url = publisher.start(
-                disc_id,
-                topic=topic,
-                participants=[
-                    {
-                        "profile": p["profile"],
-                        "display_name": p.get("display_name", p["profile"]),
-                        "role": p.get("role", ""),
-                    }
-                    for p in participants
-                ],
-            )
-            self._publishers[disc_id] = publisher
-            if verbose:
-                print(f"\n  🌐 Web viewer: {url}\n")
-
-        self.speak(disc_id, "coordinator", f"开场：围绕「{topic}」展开圆桌讨论。")
-
-        # 2. Run rounds
-        for round_num in range(1, max_rounds + 1):
-            if verbose:
-                self._demo_print_round_start(round_num, max_rounds)
-
-            # Use scripted speeches or generate simple defaults
-            round_speeches = self._DEMO_SPEECHES.get(round_num, {})
-            for name in p_names:
-                content = round_speeches.get(
-                    name,
-                    f"Round {round_num} 发言：{name} 对本议题的看法（demo 默认内容）。",
-                )
-                self.speak(disc_id, name, content)
-
-                if verbose:
-                    p_info = p_map.get(name, {})
-                    self._demo_print_speech(
-                        name,
-                        p_info.get("display_name", name),
-                        p_info.get("role", ""),
-                        content,
-                    )
-
-            # Add findings for this round
-            round_findings = self._DEMO_FINDINGS.get(
-                round_num,
-                [
-                    ("consensus", f"Round {round_num} 达成的共识"),
-                    ("disagreement", f"Round {round_num} 存在的分歧"),
-                ],
-            )
-            conn = self.db.connect()
-            try:
-                for ftype, content in round_findings:
-                    self.db.add_finding(conn, disc_id, ftype, content, round_num)
-                # Calculate convergence
-                conv_score = self.db.calculate_convergence(conn, disc_id, round_num)
-            finally:
-                conn.close()
-
-            if verbose:
-                self._demo_print_round_end(round_findings, conv_score)
-
-        # 3. Generate conclusion
-        conclusion = (
-            f"经过 {max_rounds} 轮讨论，团队达成一致："
-            f"采用 FastAPI 作为主力框架，预留 Go 微服务扩展接口，"
-            f"两周内交付 MVP。"
-        )
-        self.end_discussion(disc_id, conclusion=conclusion)
-
-        # 4. Get final summary
-        summary = self.summarize(disc_id, compact=True)
-
-        if verbose:
-            self._demo_print_conclusion(conclusion, summary)
-
-        return {
-            "ok": True,
-            "discussion_id": disc_id,
-            "topic": topic,
-            "rounds_completed": max_rounds,
-            "conclusion": conclusion,
-            "convergence_score": summary.get("final_convergence_score"),
-            "consensus_points": summary.get("consensus_points", []),
-            "disagreement_points": summary.get("disagreement_points", []),
-            "summary": summary,
-            "web_url": publisher.url if publisher else None,
-        }
-
-    # ------------------------------------------------------------------
-    # Demo output formatters
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _demo_print_header(topic: str, participants: list[dict[str, Any]], max_rounds: int) -> None:
-        width = 58
-        print()
-        print("╭" + "─" * width + "╮")
-        print("│" + " Roundtable Demo Discussion ".center(width) + "│")
-        print("├" + "─" * width + "┤")
-        topic_line = f" Topic: {topic}"
-        if len(topic_line) > width - 1:
-            topic_line = topic_line[: width - 2] + "…"
-        print("│" + topic_line.ljust(width) + "│")
-        print("│" + f" Rounds: {max_rounds}".ljust(width) + "│")
-        print("│" + "".ljust(width) + "│")
-        print("│" + " Participants:".ljust(width) + "│")
-        for p in participants:
-            icon = {"全栈工程师": "👩‍💻", "架构师": "👨‍💻", "产品经理": "👩‍💼"}.get(p.get("role", ""), "👤")
-            line = f"   {icon} {p.get('display_name', p['profile'])} ({p.get('role', '')})"
-            print("│" + line.ljust(width) + "│")
-        print("╰" + "─" * width + "╯")
-        print()
-
-    @staticmethod
-    def _demo_print_round_start(round_num: int, max_rounds: int) -> None:
-        print(f"{'━' * 60}")
-        print(f"  📍 Round {round_num}/{max_rounds}")
-        print(f"{'━' * 60}")
-
-    @staticmethod
-    def _demo_print_speech(name: str, display_name: str, role: str, content: str) -> None:
-        icon = {"全栈工程师": "👩‍💻", "架构师": "👨‍💻", "产品经理": "👩‍💼"}.get(role, "👤")
-        print(f"\n  {icon} {display_name} ({role}):")
-        # Word wrap content
-        import textwrap
-
-        for line in textwrap.wrap(content, width=52):
-            print(f"     {line}")
-
-    @staticmethod
-    def _demo_print_round_end(findings: list[tuple[str, str]], conv_score: float | None) -> None:
-        print()
-        print(f"  {'─' * 52}")
-        score_str = f"{conv_score:.2f}" if conv_score is not None else "N/A"
-        print(f"  📊 Convergence: {score_str}")
-        for ftype, content in findings:
-            icon = {"consensus": "✅", "disagreement": "⚡", "new_point": "💡"}.get(ftype, "•")
-            print(f"     {icon} [{ftype}] {content}")
-        print()
-
-    @staticmethod
-    def _demo_print_conclusion(conclusion: str, summary: dict[str, Any]) -> None:
-        width = 58
-        print()
-        print("╭" + "─" * width + "╮")
-        print("│" + " 📋 Discussion Conclusion ".center(width) + "│")
-        print("├" + "─" * width + "┤")
-
-        # Conclusion text
-        import textwrap
-
-        for line in textwrap.wrap(conclusion, width=width - 4):
-            print("│  " + line.ljust(width - 2) + "│")
-        print("│" + "".ljust(width) + "│")
-
-        # Convergence
-        final_score = summary.get("final_convergence_score")
-        if final_score is not None:
-            score_line = f"  🎯 Final Convergence: {final_score:.2f}"
-            print("│" + score_line.ljust(width) + "│")
-
-        # Consensus points
-        consensus = summary.get("consensus_points", [])
-        if consensus:
-            print("│" + "  ✅ Consensus:".ljust(width) + "│")
-            for pt in consensus:
-                for line in textwrap.wrap(pt, width=width - 8):
-                    print("│    • " + line.ljust(width - 6) + "│")
-
-        # Disagreement points
-        disagreements = summary.get("disagreement_points", [])
-        if disagreements:
-            print("│" + "  ⚡ Disagreements:".ljust(width) + "│")
-            for pt in disagreements:
-                for line in textwrap.wrap(pt, width=width - 8):
-                    print("│    • " + line.ljust(width - 6) + "│")
-
-        print("╰" + "─" * width + "╯")
-        print()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1288,15 +1076,9 @@ class RoundtableCore:
     @staticmethod
     def _format_history(speeches: list[Speech], participants_map: dict[str, Any]) -> str:
         """Format speech history into a human-readable string."""
-        lines = []
-        for s in speeches:
-            p_info = participants_map.get(s.participant, {})
-            display = p_info.get("display_name", s.participant)
-            role = p_info.get("role", "")
-            role_str = f"({role})" if role else ""
-            ref_str = f" [引用 #{s.reply_to}]" if s.reply_to else ""
-            lines.append(f"[#{s.id}] Round {s.round} | {display}{role_str}{ref_str}:\n  {s.content}")
-        return "\n\n".join(lines) if lines else "(暂无发言)"
+        from roundtable.formatter import format_history
+
+        return format_history(speeches, participants_map)
 
     @staticmethod
     def _build_structured_summary(
@@ -1310,72 +1092,20 @@ class RoundtableCore:
         final_score: float | None,
         conv_history: list[ConvergenceRecord],
     ) -> str:
-        """Build a compact structured summary for LLM consumption.
+        """Build a compact structured summary for LLM consumption."""
+        from roundtable.formatter import build_structured_summary
 
-        Returns a Markdown string (~500-2000 chars) that gives the coordinator
-        enough context to write a conclusion document without re-reading all
-        raw speech content.
-        """
-        lines = []
-        lines.append(f"# 圆桌讨论摘要: {disc.topic}")
-        if disc.context:
-            lines.append(f"\n**背景**: {disc.context}")
-
-        # Participants
-        lines.append("\n## 参与者")
-        for p in participants:
-            name = p.display_name or p.participant
-            role = p.role or "未指定"
-            perspective = p.perspective or ""
-            persp_str = f" — {perspective}" if perspective else ""
-            lines.append(f"- **{name}** ({role}){persp_str}")
-
-        # Per-round summary (key points only, truncate content)
-        lines.append(f"\n## 讨论轮次 (共 {disc.current_round} 轮)")
-        rounds_dict: dict[int, list[Speech]] = {}
-        for s in speeches:
-            rounds_dict.setdefault(s.round, []).append(s)
-
-        for rnd in sorted(rounds_dict.keys()):
-            round_speeches = rounds_dict[rnd]
-            lines.append(f"\n### Round {rnd}")
-            for s in round_speeches:
-                p_info = p_map.get(s.participant, {})
-                display = p_info.get("display_name", s.participant)
-                role = p_info.get("role", "")
-                role_str = f" ({role})" if role else ""
-                # Truncate content to 300 chars for summary
-                content = s.content
-                if len(content) > 300:
-                    content = content[:297] + "..."
-                lines.append(f"- **{display}**{role_str}: {content}")
-
-        # Findings
-        if consensus_pts:
-            lines.append("\n## 共识点")
-            for pt in consensus_pts:
-                lines.append(f"- {pt}")
-
-        if disagreement_pts:
-            lines.append("\n## 分歧点")
-            for pt in disagreement_pts:
-                lines.append(f"- {pt}")
-
-        if new_points:
-            lines.append("\n## 新议题")
-            for pt in new_points:
-                lines.append(f"- {pt}")
-
-        # Convergence
-        if final_score is not None:
-            lines.append(f"\n## 收敛度: {final_score:.2f}")
-        if conv_history:
-            for c in conv_history:
-                lines.append(
-                    f"- Round {c.round}: score={c.score:.2f}, "
-                    f"consensus={c.consensus_count}, disagreement={c.disagreement_count}"
-                )
-        return "\n".join(lines)
+        return build_structured_summary(
+            disc,
+            participants,
+            speeches,
+            p_map,
+            consensus_pts,
+            disagreement_pts,
+            new_points,
+            final_score,
+            conv_history,
+        )
 
 
 # Dynamic alias to avoid shadowing built-in `list` type in the class body.

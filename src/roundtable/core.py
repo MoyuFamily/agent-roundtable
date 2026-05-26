@@ -960,7 +960,7 @@ class RoundtableCore:
                         data = json.load(f)
 
                     changed = False
-                    now = int(time.time())
+                    now = time.time()
 
                     disc = self.db.get_discussion(conn, discussion_id)
                     if not disc:
@@ -1125,7 +1125,7 @@ class RoundtableCore:
                     # Append speech
                     data.setdefault("speeches", []).append(speech_data)
                     # Also append replay event for cross-process replay
-                    now = int(time.time())
+                    now = time.time()
                     data.setdefault("events", []).append(
                         {
                             "type": "speech_delta",
@@ -1177,7 +1177,7 @@ class RoundtableCore:
                     data["conclusion"] = conclusion
                     data["status"] = "concluded"
                     # Also append concluded event for cross-process replay
-                    now = int(time.time())
+                    now = time.time()
                     data.setdefault("events", []).append(
                         {
                             "type": "status_delta",

@@ -150,7 +150,7 @@ class WebPublisher:
             "participant": speech.get("participant", ""),
             "display_name": speech.get("display_name", ""),
             "content": speech.get("content", ""),
-            "created_at": speech.get("created_at", int(time.time())),
+            "created_at": speech.get("created_at", time.time()),
         }
         self._speeches.append(speech_payload)
         self._append_stream_event("speech_delta", {"speech": speech_payload})
@@ -178,7 +178,7 @@ class WebPublisher:
             "agent": agent,
             "avatar": avatar,
             "round": round_num,
-            "timestamp": int(time.time()),
+            "timestamp": time.time(),
         }
         if display_name is not None:
             event["display_name"] = display_name
@@ -201,7 +201,7 @@ class WebPublisher:
             "id": speech_id,
             "delta": delta,
             "seq": seq if seq is not None else self._event_seq + 1,
-            "timestamp": int(time.time()),
+            "timestamp": time.time(),
         }
         self._append_stream_event(event)
         self._write_discussion_json()
@@ -215,7 +215,7 @@ class WebPublisher:
             "type": "speech_end",
             "id": speech_id,
             "total_tokens": total_tokens,
-            "timestamp": int(time.time()),
+            "timestamp": time.time(),
         }
         self._append_stream_event(event)
         self._write_discussion_json()
@@ -238,7 +238,7 @@ class WebPublisher:
             "round": round_num if round_num is not None else source.get("round", 0),
             "consensus": consensus if consensus is not None else list(source.get("consensus", [])),
             "disagreement": disagreement if disagreement is not None else list(source.get("disagreement", [])),
-            "timestamp": source.get("timestamp", int(time.time())),
+            "timestamp": source.get("timestamp", time.time()),
         }
         if "consensus_points" in source:
             normalized["consensus_points"] = list(source.get("consensus_points", []))
@@ -289,7 +289,7 @@ class WebPublisher:
             "consensus": consensus if consensus is not None else [],
             "disagreement": disagreement if disagreement is not None else [],
             "verdict": verdict,
-            "timestamp": int(time.time()),
+            "timestamp": time.time(),
         }
         if consensus_points is not None:
             event["consensus_points"] = consensus_points
@@ -320,7 +320,7 @@ class WebPublisher:
             if self._token and self._token not in revoked:
                 revoked.append(self._token)
             data["revoked_tokens"] = revoked
-            data["updated_at"] = int(time.time())
+            data["updated_at"] = time.time()
             self._write_discussion_json_raw(data)
         logger.info("Token revoked for discussion %s", self._discussion_id)
 
@@ -451,7 +451,7 @@ class WebPublisher:
             "conclusion": self._conclusion,
             "final_summary": self._final_summary,
             "revoked_tokens": [self._token] if self._revoked else [],
-            "updated_at": int(time.time()),
+            "updated_at": time.time(),
         }
         self._write_discussion_json_raw(data)
 
@@ -492,7 +492,7 @@ class WebPublisher:
             event = {
                 "seq": self._event_seq,
                 "type": event_or_type,
-                "created_at": int(time.time()),
+                "created_at": time.time(),
                 "payload": payload or {},
             }
         self._stream_events.append(event)
@@ -550,29 +550,49 @@ class WebPublisher:
                     # 3. Merge final_summary
                     existing_fs = existing.get("final_summary")
                     data_fs = data.get("final_summary")
+                    existing_ts = existing_fs.get("timestamp", 0) if existing_fs else 0
+                    data_ts = data_fs.get("timestamp", 0) if data_fs else 0
+
                     if existing_fs and not data_fs:
                         data["final_summary"] = existing_fs
                         self._final_summary = existing_fs
                     elif existing_fs and data_fs:
-                        ex_verdict = existing_fs.get("verdict", "")
-                        new_verdict = data_fs.get("verdict", "")
-                        ex_items = len(existing_fs.get("consensus", [])) + len(existing_fs.get("disagreement", []))
-                        new_items = len(data_fs.get("consensus", [])) + len(data_fs.get("disagreement", []))
-                        verdict_changed = new_verdict != ex_verdict
-                        has_more_items = new_items > ex_items
-                        if not verdict_changed and not has_more_items:
+                        if data_ts < existing_ts:
                             data["final_summary"] = existing_fs
                             self._final_summary = existing_fs
-                        else:
+                        elif data_ts > existing_ts:
                             self._final_summary = data_fs
+                        else:
+                            # Equal timestamps, merge based on completeness/verdict
+                            ex_verdict = existing_fs.get("verdict", "")
+                            new_verdict = data_fs.get("verdict", "")
+                            ex_items = len(existing_fs.get("consensus", [])) + len(existing_fs.get("disagreement", []))
+                            new_items = len(data_fs.get("consensus", [])) + len(data_fs.get("disagreement", []))
+                            verdict_changed = new_verdict != ex_verdict
+                            has_more_items = new_items > ex_items
+                            if not verdict_changed and not has_more_items:
+                                data["final_summary"] = existing_fs
+                                self._final_summary = existing_fs
+                            else:
+                                self._final_summary = data_fs
 
                     # 4. Merge status & conclusion
                     if existing.get("status") == "concluded" and data.get("status") != "concluded":
                         data["status"] = "concluded"
                         self._status = "concluded"
-                    if existing.get("conclusion") and not data.get("conclusion"):
-                        data["conclusion"] = existing.get("conclusion")
-                        self._conclusion = existing.get("conclusion")
+
+                    existing_conclusion = existing.get("conclusion")
+                    new_conclusion = data.get("conclusion")
+                    if existing_conclusion:
+                        if not new_conclusion:
+                            data["conclusion"] = existing_conclusion
+                            self._conclusion = existing_conclusion
+                        elif new_conclusion != existing_conclusion:
+                            if data_ts < existing_ts:
+                                data["conclusion"] = existing_conclusion
+                                self._conclusion = existing_conclusion
+                            else:
+                                self._conclusion = new_conclusion
 
                     # 5. Merge root events (e.g. speech_delta, status_delta from fallback sync)
                     existing_events = existing.get("events", [])

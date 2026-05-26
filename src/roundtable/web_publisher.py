@@ -76,12 +76,14 @@ class WebPublisher:
         discussion_dir: str | Path,
         port: int = 8199,
         host: str = "0.0.0.0",
+        password: str | None = None,
     ) -> None:
         self._discussion_dir = Path(discussion_dir)
         self._discussion_dir.mkdir(parents=True, exist_ok=True)
         self._port = port
         self._host = host
         self._url_host = "127.0.0.1" if host in {"", "0.0.0.0", "::"} else host
+        self._password = password
         self._token: str | None = None
         self._discussion_id: str | None = None
         self._pm2_process_name: str | None = None
@@ -412,6 +414,12 @@ class WebPublisher:
             "--discussion-dir",
             str(self._discussion_dir),
         ]
+
+        # Hash password with bcrypt and pass to server
+        if self._password:
+            import bcrypt
+            pw_hash = bcrypt.hashpw(self._password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+            cmd.extend(["--password-hash", pw_hash])
 
         logger.info("Starting PM2: %s", " ".join(cmd))
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)

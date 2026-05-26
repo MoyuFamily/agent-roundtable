@@ -18,39 +18,57 @@
       <div class="flex items-center gap-2">
         <span class="status-badge waiting" id="statusBadge">
           <span class="badge-dot"></span>
-          <span id="statusLabel">等待中</span>
+          <span id="statusLabel" data-i18n="statusWaiting">等待中</span>
         </span>
-        <h1 class="text-lg font-semibold" style="color:var(--rt-text-primary)" id="topicTitle">圆桌讨论</h1>
+        <h1 class="text-lg font-semibold" style="color:var(--rt-text-primary)" id="topicTitle" data-i18n="pageTitle">圆桌讨论</h1>
       </div>
       <div class="flex items-center gap-3">
+        <!-- Export button -->
+        <div class="relative" id="exportContainer">
+          <button class="share-btn" id="exportBtn" aria-label="导出" style="gap:4px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span data-i18n="exportBtn">导出</span>
+          </button>
+          <div class="share-popover hidden" id="exportPopover" style="min-width:160px">
+            <div class="share-popover-title" data-i18n="exportTitle">📋 导出讨论结果</div>
+            <div style="display:flex;flex-direction:column;gap:8px;padding:8px 0">
+              <button class="copy-btn" id="exportMarkdownBtn" style="width:100%" data-i18n="exportMarkdown">Markdown</button>
+              <button class="copy-btn" id="exportPdfBtn" style="width:100%" data-i18n="exportPdf">PDF</button>
+            </div>
+          </div>
+        </div>
         <!-- Share button (desktop) -->
         <div class="relative" id="shareContainer">
           <button class="share-btn" id="shareBtn" aria-label="分享链接">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
             </svg>
-            <span>分享</span>
+            <span data-i18n="share">分享</span>
           </button>
           <!-- Desktop Popover -->
           <div class="share-popover" id="sharePopover">
-            <div class="share-popover-title">📋 分享链接</div>
+            <div class="share-popover-title" data-i18n="shareTitle">📋 分享链接</div>
             <div id="sharePanelContent">
               <div class="share-link-row">
                 <input class="share-link-input" id="shareLinkInput" readonly>
-                <button class="copy-btn" id="copyBtn">复制</button>
+                <button class="copy-btn" id="copyBtn" data-i18n="copy">复制</button>
               </div>
-              <div class="share-hint">任何人通过此链接可查看讨论</div>
-              <button class="revoke-link-btn" id="revokeLinkBtn">⚠️ 撤销链接</button>
+              <div class="share-hint" data-i18n="shareHint">任何人通过此链接可查看讨论</div>
+              <button class="revoke-link-btn" id="revokeLinkBtn" data-i18n="shareRevoke">⚠️ 撤销链接</button>
             </div>
             <div class="share-revoked-state hidden" id="shareRevokedState">
               <div class="revoked-icon">🔒</div>
-              <div>链接已撤销</div>
+              <div data-i18n="shareRevoked">链接已撤销</div>
             </div>
           </div>
         </div>
+        <!-- Language switcher -->
+        <button class="share-btn" id="langSwitchBtn" style="min-width:32px;font-weight:600;font-size:13px" data-i18n="langSwitch">EN</button>
         <div class="conn-status">
           <span class="conn-dot connected" id="connDot"></span>
-          <span id="connText">已连接</span>
+          <span id="connText" data-i18n="connConnected">已连接</span>
         </div>
       </div>
     </div>
@@ -61,8 +79,8 @@
     <!-- Waiting state -->
     <div id="waitingState" class="flex flex-col items-center justify-center py-20">
       <div class="spinner mb-4"></div>
-      <p class="text-lg" style="color: var(--rt-text-secondary)">讨论即将开始…</p>
-      <p class="text-sm mt-2" style="color: var(--rt-text-muted)">发言将会实时显示在这里</p>
+      <p class="text-lg" style="color: var(--rt-text-secondary)" data-i18n="waitingTitle">讨论即将开始…</p>
+      <p class="text-sm mt-2" style="color: var(--rt-text-muted)" data-i18n="waitingSubtitle">发言将会实时显示在这里</p>
     </div>
 
     <!-- Active state (hidden initially) -->
@@ -79,7 +97,7 @@
       <div id="participantsDrawerOverlay" class="participants-drawer-overlay" onclick="toggleParticipantsDrawer()"></div>
       <div id="participantsDrawer" class="participants-drawer">
         <div class="drawer-handle"></div>
-        <div class="drawer-title">👥 参与者</div>
+        <div class="drawer-title" data-i18n="participants">👥 参与者</div>
         <div id="drawerParticipantList" class="drawer-participant-list"></div>
       </div>
 
@@ -88,14 +106,14 @@
 
       <!-- Conclusion card (hidden until concluded) -->
       <div id="conclusionCard" class="hidden conclusion-card mt-6">
-        <h3 class="text-lg font-semibold mb-2" style="position:relative;z-index:1;color:var(--rt-text-primary)">📌 讨论结论</h3>
+        <h3 class="text-lg font-semibold mb-2" style="position:relative;z-index:1;color:var(--rt-text-primary)" data-i18n="conclusion">📌 讨论结论</h3>
         <div id="conclusionContent" class="leading-relaxed" style="position:relative;z-index:1;color:var(--rt-text-secondary)"></div>
       </div>
 
       <!-- Replay entry card (hidden until concluded) -->
       <div id="replayEntry" class="hidden replay-entry" onclick="enterReplayMode()">
         <div class="replay-entry-icon">🎬</div>
-        <div class="replay-entry-title">回放讨论全过程</div>
+        <div class="replay-entry-title" data-i18n="replayEntryTitle">回放讨论全过程</div>
         <div class="replay-entry-meta" id="replayEntryMeta">加载中…</div>
         <div class="replay-entry-agents" id="replayEntryAgents"></div>
       </div>
@@ -104,15 +122,15 @@
     <!-- Revoked state (hidden) — updated to dark theme per design spec -->
     <div id="revokedState" class="revoked-page hidden">
       <div class="revoked-icon-lg">🔒</div>
-      <h2 class="revoked-title">此讨论链接已失效</h2>
-      <p class="revoked-desc">创作者已撤销了此链接的访问权限</p>
-      <p class="revoked-brand">Roundtable AI · 圆桌讨论</p>
+      <h2 class="revoked-title" data-i18n="revokedTitle">此讨论链接已失效</h2>
+      <p class="revoked-desc" data-i18n="revokedDesc">创作者已撤销了此链接的访问权限</p>
+      <p class="revoked-brand" data-i18n="revokedBrand">Roundtable AI · 圆桌讨论</p>
     </div>
   </main>
 
   <!-- ↓ 新消息 浮动按钮 -->
   <button class="scroll-bottom-btn hidden" id="scrollBottomBtn">
-    <span>↓</span> <span>新消息</span>
+    <span>↓</span> <span data-i18n="scrollNewMessages">新消息</span>
   </button>
 
   <!-- Mobile Share Bar -->
@@ -121,7 +139,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px">
         <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
       </svg>
-      <span>分享讨论</span>
+      <span data-i18n="shareMobile">分享讨论</span>
     </button>
   </div>
 
@@ -129,16 +147,16 @@
   <div class="share-sheet-overlay" id="shareSheetOverlay"></div>
   <div class="share-sheet" id="shareSheet">
     <div class="share-sheet-handle"></div>
-    <div class="share-popover-title">📋 分享链接</div>
+    <div class="share-popover-title" data-i18n="shareTitle">📋 分享链接</div>
     <div id="shareSheetContent">
       <input class="share-link-input" id="shareSheetLinkInput" readonly style="width:100%;margin-bottom:12px">
-      <button class="copy-btn" id="sheetCopyBtn" style="width:100%;padding:12px;font-size:var(--rt-font-size-base);margin-bottom:12px">复制链接</button>
-      <div class="share-hint">任何人通过此链接可查看讨论</div>
-      <button class="revoke-link-btn" id="sheetRevokeLinkBtn" style="justify-content:center;padding-top:16px">⚠️ 撤销链接</button>
+      <button class="copy-btn" id="sheetCopyBtn" style="width:100%;padding:12px;font-size:var(--rt-font-size-base);margin-bottom:12px" data-i18n="copyLink">复制链接</button>
+      <div class="share-hint" data-i18n="shareHint">任何人通过此链接可查看讨论</div>
+      <button class="revoke-link-btn" id="sheetRevokeLinkBtn" style="justify-content:center;padding-top:16px" data-i18n="shareRevoke">⚠️ 撤销链接</button>
     </div>
     <div class="share-revoked-state hidden" id="sheetRevokedState">
       <div class="revoked-icon">🔒</div>
-      <div>链接已撤销</div>
+      <div data-i18n="shareRevoked">链接已撤销</div>
     </div>
   </div>
 
@@ -146,11 +164,11 @@
   <div class="revoke-modal-overlay" id="revokeModalOverlay" role="dialog" aria-modal="true" aria-label="确认撤销链接">
     <div class="revoke-modal">
       <div class="revoke-modal-icon">⚠️</div>
-      <div class="revoke-modal-title">确认撤销链接？</div>
-      <div class="revoke-modal-desc">撤销后，所有通过此链接的访问将在 5 秒内失效，且不可恢复。</div>
+      <div class="revoke-modal-title" data-i18n="revokeTitle">确认撤销链接？</div>
+      <div class="revoke-modal-desc" data-i18n="revokeDesc">撤销后，所有通过此链接的访问将在 5 秒内失效，且不可恢复。</div>
       <div class="revoke-modal-actions">
-        <button class="revoke-cancel-btn" id="revokeCancelBtn">取消</button>
-        <button class="revoke-confirm-btn" id="revokeConfirmBtn">确认撤销</button>
+        <button class="revoke-cancel-btn" id="revokeCancelBtn" data-i18n="revokeCancel">取消</button>
+        <button class="revoke-confirm-btn" id="revokeConfirmBtn" data-i18n="confirmRevoke">确认撤销</button>
       </div>
     </div>
   </div>
@@ -161,10 +179,10 @@
     <div class="replay-top-bar">
       <button class="replay-back-btn" onclick="exitReplayMode()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-        返回
+        <span data-i18n="replayBack">返回</span>
       </button>
       <div class="replay-title-bar">
-        🎬 <span id="replayTopicTitle">回放</span>
+        🎬 <span id="replayTopicTitle" data-i18n="replay">回放</span>
       </div>
       <div class="replay-speed-selector" id="replaySpeedSelector">
         <button class="replay-speed-btn active" data-speed="1">1x</button>
@@ -202,6 +220,7 @@
     </div>
   </div>
 
+  <script src="/i18n.js"></script>
   <script src="/viewer.js" defer></script>
 </body>
 </html>

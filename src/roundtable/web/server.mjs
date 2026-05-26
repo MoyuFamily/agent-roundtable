@@ -19,6 +19,7 @@ import { readFileSync, watch, existsSync, writeFileSync, renameSync, createReadS
 import * as readline from "node:readline";
 import { join, resolve, dirname, basename } from "node:path";
 import { createRequire } from "node:module";
+import { createHmac } from "node:crypto";
 
 const require = createRequire(import.meta.url);
 
@@ -28,15 +29,16 @@ const require = createRequire(import.meta.url);
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const opts = { port: 8199, discussionDir: "." };
+  const opts = { port: 8199, discussionDir: ".", passwordHash: "" };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port" && args[i + 1]) opts.port = parseInt(args[++i], 10);
     if (args[i] === "--discussion-dir" && args[i + 1]) opts.discussionDir = args[++i];
+    if (args[i] === "--password-hash" && args[i + 1]) opts.passwordHash = args[++i];
   }
   return opts;
 }
 
-const { port, discussionDir } = parseArgs();
+const { port, discussionDir, passwordHash } = parseArgs();
 const DISCUSSION_PATH = resolve(discussionDir, "discussion.json");
 const TOKEN_STREAM_PATH=resolv...Dir, "token_stream.jsonl");
 const REVOKED_PATH = resolve(discussionDir, ".revoked_tokens");
@@ -203,6 +205,128 @@ function sendExpired(res) {
 
 function send404(res) {
   sendJSON(res, { error: "Not found" }, 404);
+}
+
+function escapeHtmlAttr(str) {
+  if (typeof str !== "string") return "";
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/'/g, "&#39;");
+}
+
+// ---------------------------------------------------------------------------
+// Password protection (bcrypt + HMAC signed cookie)
+// ---------------------------------------------------------------------------
+
+let _bcrypt = null;
+const _bcryptPromise = passwordHash
+  ? import("bcryptjs").then(m => { _bcrypt = m.default; console.log("[Roundtable Web] Password protection enabled"); })
+      .catch(err => { console.error("[Roundtable Web] bcryptjs not available:", err.message); })
+  : Promise.resolve();
+
+function _signPwHash(pwHash) {
+  return createHmac("sha256", passwordHash.slice(0, 32)).update(pwHash).digest("hex").slice(0, 32);
+}
+
+function _parseCookies(cookieHeader) {
+  const cookies = {};
+  if (!cookieHeader) return cookies;
+  for (const part of cookieHeader.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k) {
+      try { cookies[k.trim()] = decodeURIComponent(v.join("=").trim()); }
+      catch { cookies[k.trim()] = v.join("=").trim(); }
+    }
+  }
+  return cookies;
+}
+
+function checkPassword(req) {
+  if (!_bcrypt || !passwordHash) return true;
+  const cookies = _parseCookies(req.headers.cookie);
+  const rtPw = cookies["rt_pw"];
+  if (!rtPw) return false;
+  const [storedHash, sig] = rtPw.split(":");
+  if (!storedHash || !sig) return false;
+  const expectedSig = _signPwHash(storedHash);
+  return sig === expectedSig;
+}
+
+function sendPasswordPage(res) {
+  const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Roundtable - Access Verification</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{min-height:100vh;display:flex;align-items:center;justify-content:center;
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+      background:#0f172a;color:#e2e8f0}
+    .card{max-width:420px;width:90%;padding:2.5rem 2rem;text-align:center;
+      background:#1e293b;border-radius:16px;border:1px solid #334155;
+      box-shadow:0 8px 32px rgba(0,0,0,0.3)}
+    .icon{font-size:3rem;margin-bottom:0.8rem}
+    h1{font-size:1.3rem;font-weight:600;margin-bottom:0.5rem;color:#f1f5f9}
+    p{color:#94a3b8;line-height:1.6;font-size:0.9rem;margin-bottom:1.5rem}
+    .input{width:100%;padding:12px 16px;border:1px solid #475569;border-radius:10px;
+      background:#0f172a;color:#e2e8f0;font-size:15px;outline:none;
+      transition:border-color 0.2s}
+    .input:focus{border-color:#60a5fa}
+    .btn{width:100%;padding:12px;margin-top:12px;border:none;border-radius:10px;
+      background:linear-gradient(135deg,#3b82f6,#6366f1);color:#fff;
+      font-size:15px;font-weight:600;cursor:pointer;transition:opacity 0.2s}
+    .btn:hover{opacity:0.9}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .error{color:#f87171;font-size:13px;margin-top:8px;min-height:20px}
+    .brand{margin-top:1.5rem;color:#64748b;font-size:12px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">🔒</div>
+    <h1>Access Verification</h1>
+    <p>This discussion requires a password to view</p>
+    <form id="pwForm">
+      <input class="input" type="password" id="pwInput" placeholder="Enter access password" autofocus autocomplete="off">
+      <button class="btn" type="submit" id="pwBtn">Enter</button>
+      <div class="error" id="pwError"></div>
+    </form>
+    <div class="brand">Roundtable AI</div>
+  </div>
+  <script>
+    document.getElementById('pwForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pw = document.getElementById('pwInput').value.trim();
+      if (!pw) { document.getElementById('pwError').textContent = 'Please enter a password'; return; }
+      const btn = document.getElementById('pwBtn');
+      btn.disabled = true; btn.textContent = 'Verifying...';
+      try {
+        const resp = await fetch('/api/validate-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pw })
+        });
+        const data = await resp.json();
+        if (data.ok) {
+          window.location.reload();
+        } else {
+          document.getElementById('pwError').textContent = 'Incorrect password, please try again';
+          btn.disabled = false; btn.textContent = 'Enter';
+        }
+      } catch {
+        document.getElementById('pwError').textContent = 'Network error';
+        btn.disabled = false; btn.textContent = 'Enter';
+      }
+    });
+  </script>
+</body>
+</html>`;
+  sendHTML(res, html);
 }
 
 // ---------------------------------------------------------------------------
@@ -411,6 +535,10 @@ router.get("/r/:token", (req, res, params) => {
     return sendExpired(res);
   }
   if (!isTokenValid(params.token)) return send403(res);
+  // Password gate: if password protection is enabled, check cookie
+  if (passwordHash && _bcrypt && !checkPassword(req)) {
+    return sendPasswordPage(res);
+  }
 
   // Serve index.html from web/ directory
   const indexPath = join(WEB_DIR, "index.html");
@@ -422,6 +550,7 @@ router.get("/r/:token", (req, res, params) => {
         token: params.token,
         port,
         host: "0.0.0.0",
+        hasPassword: !!(passwordHash && _bcrypt),
       });
       // Build Open Graph tags from discussion data
       const disc = readDiscussion();
@@ -455,6 +584,7 @@ router.get("/r/:token", (req, res, params) => {
 // GET /api/:token/data → Read discussion.json
 router.get("/api/:token/data", (req, res, params) => {
   if (!isTokenValid(params.token)) return send403(res);
+  if (passwordHash && _bcrypt && !checkPassword(req)) return sendJSON(res, { error: "Password required" }, 401);
 
   const data = readDiscussion();
   if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
@@ -466,6 +596,7 @@ router.get("/api/:token/data", (req, res, params) => {
 // GET /api/:token/events → SSE stream
 router.get("/api/:token/events", (req, res, params) => {
   if (!isTokenValid(params.token)) return send403(res);
+  if (passwordHash && _bcrypt && !checkPassword(req)) return sendJSON(res, { error: "Password required" }, 401);
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -509,6 +640,7 @@ router.get("/api/:token/events", (req, res, params) => {
 // GET /api/:token/poll?since=<timestamp> → Long-polling
 router.get("/api/:token/poll", (req, res, params) => {
   if (!isTokenValid(params.token)) return send403(res);
+  if (passwordHash && _bcrypt && !checkPassword(req)) return sendJSON(res, { error: "Password required" }, 401);
 
   // Parse query manually (no express)
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -576,6 +708,300 @@ router.post("/api/:token/revoke", (req, res, params) => {
   sendJSON(res, { ok: true, revoked: true });
 });
 
+// POST /api/validate-password → Password validation (no auth required)
+router.post("/api/validate-password", async (req, res) => {
+  if (!_bcrypt || !passwordHash) return sendJSON(res, { ok: true, noPassword: true });
+
+  let body = "";
+  for await (const chunk of req) body += chunk;
+  try {
+    const { password } = JSON.parse(body);
+    if (!password) return sendJSON(res, { ok: false, error: "Password required" }, 400);
+
+    const match = await _bcrypt.compare(password, passwordHash);
+    if (match) {
+      const sig = _signPwHash(passwordHash);
+      res.setHeader("Set-Cookie", `rt_pw=${encodeURIComponent(passwordHash + ":" + sig)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}`);
+      return sendJSON(res, { ok: true });
+    }
+    return sendJSON(res, { ok: false, error: "Incorrect password" }, 401);
+  } catch {
+    return sendJSON(res, { ok: false, error: "Invalid request" }, 400);
+  }
+});
+
+// GET /api/:token/export/markdown → Export discussion as Markdown
+router.get("/api/:token/export/markdown", (req, res, params) => {
+  if (!isTokenValid(params.token)) return send403(res);
+  if (passwordHash && _bcrypt && !checkPassword(req)) return sendJSON(res, { error: "Password required" }, 401);
+
+  const data = readDiscussion();
+  if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
+
+  const topic = data.topic || "Discussion";
+  const participants = data.participants || [];
+  const speeches = data.speeches || [];
+  const roundSummaries = data.round_summaries || [];
+  const finalSummary = data.final_summary;
+  const conclusion = data.conclusion;
+
+  let md = `# ${topic}\n\n`;
+
+  // Participants
+  if (participants.length > 0) {
+    md += `## Participants\n\n`;
+    for (const p of participants) {
+      const name = p.name || p.display_name || p.profile || p.id || "";
+      const role = p.role || "";
+      md += role ? `- **${name}** (${role})\n` : `- **${name}**\n`;
+    }
+    md += "\n";
+  }
+
+  // Speeches grouped by round
+  const rounds = new Map();
+  for (const s of speeches) {
+    const r = s.round || 0;
+    if (!rounds.has(r)) rounds.set(r, []);
+    rounds.get(r).push(s);
+  }
+
+  const sortedRounds = [...rounds.keys()].sort((a, b) => a - b);
+  for (const r of sortedRounds) {
+    md += r === 0 ? `## Opening (Round 0)\n\n` : `## Round ${r}\n\n`;
+    for (const s of rounds.get(r)) {
+      const speaker = s.display_name || s.participant || "Unknown";
+      md += `### ${speaker}\n\n`;
+      md += `${s.content || ""}\n\n`;
+    }
+  }
+
+  // Round summaries
+  if (roundSummaries.length > 0) {
+    md += `## Round Summaries\n\n`;
+    for (const rs of roundSummaries) {
+      md += `### Round ${rs.round || "?"}\n\n`;
+      const consensus = rs.consensus || rs.consensus_points || [];
+      const disagreement = rs.disagreement || rs.disagreement_points || [];
+      if (consensus.length > 0) {
+        md += `**Consensus:**\n`;
+        for (const c of consensus) {
+          const text = typeof c === "string" ? c : c.point || c.text || JSON.stringify(c);
+          md += `- ${text}\n`;
+        }
+        md += "\n";
+      }
+      if (disagreement.length > 0) {
+        md += `**Disagreement:**\n`;
+        for (const d of disagreement) {
+          const text = typeof d === "string" ? d : d.point || d.text || JSON.stringify(d);
+          md += `- ${text}\n`;
+        }
+        md += "\n";
+      }
+      if (rs.convergence_score !== undefined) {
+        md += `*Convergence: ${Math.round(rs.convergence_score * 100)}%*\n\n`;
+      }
+    }
+  }
+
+  // Final summary
+  if (finalSummary) {
+    md += `## Final Summary\n\n`;
+    const fsConsensus = finalSummary.consensus || finalSummary.consensus_points || [];
+    const fsDisagreement = finalSummary.disagreement || finalSummary.disagreement_points || [];
+    if (fsConsensus.length > 0) {
+      md += `### Consensus\n`;
+      for (const c of fsConsensus) {
+        const text = typeof c === "string" ? c : c.point || c.text || JSON.stringify(c);
+        md += `- ${text}\n`;
+      }
+      md += "\n";
+    }
+    if (fsDisagreement.length > 0) {
+      md += `### Disagreement\n`;
+      for (const d of fsDisagreement) {
+        const text = typeof d === "string" ? d : d.point || d.text || JSON.stringify(d);
+        md += `- ${text}\n`;
+      }
+      md += "\n";
+    }
+    if (finalSummary.verdict) {
+      md += `### Verdict\n\n${finalSummary.verdict}\n\n`;
+    }
+  }
+
+  // Conclusion
+  if (conclusion) {
+    md += `## Conclusion\n\n${conclusion}\n\n`;
+  }
+
+  // Footer
+  md += `---\n\n*Generated by Roundtable AI*\n`;
+
+  const filename = topic.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "_").slice(0, 60) || "discussion";
+  res.writeHead(200, {
+    "Content-Type": "text/markdown; charset=utf-8",
+    "Content-Disposition": `attachment; filename="${filename}.md"`,
+    "Access-Control-Allow-Origin": "*",
+  });
+  res.end(md);
+});
+
+// GET /api/:token/export/pdf → Export discussion as PDF (via md-to-pdf)
+router.get("/api/:token/export/pdf", async (req, res, params) => {
+  if (!isTokenValid(params.token)) return send403(res);
+  if (passwordHash && _bcrypt && !checkPassword(req)) return sendJSON(res, { error: "Password required" }, 401);
+
+  const data = readDiscussion();
+  if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
+
+  const { spawn } = await import("node:child_process");
+
+  // Reuse the markdown generation logic
+  const topic = data.topic || "Discussion";
+  const participants = data.participants || [];
+  const speeches = data.speeches || [];
+  const roundSummaries = data.round_summaries || [];
+  const finalSummary = data.final_summary;
+  const conclusion = data.conclusion;
+
+  let md = `# ${topic}\n\n`;
+
+  if (participants.length > 0) {
+    md += `## Participants\n\n`;
+    for (const p of participants) {
+      const name = p.name || p.display_name || p.profile || p.id || "";
+      const role = p.role || "";
+      md += role ? `- **${name}** (${role})\n` : `- **${name}**\n`;
+    }
+    md += "\n";
+  }
+
+  const rounds = new Map();
+  for (const s of speeches) {
+    const r = s.round || 0;
+    if (!rounds.has(r)) rounds.set(r, []);
+    rounds.get(r).push(s);
+  }
+
+  const sortedRounds = [...rounds.keys()].sort((a, b) => a - b);
+  for (const r of sortedRounds) {
+    md += r === 0 ? `## Opening (Round 0)\n\n` : `## Round ${r}\n\n`;
+    for (const s of rounds.get(r)) {
+      const speaker = s.display_name || s.participant || "Unknown";
+      md += `### ${speaker}\n\n`;
+      md += `${s.content || ""}\n\n`;
+    }
+  }
+
+  if (roundSummaries.length > 0) {
+    md += `## Round Summaries\n\n`;
+    for (const rs of roundSummaries) {
+      md += `### Round ${rs.round || "?"}\n\n`;
+      const consensus = rs.consensus || rs.consensus_points || [];
+      const disagreement = rs.disagreement || rs.disagreement_points || [];
+      if (consensus.length > 0) {
+        md += `**Consensus:**\n`;
+        for (const c of consensus) {
+          const text = typeof c === "string" ? c : c.point || c.text || JSON.stringify(c);
+          md += `- ${text}\n`;
+        }
+        md += "\n";
+      }
+      if (disagreement.length > 0) {
+        md += `**Disagreement:**\n`;
+        for (const d of disagreement) {
+          const text = typeof d === "string" ? d : d.point || d.text || JSON.stringify(d);
+          md += `- ${text}\n`;
+        }
+        md += "\n";
+      }
+      if (rs.convergence_score !== undefined) {
+        md += `*Convergence: ${Math.round(rs.convergence_score * 100)}%*\n\n`;
+      }
+    }
+  }
+
+  if (finalSummary) {
+    md += `## Final Summary\n\n`;
+    const fsConsensus = finalSummary.consensus || finalSummary.consensus_points || [];
+    const fsDisagreement = finalSummary.disagreement || finalSummary.disagreement_points || [];
+    if (fsConsensus.length > 0) {
+      md += `### Consensus\n`;
+      for (const c of fsConsensus) {
+        const text = typeof c === "string" ? c : c.point || c.text || JSON.stringify(c);
+        md += `- ${text}\n`;
+      }
+      md += "\n";
+    }
+    if (fsDisagreement.length > 0) {
+      md += `### Disagreement\n`;
+      for (const d of fsDisagreement) {
+        const text = typeof d === "string" ? d : d.point || d.text || JSON.stringify(d);
+        md += `- ${text}\n`;
+      }
+      md += "\n";
+    }
+    if (finalSummary.verdict) {
+      md += `### Verdict\n\n${finalSummary.verdict}\n\n`;
+    }
+  }
+
+  if (conclusion) {
+    md += `## Conclusion\n\n${conclusion}\n\n`;
+  }
+
+  md += `---\n\n*Generated by Roundtable AI*\n`;
+
+  const filename = topic.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "_").slice(0, 60) || "discussion";
+
+  // Convert Markdown to PDF using md-to-pdf via npx
+  const tmpMdPath = resolve(discussionDir, `.${filename}.tmp.md`);
+  const expectedPdfPath = tmpMdPath.replace(/\.md$/, ".pdf");
+  try {
+    writeFileSync(tmpMdPath, md, "utf-8");
+
+    const pdfOk = await new Promise((resolveP, rejectP) => {
+      let stderr = "";
+      const child = spawn("npx", ["--yes", "md-to-pdf", basename(tmpMdPath)], {
+        cwd: dirname(tmpMdPath),
+        env: { ...process.env },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      child.stdin.end();
+      child.stderr?.on("data", (d) => { stderr += d.toString(); });
+      child.on("close", (code) => {
+        if (code === 0) resolveP(true);
+        else rejectP(new Error(`md-to-pdf exited with code ${code}: ${stderr.slice(0, 500)}`));
+      });
+      child.on("error", rejectP);
+    });
+
+    if (pdfOk && existsSync(expectedPdfPath)) {
+      const { unlinkSync } = await import("node:fs");
+      const pdfBuffer = readFileSync(expectedPdfPath);
+      res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}.pdf"`,
+        "Content-Length": pdfBuffer.length,
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(pdfBuffer);
+      // Cleanup
+      try { unlinkSync(tmpMdPath); unlinkSync(expectedPdfPath); } catch { /* ignore */ }
+    } else {
+      sendJSON(res, { error: "PDF generation failed — output not found" }, 500);
+    }
+  } catch (err) {
+    console.error("[export/pdf] Error:", err.message);
+    // Cleanup temp files
+    try { unlinkSync(tmpMdPath); } catch { /* ignore */ }
+    try { unlinkSync(expectedPdfPath); } catch { /* ignore */ }
+    sendJSON(res, { error: "PDF generation failed", detail: err.message }, 500);
+  }
+});
+
 // GET /theme.css → Serve theme CSS
 router.get("/theme.css", (req, res) => {
   const cssPath = join(WEB_DIR, "theme.css");
@@ -599,6 +1025,19 @@ router.get("/viewer.css", (req, res) => {
   } else {
     res.writeHead(404);
     res.end("/* viewer.css not found */");
+  }
+});
+
+// GET /i18n.js → Serve i18n JS
+router.get("/i18n.js", (req, res) => {
+  const jsPath = join(WEB_DIR, "i18n.js");
+  if (existsSync(jsPath)) {
+    const js = readFileSync(jsPath, "utf-8");
+    res.writeHead(200, { "Content-Type": "application/javascript" });
+    res.end(js);
+  } else {
+    res.writeHead(404);
+    res.end("/* i18n.js not found */");
   }
 });
 
@@ -945,6 +1384,26 @@ async function main() {
         ?.handlers[0](req, res, params);
     });
 
+    app.post("/api/validate-password", (req, res) => {
+      router._routes
+        .find((r) => r.method === "POST" && r.path === "/api/validate-password")
+        ?.handlers[0](req, res, {});
+    });
+
+    app.get("/api/:token/export/markdown", (req, res) => {
+      const params = { token: req.params.token };
+      router._routes
+        .find((r) => r.method === "GET" && r.path === "/api/:token/export/markdown")
+        ?.handlers[0](req, res, params);
+    });
+
+    app.get("/api/:token/export/pdf", (req, res) => {
+      const params = { token: req.params.token };
+      router._routes
+        .find((r) => r.method === "GET" && r.path === "/api/:token/export/pdf")
+        ?.handlers[0](req, res, params);
+    });
+
     app.get("/api/:token/replay/meta", (req, res) => {
       const params = { token: req.params.token };
       router._routes
@@ -969,6 +1428,13 @@ async function main() {
     app.get("/viewer.css", (req, res) => {
       const handler = router._routes.find(
         (r) => r.method === "GET" && r.path === "/viewer.css"
+      );
+      if (handler) handler.handlers[0](req, res, {});
+    });
+
+    app.get("/i18n.js", (req, res) => {
+      const handler = router._routes.find(
+        (r) => r.method === "GET" && r.path === "/i18n.js"
       );
       if (handler) handler.handlers[0](req, res, {});
     });

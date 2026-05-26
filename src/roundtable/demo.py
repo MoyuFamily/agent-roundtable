@@ -17,8 +17,7 @@ DEMO_PARTICIPANTS: list[dict[str, Any]] = [
         "avatar": "👩‍💻",
         "title": "Senior Full-Stack Engineer",
         "description": (
-            "10 年全栈经验，主导过多个从零到一的产品架构。"
-            "擅长 Python/TypeScript 全栈，关注开发者体验和交付效率。"
+            "10 年全栈经验，主导过多个从零到一的产品架构。擅长 Python/TypeScript 全栈，关注开发者体验和交付效率。"
         ),
     },
     {
@@ -43,9 +42,7 @@ DEMO_PARTICIPANTS: list[dict[str, Any]] = [
 DEMO_SPEECHES: dict[int, dict[str, str]] = {
     1: {
         "alice": (
-            "FastAPI 的类型提示和自动生成 OpenAPI 文档太香了，"
-            "开发效率至少提升 30%。而且 async 原生支持，"
-            "性能也不差。"
+            "FastAPI 的类型提示和自动生成 OpenAPI 文档太香了，开发效率至少提升 30%。而且 async 原生支持，性能也不差。"
         ),
         "bob": (
             "Go Gin 编译后是原生二进制，内存占用只有 Python 的 1/10。"
@@ -108,6 +105,7 @@ DEMO_FINDINGS: dict[int, list[tuple[str, str]]] = {
         ("consensus", "两周内交付 MVP，性能瓶颈模块后续迭代"),
     ],
 }
+
 
 class DemoRunner:
     """Helper to run a complete demo discussion using a RoundtableCore instance."""

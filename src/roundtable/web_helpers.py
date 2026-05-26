@@ -9,11 +9,13 @@ def get_display_name_for_participant(participant: str, participants: list[dict[s
             return str(item.get("display_name") or item.get("profile") or participant)
     return participant
 
+
 def get_role_for_participant(participant: str, participants: list[dict[str, Any]]) -> str:
     for item in participants:
         if item.get("profile") == participant or item.get("participant") == participant:
             return str(item.get("role") or "")
     return ""
+
 
 def get_avatar_for_participant(participant: str, participants: list[dict[str, Any]]) -> str:
     # 1. Check for explicit avatar in participant data
@@ -21,7 +23,7 @@ def get_avatar_for_participant(participant: str, participants: list[dict[str, An
         if item.get("profile") == participant or item.get("participant") == participant:
             explicit = item.get("avatar", "")
             if explicit:
-                return explicit
+                return str(explicit)
     if participant == "coordinator":
         return "📋"
     role = get_role_for_participant(participant, participants).lower()

@@ -58,6 +58,7 @@ def test_cross_process_sync_flow(tmp_path, monkeypatch):
 
     # We patch WebPublisher to not run PM2 but write the actual discussion.json
     from roundtable.web_publisher import WebPublisher
+
     monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
     monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
 
@@ -171,10 +172,7 @@ def test_cross_process_concurrent_writes(tmp_path):
 
     processes = []
     for w in range(num_workers):
-        p = multiprocessing.Process(
-            target=_worker_write_event,
-            args=(str(web_dir), w, writes_per_worker)
-        )
+        p = multiprocessing.Process(target=_worker_write_event, args=(str(web_dir), w, writes_per_worker))
         processes.append(p)
         p.start()
 
@@ -213,6 +211,7 @@ def test_sync_convergence_score_only(tmp_path, monkeypatch):
 
     # Patch WebPublisher to avoid PM2
     from roundtable.web_publisher import WebPublisher
+
     monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
     monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
 
@@ -277,6 +276,7 @@ def test_cross_process_auto_conclude_replay_events(tmp_path, monkeypatch):
 
     # Patch WebPublisher to avoid PM2
     from roundtable.web_publisher import WebPublisher
+
     monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
     monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
 
@@ -319,6 +319,3 @@ def test_cross_process_auto_conclude_replay_events(tmp_path, monkeypatch):
     status_events_in_jsonl = [e for e in events_in_jsonl if e.get("type") == "status_delta"]
     assert len(status_events_in_jsonl) >= 1
     assert status_events_in_jsonl[-1]["status"] == "concluded"
-
-
-

@@ -414,6 +414,32 @@ router.get("/theme.css", (req, res) => {
   }
 });
 
+// GET /viewer.css → Serve viewer CSS
+router.get("/viewer.css", (req, res) => {
+  const cssPath = join(WEB_DIR, "viewer.css");
+  if (existsSync(cssPath)) {
+    const css = readFileSync(cssPath, "utf-8");
+    res.writeHead(200, { "Content-Type": "text/css" });
+    res.end(css);
+  } else {
+    res.writeHead(404);
+    res.end("/* viewer.css not found */");
+  }
+});
+
+// GET /viewer.js → Serve viewer JS
+router.get("/viewer.js", (req, res) => {
+  const jsPath = join(WEB_DIR, "viewer.js");
+  if (existsSync(jsPath)) {
+    const js = readFileSync(jsPath, "utf-8");
+    res.writeHead(200, { "Content-Type": "application/javascript" });
+    res.end(js);
+  } else {
+    res.writeHead(404);
+    res.end("/* viewer.js not found */");
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Discussion Replay API
 // ---------------------------------------------------------------------------
@@ -452,8 +478,8 @@ function buildReplayMeta(events) {
     return { totalEvents: 0, duration: 0, startTime: 0, endTime: 0, rounds: [], agents: [] };
   }
 
-  const startTime = events[0].created_at || 0;
-  const endTime = events[events.length - 1].created_at || 0;
+  const startTime = events[0].timestamp || events[0].created_at || 0;
+  const endTime = events[events.length - 1].timestamp || events[events.length - 1].created_at || 0;
   const duration = endTime - startTime;
 
   // Track rounds: each round_summary marks a boundary
@@ -462,20 +488,21 @@ function buildReplayMeta(events) {
   const agents = new Map();
 
   for (const ev of events) {
+    const evTime = ev.timestamp || ev.created_at || 0;
     // Track round boundaries from speech_start or speech_delta events
     const round = ev.round ?? ev.payload?.speech?.round ?? ev.speech?.round;
     if (round != null && !seenRounds.has(round)) {
       seenRounds.add(round);
       roundBoundaries.push({
         round: Number(round),
-        startTs: ev.created_at,
-        offsetMs: ((ev.created_at || 0) - startTime) * 1000,
+        startTs: evTime,
+        offsetMs: (evTime - startTime) * 1000,
       });
     }
 
     // Track unique agents
-    const agentId = ev.agent_id ?? ev.payload?.speech?.agent_id ?? ev.speech?.agent_id;
-    const agentName = ev.agent_name ?? ev.payload?.speech?.agent_name ?? ev.speech?.agent_name;
+    const agentId = ev.agent ?? ev.agent_id ?? ev.payload?.speech?.agent_id ?? ev.speech?.agent_id ?? ev.payload?.speech?.participant ?? ev.speech?.participant;
+    const agentName = ev.display_name ?? ev.agent_name ?? ev.payload?.speech?.agent_name ?? ev.speech?.agent_name ?? ev.payload?.speech?.display_name ?? ev.speech?.display_name;
     if (agentId && !agents.has(agentId)) {
       agents.set(agentId, { id: agentId, name: agentName || agentId });
     }
@@ -495,16 +522,12 @@ function buildReplayMeta(events) {
 }
 
 // GET /api/:token/replay/meta → Replay metadata for the progress bar
-router.get("/api/:token/replay/meta", async (req, res) => {
-  const token = req.params.token;
+router.get("/api/:token/replay/meta", async (req, res, params) => {
+  const token = params?.token || req.params?.token;
 
   // Validate token
-  if (!globalTokens.has(token)) {
+  if (!isTokenValid(token)) {
     return sendJSON(res, { error: "Invalid or expired token" }, 403);
-  }
-
-  if (isTokenRevoked(token)) {
-    return sendJSON(res, { error: "Token revoked" }, 403);
   }
 
   try {
@@ -520,20 +543,30 @@ router.get("/api/:token/replay/meta", async (req, res) => {
 // Query params:
 //   speed=1     — playback speed multiplier (1 = realtime, 2 = 2x, 0 = instant)
 //   from=0      — start offset in ms from beginning
-router.get("/api/:token/replay/stream", async (req, res) => {
-  const token = req.params.token;
+router.get("/api/:token/replay/stream", async (req, res, params) => {
+  const token = params?.token || req.params?.token;
 
   // Validate token
-  if (!globalTokens.has(token)) {
+  if (!isTokenValid(token)) {
     return sendJSON(res, { error: "Invalid or expired token" }, 403);
   }
 
-  if (isTokenRevoked(token)) {
-    return sendJSON(res, { error: "Token revoked" }, 403);
+  let speedVal, fromVal;
+  if (req.query) {
+    speedVal = req.query.speed;
+    fromVal = req.query.from;
+  } else {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      speedVal = url.searchParams.get("speed");
+      fromVal = url.searchParams.get("from");
+    } catch {
+      speedVal = null;
+      fromVal = null;
+    }
   }
-
-  const speed = Math.max(0, parseFloat(req.query.speed) || 1);
-  const fromMs = Math.max(0, parseInt(req.query.from, 10) || 0);
+  const speed = Math.max(0, parseFloat(speedVal) || 1);
+  const fromMs = Math.max(0, parseInt(fromVal, 10) || 0);
 
   // Parse the JSONL file
   let events;
@@ -558,12 +591,12 @@ router.get("/api/:token/replay/stream", async (req, res) => {
   const meta = buildReplayMeta(events);
   res.write(`event: replay_meta\ndata: ${JSON.stringify(meta)}\n\n`);
 
-  const startTime = events[0].created_at || 0;
+  const startTime = events[0].timestamp || events[0].created_at || 0;
   const startOffsetSec = fromMs / 1000;
 
   // Filter events from the requested offset
   const filteredEvents = events.filter((ev) => {
-    const offsetSec = (ev.created_at || 0) - startTime;
+    const offsetSec = (ev.timestamp || ev.created_at || 0) - startTime;
     return offsetSec >= startOffsetSec;
   });
 
@@ -574,7 +607,7 @@ router.get("/api/:token/replay/stream", async (req, res) => {
     // Instant mode — send all events immediately
     for (const ev of filteredEvents) {
       if (closed) break;
-      const offsetMs = ((ev.created_at || 0) - startTime) * 1000;
+      const offsetMs = ((ev.timestamp || ev.created_at || 0) - startTime) * 1000;
       res.write(`event: replay_event\ndata: ${JSON.stringify({ ...ev, _offsetMs: offsetMs })}\n\n`);
     }
     if (!closed) {
@@ -589,7 +622,7 @@ router.get("/api/:token/replay/stream", async (req, res) => {
     if (closed) break;
 
     const ev = filteredEvents[i];
-    const eventTime = (ev.created_at || 0) - startTime;
+    const eventTime = (ev.timestamp || ev.created_at || 0) - startTime;
     const delayMs = Math.max(0, (eventTime - startOffsetSec) * 1000 / speed);
 
     // Calculate progress for the client
@@ -608,7 +641,7 @@ router.get("/api/:token/replay/stream", async (req, res) => {
 
     // Calculate inter-event delay for the next iteration
     if (i < filteredEvents.length - 1) {
-      const nextTime = (filteredEvents[i + 1].created_at || 0) - startTime;
+      const nextTime = (filteredEvents[i + 1].timestamp || filteredEvents[i + 1].created_at || 0) - startTime;
       const interDelay = Math.max(0, (nextTime - eventTime) * 1000 / speed);
       // Cap individual delays at 5s for UX (e.g. long pauses between rounds)
       const cappedDelay = Math.min(interDelay, 5000);
@@ -722,9 +755,37 @@ async function main() {
         ?.handlers[0](req, res, params);
     });
 
+    app.get("/api/:token/replay/meta", (req, res) => {
+      const params = { token: req.params.token };
+      router._routes
+        .find((r) => r.method === "GET" && r.path === "/api/:token/replay/meta")
+        ?.handlers[0](req, res, params);
+    });
+
+    app.get("/api/:token/replay/stream", (req, res) => {
+      const params = { token: req.params.token };
+      router._routes
+        .find((r) => r.method === "GET" && r.path === "/api/:token/replay/stream")
+        ?.handlers[0](req, res, params);
+    });
+
     app.get("/theme.css", (req, res) => {
       const handler = router._routes.find(
         (r) => r.method === "GET" && r.path === "/theme.css"
+      );
+      if (handler) handler.handlers[0](req, res, {});
+    });
+
+    app.get("/viewer.css", (req, res) => {
+      const handler = router._routes.find(
+        (r) => r.method === "GET" && r.path === "/viewer.css"
+      );
+      if (handler) handler.handlers[0](req, res, {});
+    });
+
+    app.get("/viewer.js", (req, res) => {
+      const handler = router._routes.find(
+        (r) => r.method === "GET" && r.path === "/viewer.js"
       );
       if (handler) handler.handlers[0](req, res, {});
     });

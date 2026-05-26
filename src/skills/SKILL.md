@@ -167,7 +167,7 @@ After speaking, call roundtable_speak to record your statement:
 roundtable_speak(discussion_id="{id}", participant="{profile}", content="your speech")""",
     toolsets=["roundtable"]
 )
-# Wait for completion, then send notification, then delegate to participant 2
+# Wait for completion; optionally notify only in manual mode, then delegate to participant 2
 ```
 
 **3c. After each participant, send notification (only if notifications are NOT automatically configured via roundtable_init):**

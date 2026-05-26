@@ -79,6 +79,16 @@ else
   ok "Version bumped to v$NEW_VERSION (package.json updated)"
 fi
 
+# Sync version to pyproject.toml and SKILL.md
+if [ -f "pyproject.toml" ]; then
+  sed -i '' "s/^version = .*/version = \"$NEW_VERSION\"/" pyproject.toml
+  ok "Synced version $NEW_VERSION to pyproject.toml"
+fi
+if [ -f "SKILL.md" ]; then
+  sed -i '' "s/^version: .*/version: $NEW_VERSION/" SKILL.md
+  ok "Synced version $NEW_VERSION to SKILL.md"
+fi
+
 # ---------------------------------------------------------------------------
 # Step 3: Generate changelog
 # ---------------------------------------------------------------------------
@@ -100,7 +110,7 @@ if $DRY_RUN; then
   echo "  Would commit: package.json, CHANGELOG.md"
   echo "  Would create tag: v$NEW_VERSION"
 else
-  git add package.json CHANGELOG.md
+  git add package.json pyproject.toml SKILL.md CHANGELOG.md
   git -c user.name="agent-mafei" -c user.email="mafei@izmw.me" \
     commit -m "chore(release): v$NEW_VERSION"
   git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
@@ -122,10 +132,6 @@ git push origin --tags 2>&1 && ok "Pushed tags" || warn "Tag push failed"
 
 step 6 "Publishing to PyPI..."
 if [ -f "pyproject.toml" ]; then
-  # Sync version to pyproject.toml
-  sed -i '' "s/^version = .*/version = \"$NEW_VERSION\"/" pyproject.toml
-  ok "Synced version $NEW_VERSION to pyproject.toml"
-
   # Build dist
   python3 -m build --sdist --wheel 2>&1 && ok "Built sdist + wheel" || die "python3 -m build failed"
 
@@ -135,13 +141,6 @@ if [ -f "pyproject.toml" ]; then
     TWINE_PATH="twine"
   fi
   "$TWINE_PATH" upload dist/* 2>&1 && ok "Published to PyPI as agent-roundtable v$NEW_VERSION" || warn "PyPI upload failed (check .pypirc token)"
-
-  # Commit pyproject.toml version sync
-  git add pyproject.toml
-  git -c user.name="agent-mafei" -c user.email="mafei@izmw.me" \
-    commit --amend --no-edit 2>/dev/null || \
-    git -c user.name="agent-mafei" -c user.email="mafei@izmw.me" \
-    commit -m "chore(release): sync version to pyproject.toml v$NEW_VERSION"
 else
   warn "No pyproject.toml — skipping PyPI publish"
 fi
@@ -151,12 +150,6 @@ fi
 # ---------------------------------------------------------------------------
 
 step 7 "Publishing to skill hubs..."
-
-# Sync version to SKILL.md
-if [ -f "SKILL.md" ]; then
-  sed -i '' "s/^version: .*/version: $NEW_VERSION/" SKILL.md
-  ok "Synced version $NEW_VERSION to SKILL.md"
-fi
 
 # ClawHub
 if command -v clawhub &>/dev/null; then

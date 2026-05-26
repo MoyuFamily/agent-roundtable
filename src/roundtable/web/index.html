@@ -231,10 +231,21 @@
       box-shadow: 0 0 14px var(--rt-brand-glow), var(--rt-shadow-sm);
     }
     .speech-card.streaming .stream-cursor::after {
-      content: "▍";
-      color: var(--rt-brand-light);
-      animation: blink 1s ease-in-out infinite;
+      content: "▊";
+      color: var(--rt-text-muted);
+      animation: cursorBlink 0.8s step-end infinite;
       margin-left: 2px;
+      opacity: 1;
+    }
+    /* 发言完成后光标淡出 */
+    .speech-card:not(.streaming) .stream-cursor::after {
+      animation: none;
+      opacity: 0;
+      transition: opacity 200ms ease-out;
+    }
+    @keyframes cursorBlink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
     }
     .viewpoints-card {
       background: linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(30, 41, 59, 0.35));
@@ -244,6 +255,13 @@
       margin: var(--rt-space-3) 0 var(--rt-space-4);
       box-shadow: var(--rt-shadow-sm);
       animation: fadeSlideIn 0.35s ease-out;
+      transition: box-shadow var(--rt-duration-normal);
+    }
+    .viewpoints-card:hover {
+      box-shadow: var(--rt-shadow-md);
+    }
+    .viewpoints-card.collapsed .viewpoints-grid {
+      display: none;
     }
     .viewpoints-title {
       display: flex;
@@ -254,6 +272,68 @@
       color: var(--rt-text-primary);
       font-weight: 700;
       font-size: var(--rt-font-size-sm);
+      cursor: pointer;
+      user-select: none;
+    }
+    .viewpoints-card.collapsed .viewpoints-title {
+      margin-bottom: 0;
+    }
+    .viewpoints-title .toggle-icon {
+      display: inline-block;
+      transition: transform var(--rt-duration-normal);
+    }
+    .viewpoints-card.collapsed .toggle-icon {
+      transform: rotate(-90deg);
+    }
+    /* 发言完成标记 ✓ */
+    .speech-checkmark {
+      display: inline-block;
+      color: var(--rt-semantic-success, #22c55e);
+      font-size: 12px;
+      margin-left: 6px;
+      opacity: 0;
+      animation: checkFadeIn 0.3s ease-out forwards;
+    }
+    @keyframes checkFadeIn {
+      from { opacity: 0; transform: scale(0.5); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    /* 最终总结发光效果 */
+    .final-summary-glow {
+      box-shadow: 0 0 20px rgba(79, 70, 229, 0.25), 0 0 40px rgba(79, 70, 229, 0.1);
+      border-color: var(--rt-brand);
+      animation: glowPulse 2s ease-in-out infinite;
+    }
+    @keyframes glowPulse {
+      0%, 100% { box-shadow: 0 0 20px rgba(79, 70, 229, 0.25), 0 0 40px rgba(79, 70, 229, 0.1); }
+      50% { box-shadow: 0 0 30px rgba(79, 70, 229, 0.35), 0 0 60px rgba(79, 70, 229, 0.15); }
+    }
+    /* Auto-scroll "回到最新" button (PRD F1.5) */
+    .scroll-to-bottom-btn {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 999;
+      display: none;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 20px;
+      background: rgba(59,130,246,0.9);
+      color: white;
+      border: none;
+      border-radius: 9999px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+      backdrop-filter: blur(8px);
+      transition: all 0.2s ease;
+    }
+    .scroll-to-bottom-btn:hover {
+      background: rgba(59,130,246,1);
+      box-shadow: 0 6px 20px rgba(59,130,246,0.4);
+      transform: translateX(-50%) translateY(-2px);
     }
     .viewpoints-grid {
       display: grid;
@@ -778,6 +858,132 @@
       main { padding-bottom: 72px; }
     }
 
+    /* ═══════════════════════════════════════
+       收敛度进度条
+       ═══════════════════════════════════════ */
+    .convergence-bar {
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      margin: 8px 0;
+      overflow: hidden;
+    }
+    .convergence-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--rt-success), var(--rt-warning));
+      transition: width 0.8s ease-out;
+    }
+    .convergence-label {
+      font-size: 12px;
+      color: var(--rt-text-muted);
+      text-align: right;
+      margin-top: 2px;
+    }
+
+    /* ═══════════════════════════════════════
+       观点卡片模式切换（精简/全文）
+       ═══════════════════════════════════════ */
+    .mode-toggle {
+      display: inline-flex;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.06);
+      overflow: hidden;
+    }
+    .mode-toggle-btn {
+      padding: 4px 12px;
+      font-size: 12px;
+      color: var(--rt-text-muted);
+      cursor: pointer;
+      transition: all 0.2s;
+      border: none;
+      background: transparent;
+    }
+    .mode-toggle-btn.active {
+      background: var(--rt-brand);
+      color: #fff;
+    }
+
+    /* ═══════════════════════════════════════
+       结论区（verdict box）
+       ═══════════════════════════════════════ */
+    .verdict-box {
+      background: rgba(79, 70, 229, 0.1);
+      border: 1px solid rgba(79, 70, 229, 0.3);
+      border-radius: var(--rt-radius-md);
+      padding: 16px 20px;
+      margin-bottom: var(--rt-space-4);
+      font-size: var(--rt-font-size-lg);
+      font-weight: 600;
+      color: var(--rt-text-primary);
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .verdict-box .verdict-icon {
+      font-size: 18px;
+      flex-shrink: 0;
+      line-height: 1.5;
+    }
+
+    /* ═══════════════════════════════════════
+       ↓ 新消息 浮动按钮
+       ═══════════════════════════════════════ */
+    .scroll-bottom-btn {
+      position: fixed;
+      bottom: 80px;
+      right: 24px;
+      background: var(--rt-bg-card);
+      border: 1px solid var(--rt-border);
+      border-radius: 999px;
+      padding: 8px 16px;
+      font-size: var(--rt-font-size-sm);
+      color: var(--rt-text-secondary);
+      cursor: pointer;
+      box-shadow: var(--rt-shadow-md);
+      transition: opacity 0.2s, transform 0.2s;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .scroll-bottom-btn:hover {
+      background: var(--rt-bg-card-hover);
+      border-color: var(--rt-brand);
+      color: var(--rt-brand);
+    }
+    .scroll-bottom-btn.hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px);
+    }
+
+    /* ═══════════════════════════════════════
+       发言流式 agent 辉光（按角色色）
+       ═══════════════════════════════════════ */
+    .speech-card.streaming.role-product { box-shadow: -4px 0 16px rgba(59, 130, 246, 0.15), var(--rt-shadow-sm); }
+    .speech-card.streaming.role-design { box-shadow: -4px 0 16px rgba(168, 85, 247, 0.15), var(--rt-shadow-sm); }
+    .speech-card.streaming.role-engineer { box-shadow: -4px 0 16px rgba(34, 197, 94, 0.15), var(--rt-shadow-sm); }
+    .speech-card.streaming.role-research { box-shadow: -4px 0 16px rgba(245, 158, 11, 0.15), var(--rt-shadow-sm); }
+    .speech-card.streaming.role-marketing { box-shadow: -4px 0 16px rgba(236, 72, 153, 0.15), var(--rt-shadow-sm); }
+    .speech-card.streaming.role-coordinator { box-shadow: -4px 0 16px rgba(234, 179, 8, 0.15), var(--rt-shadow-sm); }
+    .speech-card.streaming.role-default { box-shadow: -4px 0 16px rgba(100, 116, 139, 0.15), var(--rt-shadow-sm); }
+
+    /* ═══════════════════════════════════════
+       观点卡片：精简/全文模式内容截断
+       ═══════════════════════════════════════ */
+    .viewpoints-body[data-mode="compact"] .viewpoints-column ul li {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .viewpoints-body[data-mode="full"] .viewpoints-column ul li {
+      display: block;
+      -webkit-line-clamp: unset;
+      overflow: visible;
+    }
+
     /* Reduced motion accessibility */
     @media (prefers-reduced-motion: reduce) {
       .status-badge .badge-dot,
@@ -868,6 +1074,11 @@
     </div>
   </main>
 
+  <!-- ↓ 新消息 浮动按钮 -->
+  <button class="scroll-bottom-btn hidden" id="scrollBottomBtn">
+    <span>↓</span> <span>新消息</span>
+  </button>
+
   <!-- Mobile Share Bar -->
   <div class="mobile-share-bar" id="mobileShareBar">
     <button class="share-btn" id="mobileShareBtn" aria-label="分享链接">
@@ -927,6 +1138,15 @@
       streamSpeechMap: new Map(),
     };
 
+    // Token batching buffer (rAF-based)
+    let tokenBuffer = [];
+    let rafId = null;
+
+    // Auto-scroll state
+    let autoScrollEnabled = true;
+    const SCROLL_THRESHOLD = 50;
+
+
     // DOM refs
     const $statusBadge = document.getElementById('statusBadge');
     const $statusLabel = document.getElementById('statusLabel');
@@ -940,6 +1160,30 @@
     const $conclusionCard = document.getElementById('conclusionCard');
     const $conclusionContent = document.getElementById('conclusionContent');
     const $revokedState = document.getElementById('revokedState');
+    const $scrollBottomBtn = document.getElementById('scrollBottomBtn');
+
+    // ---- Auto-scroll logic ----
+    const mainEl = document.querySelector('main');
+
+    mainEl?.addEventListener('scroll', () => {
+      const distanceFromBottom = mainEl.scrollHeight - mainEl.scrollTop - mainEl.clientHeight;
+      autoScrollEnabled = distanceFromBottom < SCROLL_THRESHOLD;
+      if ($scrollBottomBtn) {
+        $scrollBottomBtn.classList.toggle('hidden', autoScrollEnabled);
+      }
+    });
+
+    $scrollBottomBtn?.addEventListener('click', () => {
+      mainEl?.scrollTo({ top: mainEl.scrollHeight, behavior: 'smooth' });
+      autoScrollEnabled = true;
+      $scrollBottomBtn.classList.add('hidden');
+    });
+
+    function scrollToEnd() {
+      if (autoScrollEnabled && mainEl) {
+        mainEl.scrollTop = mainEl.scrollHeight;
+      }
+    }
 
     // ---- SSE Connection ----
     let eventSource = null;
@@ -1270,20 +1514,32 @@
       state.streamSpeechMap.set(id, { el: div, content: '', round: roundNum });
       updateRoundCount(roundNum);
       setTimeout(() => div.classList.remove('highlight'), 2000);
-      div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      scrollToEnd();
     }
 
     function appendStreamingSpeechToken(eventData) {
-      const id = eventData.id;
-      let entry = state.streamSpeechMap.get(id);
-      if (!entry) {
-        renderStreamingSpeechStart({ id, agent: eventData.agent || 'agent', round: eventData.round || state.currentRound || 0, timestamp: eventData.timestamp });
-        entry = state.streamSpeechMap.get(id);
+      tokenBuffer.push(eventData);
+      if (!rafId) {
+        rafId = requestAnimationFrame(flushTokenBuffer);
       }
-      if (!entry) return;
-      entry.content += eventData.delta || '';
-      const contentEl = entry.el.querySelector('.stream-content');
-      if (contentEl) contentEl.innerHTML = renderMarkdown(entry.content);
+    }
+
+    function flushTokenBuffer() {
+      rafId = null;
+      const batch = tokenBuffer.splice(0);
+      for (const eventData of batch) {
+        const id = eventData.id;
+        let entry = state.streamSpeechMap.get(id);
+        if (!entry) {
+          renderStreamingSpeechStart({ id, agent: eventData.agent || 'agent', round: eventData.round || state.currentRound || 0, timestamp: eventData.timestamp });
+          entry = state.streamSpeechMap.get(id);
+        }
+        if (!entry) continue;
+        entry.content += eventData.delta || '';
+        const contentEl = entry.el.querySelector('.stream-content');
+        if (contentEl) contentEl.innerHTML = renderMarkdown(entry.content);
+      }
+      scrollToEnd();
     }
 
     function markStreamingSpeechEnd(eventData) {
@@ -1292,6 +1548,15 @@
       entry.el.classList.remove('streaming');
       const contentEl = entry.el.querySelector('.stream-content');
       if (contentEl) contentEl.classList.remove('stream-cursor');
+      // 添加完成标记 ✓
+      const headerEl = entry.el.querySelector('.flex.items-center');
+      if (headerEl && !headerEl.querySelector('.speech-checkmark')) {
+        const checkmark = document.createElement('span');
+        checkmark.className = 'speech-checkmark';
+        checkmark.textContent = '✓';
+        checkmark.title = '发言完成';
+        headerEl.appendChild(checkmark);
+      }
     }
 
     function normalizeViewpointItems(items) {
@@ -1327,29 +1592,49 @@
       }
       const consensus = summary.consensus || summary.consensus_points || [];
       const disagreement = summary.disagreement || summary.disagreement_points || [];
+      const score = summary.convergence_score;
+      const hasScore = score !== undefined && score !== null;
+      const scorePercent = hasScore ? Math.round(Number(score) * 100) : 0;
       card.innerHTML = `
-        <div class="viewpoints-title">
+        <div class="viewpoints-title" onclick="this.parentElement.classList.toggle('collapsed')">
           <span>🧠 第 ${roundNum} 轮观点汇总</span>
-          ${summary.convergence_score !== undefined ? `<span class="round-badge-count">收敛度 ${escapeHtml(summary.convergence_score)}</span>` : ''}
+          <span style="display:flex;align-items:center;gap:6px">
+            ${hasScore ? `<span class="round-badge-count">收敛度 ${scorePercent}%</span>` : ''}
+            <span class="toggle-icon">▾</span>
+          </span>
         </div>
-        <div class="viewpoints-grid">
-          <div class="viewpoints-column">
-            <h4>✅ 共识观点</h4>
-            <ul>${renderViewpointList(consensus, 'consensus')}</ul>
+        ${hasScore ? `
+          <div class="convergence-bar">
+            <div class="convergence-bar-fill" style="width: ${scorePercent}%">
+            </div>
+            <span class="convergence-label">${scorePercent}%</span>
           </div>
-          <div class="viewpoints-column">
-            <h4>⚡ 分歧观点</h4>
-            <ul>${renderViewpointList(disagreement, 'disagreement')}</ul>
+        ` : ''}
+        <div class="mode-toggle">
+          <button class="mode-toggle-btn active" onclick="this.parentElement.querySelector('.mode-toggle-btn.active')?.classList.remove('active');this.classList.add('active');this.closest('.viewpoints-card').querySelector('.viewpoints-body').dataset.mode='compact'">精简</button>
+          <button class="mode-toggle-btn" onclick="this.parentElement.querySelector('.mode-toggle-btn.active')?.classList.remove('active');this.classList.add('active');this.closest('.viewpoints-card').querySelector('.viewpoints-body').dataset.mode='full'">全文</button>
+        </div>
+        <div class="viewpoints-body" data-mode="compact">
+          <div class="viewpoints-grid">
+            <div class="viewpoints-column">
+              <h4>✅ 共识观点</h4>
+              <ul>${renderViewpointList(consensus, 'consensus')}</ul>
+            </div>
+            <div class="viewpoints-column">
+              <h4>⚡ 分歧观点</h4>
+              <ul>${renderViewpointList(disagreement, 'disagreement')}</ul>
+            </div>
           </div>
         </div>
       `;
+      scrollToEnd();
     }
 
     function renderFinalSummary(summary) {
       if (!summary) return;
       const consensus = summary.consensus || summary.consensus_points || [];
       const disagreement = summary.disagreement || summary.disagreement_points || [];
-      const verdict = summary.verdict ? `<div class="markdown-content mt-3">${renderMarkdown(summary.verdict)}</div>` : '';
+      const verdict = summary.verdict ? `<div class="verdict-box"><span class="verdict-icon">📋</span><div><div style="font-weight:700;margin-bottom:8px;">结论</div><div class="markdown-content">${renderMarkdown(summary.verdict)}</div></div></div>` : '';
       $conclusionContent.innerHTML = `
         <div class="viewpoints-grid">
           <div class="viewpoints-column">
@@ -1364,6 +1649,9 @@
         ${verdict}
       `;
       $conclusionCard.classList.remove('hidden');
+      // 最终总结发光效果
+      $conclusionCard.classList.add('final-summary-glow');
+      scrollToEnd();
     }
 
     function mergeSpeech(speech, isNew = false) {
@@ -1432,8 +1720,7 @@
       // Remove highlight after 2s
       if (isNew) {
         setTimeout(() => div.classList.remove('highlight'), 2000);
-        // Auto-scroll
-        div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        scrollToEnd();
       }
     }
 

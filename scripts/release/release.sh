@@ -122,16 +122,24 @@ fi
 # ---------------------------------------------------------------------------
 
 step 5 "Pushing to origin..."
-BRANCH=$(git branch --show-current)
-git push origin "$BRANCH" 2>&1 && ok "Pushed branch" || warn "Branch push failed"
-git push origin --tags 2>&1 && ok "Pushed tags" || warn "Tag push failed"
+if $DRY_RUN; then
+  echo "  Would push branch to origin"
+  echo "  Would push tags"
+else
+  BRANCH=$(git branch --show-current)
+  git push origin "$BRANCH" 2>&1 && ok "Pushed branch" || warn "Branch push failed"
+  git push origin --tags 2>&1 && ok "Pushed tags" || warn "Tag push failed"
+fi
 
 # ---------------------------------------------------------------------------
 # Step 6: PyPI publish
 # ---------------------------------------------------------------------------
 
 step 6 "Publishing to PyPI..."
-if [ -f "pyproject.toml" ]; then
+if $DRY_RUN; then
+  echo "  Would build sdist + wheel"
+  echo "  Would upload to PyPI as agent-roundtable v$NEW_VERSION"
+elif [ -f "pyproject.toml" ]; then
   # Build dist
   python3 -m build --sdist --wheel 2>&1 && ok "Built sdist + wheel" || die "python3 -m build failed"
 
@@ -150,6 +158,11 @@ fi
 # ---------------------------------------------------------------------------
 
 step 7 "Publishing to skill hubs..."
+
+if $DRY_RUN; then
+  echo "  Would publish to ClawHub as agent-roundtable v$NEW_VERSION"
+  echo "  Would sync SKILL.md to $HERMES_SKILL_REPO"
+else
 
 # ClawHub
 if command -v clawhub &>/dev/null; then
@@ -185,12 +198,16 @@ else
   warn "gh CLI not found — skipping Hermes Skill Hub"
 fi
 
+fi  # end dry-run check for step 7
+
 # ---------------------------------------------------------------------------
 # Step 8: GitHub Release
 # ---------------------------------------------------------------------------
 
 step 8 "Creating GitHub Release..."
-if command -v gh &>/dev/null; then
+if $DRY_RUN; then
+  echo "  Would create GitHub Release v$NEW_VERSION"
+elif command -v gh &>/dev/null; then
   CHANGELOG_LATEST=$(awk "/^## \\[$NEW_VERSION/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md)
   if [ -n "$CHANGELOG_LATEST" ]; then
     echo "$CHANGELOG_LATEST" > /tmp/release-notes-$NEW_VERSION.md
@@ -211,5 +228,9 @@ fi
 
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════${NC}"
-echo -e "${GREEN}  ✅ Release v$NEW_VERSION complete!${NC}"
+if $DRY_RUN; then
+  echo -e "${GREEN}  Dry run complete. No changes published.${NC}"
+else
+  echo -e "${GREEN}  ✅ Release v$NEW_VERSION complete!${NC}"
+fi
 echo -e "${GREEN}═══════════════════════════════════════════${NC}"

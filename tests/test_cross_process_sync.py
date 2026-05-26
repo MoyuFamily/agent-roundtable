@@ -264,3 +264,61 @@ def test_sync_convergence_score_only(tmp_path, monkeypatch):
     assert data["round_summaries"][0]["convergence_score"] is not None
 
 
+def test_cross_process_auto_conclude_replay_events(tmp_path, monkeypatch):
+    """Test that status_delta concluded event is written to token_stream.jsonl on auto-conclude in fallback scenario."""
+    db_path = tmp_path / "roundtable.db"
+    db = RoundtableDB(db_path)
+    core = RoundtableCore(db)
+
+    # Redirect Path("/tmp") / "roundtable_web" to our tmp_path
+    web_base_dir = tmp_path / "roundtable_web"
+    web_base_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(core, "_get_web_dir", lambda discussion_id: web_base_dir / discussion_id)
+
+    # Patch WebPublisher to avoid PM2
+    from roundtable.web_publisher import WebPublisher
+    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
+
+    participants = [
+        {"profile": "alice", "role": "Engineer", "display_name": "Alice"},
+        {"profile": "bob", "role": "Designer", "display_name": "Bob"},
+    ]
+
+    # max_rounds=2 (auto-conclude after round 2 completes)
+    res = core.create_discussion("Topic", participants, web=True, max_rounds=2)
+    disc_id = res["discussion_id"]
+    disc_web_dir = web_base_dir / disc_id
+    disc_json_path = disc_web_dir / "discussion.json"
+    jsonl_path = disc_web_dir / "token_stream.jsonl"
+
+    # Now clear publisher to simulate fallback (cross-process)
+    core._publishers.clear()
+
+    # Speak speeches for Round 0, 1, 2 to complete discussion
+    core.speak(disc_id, "coordinator", "Opening")
+    core.speak(disc_id, "alice", "Round 1 alice")
+    core.speak(disc_id, "bob", "Round 1 bob")
+    core.speak(disc_id, "alice", "Round 2 alice")
+    result = core.speak(disc_id, "bob", "Round 2 bob")
+
+    assert result["discussion_complete"] is True
+
+    # Read events from discussion.json and token_stream.jsonl
+    data = json.loads(disc_json_path.read_text())
+    assert data["status"] == "concluded"
+
+    # Verify status_delta concluded event exists in discussion.json
+    events_in_json = data.get("events", [])
+    status_events_in_json = [e for e in events_in_json if e.get("type") == "status_delta"]
+    assert len(status_events_in_json) >= 1
+    assert status_events_in_json[-1]["status"] == "concluded"
+
+    # Verify status_delta concluded event exists in token_stream.jsonl
+    events_in_jsonl = [json.loads(line) for line in jsonl_path.read_text().splitlines()]
+    status_events_in_jsonl = [e for e in events_in_jsonl if e.get("type") == "status_delta"]
+    assert len(status_events_in_jsonl) >= 1
+    assert status_events_in_jsonl[-1]["status"] == "concluded"
+
+
+

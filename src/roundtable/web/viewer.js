@@ -423,7 +423,7 @@
         const roleType = getRoleType(p.role || '');
         const speechCount = state.speeches ? state.speeches.filter(s => s.participant === agent).length : 0;
         return `<div class="participant-chip" data-agent="${escapeHtml(agent)}" onclick="event.stopPropagation(); showAgentInfo('${escapeHtml(agent)}', this)">
-          <span class="chip-avatar">${avatar}</span>
+          <span class="chip-avatar" style="background: var(--rt-role-${roleType}-bg, var(--rt-bg-hover)); border-color: var(--rt-role-${roleType}, var(--rt-border))">${avatar}</span>
           <span class="font-medium" style="color:var(--rt-text-primary)">${name}</span>
           ${p.role ? `<span class="speaker-role-tag ${getRoleTagClass(roleType)}">${escapeHtml(p.role)}</span>` : ''}
           ${speechCount > 0 ? `<span class="chip-count">${speechCount}</span>` : ''}
@@ -1268,8 +1268,9 @@
               let html = '';
               data.rounds.forEach((rnd, index) => {
                 const pct = (rnd.offsetMs / data.duration) * 100;
+                const timeLabel = formatDuration(rnd.offsetMs);
                 html += `
-                  <div class="timeline-node round-marker" style="left: ${pct}%" onclick="seekReplay(${rnd.offsetMs})" title="第 ${rnd.round} 轮"></div>
+                  <div class="timeline-node round-marker" style="left: ${pct}%" onclick="seekReplay(${rnd.offsetMs})" data-tooltip="第 ${rnd.round} 轮 · ${timeLabel}"></div>
                   ${index < data.rounds.length - 1 ? '<div class="timeline-connector"></div>' : ''}
                 `;
               });

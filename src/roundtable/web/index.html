@@ -1033,6 +1033,19 @@
         appendStreamingSpeechToken(eventData);
       } else if (eventData.type === 'speech_end') {
         markStreamingSpeechEnd(eventData);
+      } else if (eventData.type === 'speech_delta') {
+        const speech = eventData.speech || eventData.payload?.speech;
+        if (speech) mergeSpeech(speech, true);
+      } else if (eventData.type === 'status_delta') {
+        if (eventData.status || eventData.payload?.status) {
+          state.status = eventData.status || eventData.payload.status;
+          updateStatusUI();
+        }
+        const conclusion = eventData.conclusion || eventData.payload?.conclusion;
+        if (conclusion && !state.conclusion) {
+          state.conclusion = conclusion;
+          renderConclusion(conclusion);
+        }
       } else if (eventData.type === 'round_summary') {
         renderRoundSummary(eventData);
       } else if (eventData.type === 'final_summary') {
@@ -1062,11 +1075,8 @@
       // Update speeches
       if (data.speeches) {
         const isInitialLoad = state.speeches.length === 0;
-        const newSpeeches = data.speeches.filter(s => !state.speechIdSet.has(s.id));
-        for (const s of newSpeeches) {
-          state.speechIdSet.add(s.id);
-          state.speeches.push(s);
-          renderSpeech(s, !isInitialLoad);
+        for (const speech of data.speeches) {
+          mergeSpeech(speech, !isInitialLoad);
         }
 
         // If it was the initial load, collapse older rounds
@@ -1354,6 +1364,18 @@
         ${verdict}
       `;
       $conclusionCard.classList.remove('hidden');
+    }
+
+    function mergeSpeech(speech, isNew = false) {
+      if (!speech || speech.id === undefined || state.speechIdSet.has(speech.id)) return;
+      state.speechIdSet.add(speech.id);
+      state.speeches.push(speech);
+      const streaming = state.streamSpeechMap.get(speech.id);
+      if (streaming) {
+        streaming.el.remove();
+        state.streamSpeechMap.delete(speech.id);
+      }
+      renderSpeech(speech, isNew);
     }
 
     function renderSpeech(speech, isNew = false) {

@@ -2,6 +2,16 @@
     const CONFIG = window.__RT_CONFIG__ || { token: '', port: 8199, host: '0.0.0.0' };
     const API_BASE = '';
 
+    // i18n (loaded by i18n.js before this script)
+    const _i18n = window.__RT_I18N__ || {};
+    const t = _i18n.t || ((k) => k);
+    const initI18n = _i18n.initI18n || (() => 'zh-CN');
+    const setLang = _i18n.setLang || (() => {});
+    const getLang = _i18n.getLang || (() => 'zh-CN');
+
+    // Initialize language
+    initI18n();
+
     // State
     let state = {
       status: 'waiting',
@@ -186,7 +196,7 @@
       if (data.topic && data.topic !== state.topic) {
         state.topic = data.topic;
         $topicTitle.textContent = data.topic;
-        document.title = `${data.topic} — 圆桌讨论`;
+        document.title = `${data.topic} — ${t('roundtableDiscussion')}`;
       }
 
       // Update participants
@@ -306,8 +316,8 @@
         </div>
         ${desc ? `<div class="agent-info-desc">${escapeHtml(desc)}</div>` : ''}
         <div class="agent-info-stats">
-          <div class="agent-stat"><div class="agent-stat-value">${speechCount}</div><div class="agent-stat-label">发言</div></div>
-          <div class="agent-stat"><div class="agent-stat-value">${roundCount}</div><div class="agent-stat-label">轮次</div></div>
+          <div class="agent-stat"><div class="agent-stat-value">${speechCount}</div><div class="agent-stat-label">${t("speeches")}</div></div>
+          <div class="agent-stat"><div class="agent-stat-value">${roundCount}</div><div class="agent-stat-label">${t("rounds")}</div></div>
         </div>
       `;
       document.body.appendChild(popup);
@@ -386,13 +396,13 @@
         section.id = id;
         section.className = 'round-section';
         
-        const titleText = roundNum === 0 ? '📢 开场发言 (Round 0)' : `💬 第 ${roundNum} 轮讨论 (Round ${roundNum})`;
+        const titleText = roundNum === 0 ? `📢 ${t('round0Speech')}` : `💬 ${t('roundDiscussion', { round: roundNum })}`;
         
         section.innerHTML = `
           <div class="round-header" onclick="toggleRound('${id}')">
             <div class="round-title">
               <span>${titleText}</span>
-              <span class="round-badge-count" id="${prefix}-round-count-${roundNum}">0 条发言</span>
+              <span class="round-badge-count" id="${prefix}-round-count-${roundNum}">${t("speeches", {count: 0})}</span>
             </div>
             <svg class="toggle-icon" viewBox="0 0 24 24">
               <path d="M19 9l-7 7-7-7" />
@@ -440,7 +450,7 @@
         }).join('');
       }
       if ($triggerCount) {
-        $triggerCount.textContent = `${state.participants.length} 位参与者`;
+        $triggerCount.textContent = `${state.participants.length} ${t("participants")}`;
       }
 
       // 更新移动端抽屉内容
@@ -460,7 +470,7 @@
               ${role ? `<div class="dp-role">${escapeHtml(role)}</div>` : ''}
               ${desc ? `<div class="dp-desc">${escapeHtml(desc)}</div>` : ''}
             </div>
-            ${speechCount > 0 ? `<span class="chip-count" style="font-size:13px">${speechCount} 条</span>` : ''}
+            ${speechCount > 0 ? `<span class="chip-count" style="font-size:13px">${speechCount} ${t("count")}</span>` : ''}
           </div>`;
         }).join('');
       }
@@ -501,7 +511,7 @@
       const countEl = document.getElementById(`${prefix}-round-count-${roundNum}`);
       if (body && countEl) {
         const count = body.querySelectorAll('.speech-card').length;
-        countEl.textContent = `${count} 条发言`;
+        countEl.textContent = `${count} ${t("speeches")}`;
       }
     }
 
@@ -581,7 +591,7 @@
         const checkmark = document.createElement('span');
         checkmark.className = 'speech-checkmark';
         checkmark.textContent = '✓';
-        checkmark.title = '发言完成';
+        checkmark.title = t('speechComplete');
         headerEl.appendChild(checkmark);
       }
     }
@@ -593,7 +603,7 @@
 
     function renderViewpointList(items, type) {
       const normalized = normalizeViewpointItems(items);
-      if (normalized.length === 0) return '<li class="viewpoint-item">暂无</li>';
+      if (normalized.length === 0) return `<li class="viewpoint-item">${t('none')}</li>`;
       return normalized.map(item => {
         const content = escapeHtml(item.content || item.text || item.title || String(item));
         const supporters = Array.isArray(item.supporters) && item.supporters.length > 0
@@ -627,9 +637,9 @@
       const scoreClass = scorePercent >= 90 ? 'complete' : scorePercent >= 60 ? 'high' : scorePercent >= 30 ? 'medium' : 'low';
       card.innerHTML = `
         <div class="viewpoints-title" onclick="this.parentElement.classList.toggle('collapsed')">
-          <span>🧠 第 ${roundNum} 轮观点汇总</span>
+          <span>🧠 ${t("roundViewpointSummary", { round: roundNum })}</span>
           <span style="display:flex;align-items:center;gap:6px">
-            ${hasScore ? `<span class="round-badge-count">收敛度 ${scorePercent}%</span>` : ''}
+            ${hasScore ? `<span class="round-badge-count">${t("convergence")} ${scorePercent}%</span>` : ''}
             <span class="toggle-icon">▾</span>
           </span>
         </div>
@@ -647,11 +657,11 @@
         <div class="viewpoints-body" data-mode="compact">
           <div class="viewpoints-grid">
             <div class="viewpoints-column">
-              <h4>✅ 共识观点</h4>
+              <h4>${t("consensusPoints")}</h4>
               <ul>${renderViewpointList(consensus, 'consensus')}</ul>
             </div>
             <div class="viewpoints-column">
-              <h4>⚡ 分歧观点</h4>
+              <h4>${t("disagreementPoints")}</h4>
               <ul>${renderViewpointList(disagreement, 'disagreement')}</ul>
             </div>
           </div>
@@ -664,15 +674,15 @@
       if (!summary) return;
       const consensus = summary.consensus || summary.consensus_points || [];
       const disagreement = summary.disagreement || summary.disagreement_points || [];
-      const verdict = summary.verdict ? `<div class="verdict-box"><span class="verdict-icon">📋</span><div><div style="font-weight:700;margin-bottom:8px;">结论</div><div class="markdown-content">${renderMarkdown(summary.verdict)}</div></div></div>` : '';
+      const verdict = summary.verdict ? `<div class="verdict-box"><span class="verdict-icon">📋</span><div><div style="font-weight:700;margin-bottom:8px;">${t("conclusion")}</div><div class="markdown-content">${renderMarkdown(summary.verdict)}</div></div></div>` : '';
       $conclusionContent.innerHTML = `
         <div class="viewpoints-grid">
           <div class="viewpoints-column">
-            <h4>✅ 最终共识</h4>
+            <h4>${t("finalConsensus")}</h4>
             <ul>${renderViewpointList(consensus, 'consensus')}</ul>
           </div>
           <div class="viewpoints-column">
-            <h4>⚡ 保留分歧</h4>
+            <h4>${t("remainingDisagreement")}</h4>
             <ul>${renderViewpointList(disagreement, 'disagreement')}</ul>
           </div>
         </div>
@@ -702,7 +712,7 @@
       let roleName = '';
       if (speech.participant === 'coordinator') {
         roleType = 'coordinator';
-        roleName = '👑 协调者';
+        roleName = `👑 ${t('coordinator')}`;
       } else {
         const participantObj = state.participants.find(p => p.profile === speech.participant);
         if (participantObj) {
@@ -768,9 +778,9 @@
 
     function updateStatusUI() {
       const statusMap = {
-        waiting: { cls: 'waiting', label: '等待中' },
+        waiting: { cls: 'waiting', label: t('statusWaiting') },
         active:  { cls: 'live',    label: 'LIVE' },
-        concluded: { cls: 'ended', label: '已结束' },
+        concluded: { cls: 'ended', label: t('statusConcluded') },
       };
       const info = statusMap[state.status] || statusMap.waiting;
       $statusBadge.className = `status-badge ${info.cls}`;
@@ -788,17 +798,11 @@
 
     function setConnection(status) {
       $connDot.className = `conn-dot ${status}`;
-      const labels = { connected: '已连接', disconnected: '已断开', reconnecting: '重连中…' };
+      const labels = { connected: t('connConnected'), disconnected: t('connDisconnected'), reconnecting: t('connReconnecting') };
       $connText.textContent = labels[status] || status;
     }
 
     // ---- Utils ----
-    function escapeHtml(str) {
-      const div = document.createElement('div');
-      div.textContent = str;
-      return div.innerHTML;
-    }
-
     function formatTime(ts) {
       if (!ts) return '';
       const d = new Date(ts * 1000);
@@ -959,7 +963,7 @@
     }
 
     function showCopySuccess(btn, originalText) {
-      btn.textContent = '✓ 已复制';
+      btn.textContent = `✓ ${t('copied')}`;
       btn.classList.add('copied');
       btn.disabled = true;
       setTimeout(() => {
@@ -973,7 +977,7 @@
       if (!shareLink) return;
       try {
         await copyToClipboard(shareLink);
-        showCopySuccess($copyBtn, '复制');
+        showCopySuccess($copyBtn, t('copy'));
       } catch {
         // If clipboard fails, select the input so user can manually copy
         $shareLinkInput.select();
@@ -984,7 +988,7 @@
       if (!shareLink) return;
       try {
         await copyToClipboard(shareLink);
-        showCopySuccess($sheetCopyBtn, '复制链接');
+        showCopySuccess($sheetCopyBtn, t('copyLink'));
       } catch {
         $shareSheetLinkInput.select();
       }
@@ -1023,7 +1027,7 @@
     // ---- Revoke Confirm ----
     $revokeConfirmBtn.addEventListener('click', async () => {
       $revokeConfirmBtn.disabled = true;
-      $revokeConfirmBtn.textContent = '撤销中…';
+      $revokeConfirmBtn.textContent = t('revoking');
 
       try {
         const resp = await fetch(`${API_BASE}/api/${CONFIG.token}/revoke`, {
@@ -1035,12 +1039,12 @@
           showRevokedInPanel();
           // The SSE 'revoked' event will show the full-page revoked state
         } else {
-          alert('撤销失败，请重试');
+          alert(t('revokeFailed'));
           $revokeConfirmBtn.disabled = false;
-          $revokeConfirmBtn.textContent = '确认撤销';
+          $revokeConfirmBtn.textContent = t('confirmRevoke');
         }
       } catch {
-        alert('网络错误，请重试');
+        alert(t('networkError'));
         $revokeConfirmBtn.disabled = false;
         $revokeConfirmBtn.textContent = '确认撤销';
       }
@@ -1145,7 +1149,7 @@
       function showCopyToast() {
         const toast = document.createElement('div');
         toast.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:rgba(34,197,94,0.9);color:#fff;padding:8px 20px;border-radius:999px;font-size:14px;z-index:1300;animation:fadeSlideIn 0.3s ease-out;';
-        toast.textContent = '✓ 已复制';
+        toast.textContent = `✓ ${t('copied')}`;
         document.body.appendChild(toast);
         setTimeout(function() { toast.remove(); }, 1500);
       }
@@ -1260,7 +1264,7 @@
           if (data.ok || data.duration !== undefined) {
             replayState.totalDurationMs = data.duration;
             document.getElementById('replayTotalTime').textContent = formatDuration(data.duration);
-            document.getElementById('replayTopicTitle').textContent = state.topic || '回放';
+            document.getElementById('replayTopicTitle').textContent = state.topic || t('replay');
             
             // Render timeline strip nodes
             const $timelineStrip = document.getElementById('timelineStrip');
@@ -1413,7 +1417,7 @@
         replayState.currentTimeMs = data.currentMs;
         updateProgressBar(data.currentMs);
         if (data.round !== undefined) {
-          document.getElementById('replayRoundInfo').textContent = `第 ${data.round} 轮`;
+          document.getElementById('replayRoundInfo').textContent = `${t("roundN", { round: data.round })}`;
         }
       });
 
@@ -1454,6 +1458,101 @@
       es.onerror = () => {
         es.close();
       };
+    }
+
+    // ── data-i18n: translate static HTML elements ──────────────────────────
+    function applyStaticI18n() {
+      if (typeof t !== 'function') return;
+      document.querySelectorAll('[data-i18n]').forEach((el) => {
+        const key = el.getAttribute('data-i18n');
+        const translated = t(key);
+        if (translated && translated !== key) {
+          if (el.tagName === 'INPUT') {
+            el.placeholder = translated;
+          } else {
+            el.textContent = translated;
+          }
+        }
+      });
+    }
+    applyStaticI18n();
+
+    // ── Language switcher ──────────────────────────────────────────────────
+    const langSwitchBtn = document.getElementById('langSwitchBtn');
+    if (langSwitchBtn) {
+      langSwitchBtn.addEventListener('click', () => {
+        const next = getLang() === 'zh-CN' ? 'en-US' : 'zh-CN';
+        setLang(next);
+        langSwitchBtn.textContent = next === 'zh-CN' ? 'EN' : '中';
+        applyStaticI18n();
+        // Re-render dynamic content
+        renderParticipants();
+        if (replayState.data) {
+          renderTimelineStrip();
+        }
+      });
+      // Set initial label
+      langSwitchBtn.textContent = getLang() === 'zh-CN' ? 'EN' : '中';
+    }
+
+    // ── Export button (Markdown + PDF) ─────────────────────────────────────
+    const exportBtn = document.getElementById('exportBtn');
+    const exportPopover = document.getElementById('exportPopover');
+    const exportMarkdownBtn = document.getElementById('exportMarkdownBtn');
+    const exportPdfBtn = document.getElementById('exportPdfBtn');
+
+    if (exportBtn && exportPopover) {
+      exportBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportPopover.classList.toggle('hidden');
+      });
+      document.addEventListener('click', () => {
+        exportPopover.classList.add('hidden');
+      });
+    }
+
+    if (exportMarkdownBtn) {
+      exportMarkdownBtn.addEventListener('click', async () => {
+        exportPopover.classList.add('hidden');
+        try {
+          const resp = await fetch(`${API_BASE}/api/${CONFIG.token}/export/markdown`);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const blob = await resp.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `roundtable-${CONFIG.token}.md`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        } catch (err) {
+          console.error('[export] Markdown download failed:', err);
+          alert(t('exportFailed') + ': ' + err.message);
+        }
+      });
+    }
+
+    if (exportPdfBtn) {
+      exportPdfBtn.addEventListener('click', async () => {
+        exportPopover.classList.add('hidden');
+        try {
+          const resp = await fetch(`${API_BASE}/api/${CONFIG.token}/export/pdf`);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const blob = await resp.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `roundtable-${CONFIG.token}.pdf`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        } catch (err) {
+          console.error('[export] PDF download failed:', err);
+          alert(t('exportFailed') + ': ' + err.message);
+        }
+      });
     }
 
     connectSSE();

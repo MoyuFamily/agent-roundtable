@@ -14,6 +14,7 @@
     "release:major": "bash scripts/release/release.sh --type=major"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "express": "^5.1.0"
   }
 }

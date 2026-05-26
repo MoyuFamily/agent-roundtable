@@ -1,6 +1,9 @@
 from __future__ import annotations
+
 from typing import Any
-from roundtable.models import Discussion, Participant, Speech, ConvergenceRecord
+
+from roundtable.models import ConvergenceRecord, Discussion, Participant, Speech
+
 
 def format_history(speeches: list[Speech], participants_map: dict[str, Any]) -> str:
     """Format speech history into a human-readable string."""

@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 from typing import Any
+
 
 def get_display_name_for_participant(participant: str, participants: list[dict[str, Any]]) -> str:
     for item in participants:

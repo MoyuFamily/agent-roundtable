@@ -22,20 +22,18 @@ from roundtable.exceptions import (
     InvalidReplyToError,
     InvalidSpeechOrderError,
 )
-from roundtable.schema import (
-    INITIATION_ROUND,
-    SCHEMA_SQL,
-    VALID_DISCUSSION_STATUSES,
-    VALID_FINDING_TYPES,
-    VALID_SPEECH_ORDERS,
-    migrate_db,
-)
 from roundtable.models import (
     ConvergenceRecord,
     Discussion,
     Finding,
     Participant,
     Speech,
+)
+from roundtable.schema import (
+    SCHEMA_SQL,
+    VALID_FINDING_TYPES,
+    VALID_SPEECH_ORDERS,
+    migrate_db,
 )
 
 # Constants and SCHEMA_SQL are imported from roundtable.schema

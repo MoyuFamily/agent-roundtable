@@ -22,8 +22,6 @@ Adapter registration::
 
 from __future__ import annotations
 
-from typing import Any
-
 from roundtable.adapters.base import RoundtableAdapter
 from roundtable.adapters.generic import Roundtable
 from roundtable.adapters.simple import SimpleAdapter

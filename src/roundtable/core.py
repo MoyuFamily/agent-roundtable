@@ -16,16 +16,16 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from roundtable.db import RoundtableDB
-from roundtable.exceptions import (
-    DiscussionNotActiveError,
-    DiscussionNotFoundError,
-    InvalidParticipantError,
-)
 from roundtable.demo import (
     DEMO_FINDINGS,
     DEMO_PARTICIPANTS,
     DEMO_SPEECHES,
     DEMO_TOPIC,
+)
+from roundtable.exceptions import (
+    DiscussionNotActiveError,
+    DiscussionNotFoundError,
+    InvalidParticipantError,
 )
 from roundtable.models import ConvergenceRecord, Discussion, Participant, Speech
 from roundtable.notify import Notifier

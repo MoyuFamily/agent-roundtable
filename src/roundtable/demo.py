@@ -1,8 +1,8 @@
 from __future__ import annotations
+
 import logging
 import os
 import textwrap
-import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,10 @@ DEMO_PARTICIPANTS: list[dict[str, Any]] = [
         "perspective": "重视开发效率和生态",
         "avatar": "👩‍💻",
         "title": "Senior Full-Stack Engineer",
-        "description": "10 年全栈经验，主导过多个从零到一的产品架构。擅长 Python/TypeScript 全栈，关注开发者体验和交付效率。",
+        "description": (
+            "10 年全栈经验，主导过多个从零到一的产品架构。"
+            "擅长 Python/TypeScript 全栈，关注开发者体验和交付效率。"
+        ),
     },
     {
         "profile": "bob",

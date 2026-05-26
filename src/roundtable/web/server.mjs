@@ -15,7 +15,8 @@
  */
 
 import { createServer } from "node:http";
-import { readFileSync, watch, existsSync, writeFileSync, renameSync } from "node:fs";
+import { readFileSync, watch, existsSync, writeFileSync, renameSync, createReadStream } from "node:fs";
+import * as readline from "node:readline";
 import { join, resolve, dirname, basename } from "node:path";
 import { createRequire } from "node:module";
 
@@ -37,6 +38,7 @@ function parseArgs() {
 
 const { port, discussionDir } = parseArgs();
 const DISCUSSION_PATH = resolve(discussionDir, "discussion.json");
+const TOKEN_STREAM_PATH = resolve(discussionDir, "token_stream.jsonl");
 const REVOKED_PATH = resolve(discussionDir, ".revoked_tokens");
 const WEB_DIR = new URL(".", import.meta.url).pathname;
 
@@ -132,6 +134,10 @@ function sendJSON(res, data, status = 200) {
     "Access-Control-Allow-Origin": "*",
   });
   res.end(JSON.stringify(data));
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function sendHTML(res, html) {
@@ -405,6 +411,215 @@ router.get("/theme.css", (req, res) => {
   } else {
     res.writeHead(404);
     res.end("/* theme.css not found */");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Discussion Replay API
+// ---------------------------------------------------------------------------
+
+/**
+ * Read and parse token_stream.jsonl, returning an array of event objects.
+ * Each event has: type, created_at, and various payload fields.
+ */
+async function readTokenStream() {
+  const events = [];
+  if (!existsSync(TOKEN_STREAM_PATH)) return events;
+
+  return new Promise((resolve, reject) => {
+    const rl = readline.createInterface({
+      input: createReadStream(TOKEN_STREAM_PATH, { encoding: "utf-8" }),
+      crlfDelay: Infinity,
+    });
+    rl.on("line", (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      try {
+        events.push(JSON.parse(trimmed));
+      } catch { /* skip malformed lines */ }
+    });
+    rl.on("close", () => resolve(events));
+    rl.on("error", reject);
+  });
+}
+
+/**
+ * Build replay metadata from a list of parsed events.
+ * Returns: { totalEvents, duration, startTime, endTime, rounds, agents }
+ */
+function buildReplayMeta(events) {
+  if (events.length === 0) {
+    return { totalEvents: 0, duration: 0, startTime: 0, endTime: 0, rounds: [], agents: [] };
+  }
+
+  const startTime = events[0].created_at || 0;
+  const endTime = events[events.length - 1].created_at || 0;
+  const duration = endTime - startTime;
+
+  // Track rounds: each round_summary marks a boundary
+  const roundBoundaries = [];
+  const seenRounds = new Set();
+  const agents = new Map();
+
+  for (const ev of events) {
+    // Track round boundaries from speech_start or speech_delta events
+    const round = ev.round ?? ev.payload?.speech?.round ?? ev.speech?.round;
+    if (round != null && !seenRounds.has(round)) {
+      seenRounds.add(round);
+      roundBoundaries.push({
+        round: Number(round),
+        startTs: ev.created_at,
+        offsetMs: ((ev.created_at || 0) - startTime) * 1000,
+      });
+    }
+
+    // Track unique agents
+    const agentId = ev.agent_id ?? ev.payload?.speech?.agent_id ?? ev.speech?.agent_id;
+    const agentName = ev.agent_name ?? ev.payload?.speech?.agent_name ?? ev.speech?.agent_name;
+    if (agentId && !agents.has(agentId)) {
+      agents.set(agentId, { id: agentId, name: agentName || agentId });
+    }
+  }
+
+  // Sort round boundaries by round number
+  roundBoundaries.sort((a, b) => a.round - b.round);
+
+  return {
+    totalEvents: events.length,
+    duration: duration * 1000, // convert to ms
+    startTime,
+    endTime,
+    rounds: roundBoundaries,
+    agents: Array.from(agents.values()),
+  };
+}
+
+// GET /api/:token/replay/meta → Replay metadata for the progress bar
+router.get("/api/:token/replay/meta", async (req, res) => {
+  const token = req.params.token;
+
+  // Validate token
+  if (!globalTokens.has(token)) {
+    return sendJSON(res, { error: "Invalid or expired token" }, 403);
+  }
+
+  if (isTokenRevoked(token)) {
+    return sendJSON(res, { error: "Token revoked" }, 403);
+  }
+
+  try {
+    const events = await readTokenStream();
+    const meta = buildReplayMeta(events);
+    sendJSON(res, { ok: true, ...meta });
+  } catch (err) {
+    sendJSON(res, { error: "Failed to read replay data", detail: String(err) }, 500);
+  }
+});
+
+// GET /api/:token/replay/stream → SSE replay stream
+// Query params:
+//   speed=1     — playback speed multiplier (1 = realtime, 2 = 2x, 0 = instant)
+//   from=0      — start offset in ms from beginning
+router.get("/api/:token/replay/stream", async (req, res) => {
+  const token = req.params.token;
+
+  // Validate token
+  if (!globalTokens.has(token)) {
+    return sendJSON(res, { error: "Invalid or expired token" }, 403);
+  }
+
+  if (isTokenRevoked(token)) {
+    return sendJSON(res, { error: "Token revoked" }, 403);
+  }
+
+  const speed = Math.max(0, parseFloat(req.query.speed) || 1);
+  const fromMs = Math.max(0, parseInt(req.query.from, 10) || 0);
+
+  // Parse the JSONL file
+  let events;
+  try {
+    events = await readTokenStream();
+  } catch (err) {
+    return sendJSON(res, { error: "Failed to read replay data" }, 500);
+  }
+
+  if (events.length === 0) {
+    return sendJSON(res, { error: "No replay data available" }, 404);
+  }
+
+  // Set up SSE
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+
+  const meta = buildReplayMeta(events);
+  res.write(`event: replay_meta\ndata: ${JSON.stringify(meta)}\n\n`);
+
+  const startTime = events[0].created_at || 0;
+  const startOffsetSec = fromMs / 1000;
+
+  // Filter events from the requested offset
+  const filteredEvents = events.filter((ev) => {
+    const offsetSec = (ev.created_at || 0) - startTime;
+    return offsetSec >= startOffsetSec;
+  });
+
+  let closed = false;
+  req.on("close", () => { closed = true; });
+
+  if (speed === 0) {
+    // Instant mode — send all events immediately
+    for (const ev of filteredEvents) {
+      if (closed) break;
+      const offsetMs = ((ev.created_at || 0) - startTime) * 1000;
+      res.write(`event: replay_event\ndata: ${JSON.stringify({ ...ev, _offsetMs: offsetMs })}\n\n`);
+    }
+    if (!closed) {
+      res.write(`event: replay_end\ndata: ${JSON.stringify({ totalEvents: filteredEvents.length })}\n\n`);
+      res.end();
+    }
+    return;
+  }
+
+  // Realtime mode — delay events according to their timestamps
+  for (let i = 0; i < filteredEvents.length; i++) {
+    if (closed) break;
+
+    const ev = filteredEvents[i];
+    const eventTime = (ev.created_at || 0) - startTime;
+    const delayMs = Math.max(0, (eventTime - startOffsetSec) * 1000 / speed);
+
+    // Calculate progress for the client
+    const progress = {
+      currentMs: eventTime * 1000,
+      totalMs: meta.duration,
+      eventIndex: i,
+      totalEvents: filteredEvents.length,
+    };
+
+    await sleep(delayMs);
+    if (closed) break;
+
+    res.write(`event: replay_progress\ndata: ${JSON.stringify(progress)}\n\n`);
+    res.write(`event: replay_event\ndata: ${JSON.stringify(ev)}\n\n`);
+
+    // Calculate inter-event delay for the next iteration
+    if (i < filteredEvents.length - 1) {
+      const nextTime = (filteredEvents[i + 1].created_at || 0) - startTime;
+      const interDelay = Math.max(0, (nextTime - eventTime) * 1000 / speed);
+      // Cap individual delays at 5s for UX (e.g. long pauses between rounds)
+      const cappedDelay = Math.min(interDelay, 5000);
+      if (cappedDelay > 0) await sleep(cappedDelay);
+      if (closed) break;
+    }
+  }
+
+  if (!closed) {
+    res.write(`event: replay_end\ndata: ${JSON.stringify({ totalEvents: filteredEvents.length })}\n\n`);
+    res.end();
   }
 });
 

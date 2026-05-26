@@ -42,6 +42,7 @@ class RoundtableCore:
         self.db = db or RoundtableDB()
         self._send_fn = send_fn
         self._publishers: dict[str, Any] = {}  # discussion_id → WebPublisher
+        self._stream_delay: float = 0.0  # 每个 token chunk 之间的延迟（秒）
 
     # ------------------------------------------------------------------
     # Public API
@@ -203,7 +204,7 @@ class RoundtableCore:
             participants = self.db.get_participants(conn, discussion_id)
             p_map = {p.participant: p for p in participants}
 
-            # --- Web publisher hook ---
+            # --- Web publisher hook (streaming + v1 兼容) ---
             publisher = self._publishers.get(discussion_id)
             p_info = p_map.get(speech.participant)
             speech_data = {
@@ -216,9 +217,34 @@ class RoundtableCore:
             }
             if publisher:
                 try:
+                    # 流式推送：speech_start → speech_token(s) → speech_end
+                    avatar = publisher._avatar_for_participant(speech.participant)
+                    display_name = p_info.display_name if p_info else speech.participant
+                    role = p_info.role if p_info else ""
+                    publisher.on_speech_start(
+                        speech.id,
+                        speech.participant,
+                        avatar=avatar,
+                        round_num=speech.round,
+                        display_name=display_name,
+                        role=role,
+                    )
+                    # 逐 token 推送（中文按 2-4 字符分块，模拟自然流式）
+                    content = speech.content
+                    chunk_size = 3  # 每次推送 3 个字符
+                    token_seq = 0
+                    import time as _time
+                    for i in range(0, len(content), chunk_size):
+                        token_seq += 1
+                        publisher.on_speech_token(speech.id, content[i:i + chunk_size], seq=token_seq)
+                        if self._stream_delay > 0:
+                            _time.sleep(self._stream_delay)
+                    publisher.on_speech_end(speech.id, total_tokens=token_seq)
+
+                    # 保留 v1 兼容：也推送完整 speech 事件
                     publisher.on_speech(speech_data)
                 except Exception:
-                    logger.exception(f"Web publisher on_speech failed for {discussion_id}")
+                    logger.exception(f"Web publisher streaming failed for {discussion_id}")
             else:
                 # Publisher not in memory (cross-process) — update discussion.json directly
                 self._update_web_discussion_json(discussion_id, speech_data, disc.topic, participants)
@@ -250,7 +276,7 @@ class RoundtableCore:
                         round_num=speech.round,
                     )
 
-            # Round complete notification
+            # Round complete notification + streaming viewpoint event
             if round_complete and speech.round > 0:
                 # Get key points from this round
                 findings = self.db.get_findings(conn, discussion_id)
@@ -264,6 +290,20 @@ class RoundtableCore:
                     convergence=convergence_score,
                     key_points=key_points,
                 )
+
+                # 流式推送：轮次观点汇总
+                publisher = self._publishers.get(discussion_id)
+                if publisher:
+                    try:
+                        consensus_pts = [f.content for f in round_findings if f.type == "consensus"]
+                        disagreement_pts = [f.content for f in round_findings if f.type == "disagreement"]
+                        publisher.on_round_summary(
+                            round_num=speech.round,
+                            consensus=[{"content": p} for p in consensus_pts],
+                            disagreement=[{"content": p} for p in disagreement_pts],
+                        )
+                    except Exception:
+                        logger.exception("Web publisher on_round_summary failed for %s", discussion_id)
 
             # Discussion auto-concluded notification
             if discussion_complete:
@@ -279,6 +319,15 @@ class RoundtableCore:
                     publisher = self._publishers.get(discussion_id)
                     if publisher:
                         try:
+                            # 流式推送：最终观点总结
+                            findings = self.db.get_findings(conn, discussion_id)
+                            consensus_pts = [f.content for f in findings if f.type == "consensus"]
+                            disagreement_pts = [f.content for f in findings if f.type == "disagreement"]
+                            publisher.on_final_summary(
+                                consensus=[{"content": p} for p in consensus_pts],
+                                disagreement=[{"content": p} for p in disagreement_pts],
+                                verdict=disc_after.conclusion or "",
+                            )
                             publisher.conclude(disc_after.conclusion or "")
                         except Exception:
                             logger.exception("Web publisher conclude failed for auto-concluded %s", discussion_id)
@@ -573,6 +622,15 @@ class RoundtableCore:
                     web_retained = False
                     if publisher:
                         try:
+                            # 流式推送：最终观点总结
+                            findings = self.db.get_findings(conn, discussion_id)
+                            consensus_pts = [f.content for f in findings if f.type == "consensus"]
+                            disagreement_pts = [f.content for f in findings if f.type == "disagreement"]
+                            publisher.on_final_summary(
+                                consensus=[{"content": p} for p in consensus_pts],
+                                disagreement=[{"content": p} for p in disagreement_pts],
+                                verdict=conclusion or "",
+                            )
                             publisher.conclude(conclusion)
                             web_retained = True
                         except Exception:
@@ -620,6 +678,14 @@ class RoundtableCore:
             if publisher:
                 try:
                     if action == "concluded" and disc_after:
+                        # 流式推送：最终观点总结
+                        findings = self.db.get_findings(conn, discussion_id)
+                        all_points = [f.content for f in findings]
+                        publisher.on_final_summary(
+                            consensus=[{"content": p} for p in all_points],
+                            disagreement=[],
+                            verdict=disc_after.conclusion or "",
+                        )
                         publisher.conclude(disc_after.conclusion or "")
                         web_retained = True
                         logger.info("Web publisher retained for concluded discussion %s", discussion_id)
@@ -898,6 +964,7 @@ class RoundtableCore:
         verbose: bool = True,
         web: bool = False,
         web_port: int = 8199,
+        stream_delay: float = 0.0,
     ) -> dict[str, Any]:
         """Run a complete demo discussion with pre-scripted content.
 
@@ -957,6 +1024,9 @@ class RoundtableCore:
             if verbose:
                 print(f"\n  🌐 Web viewer: {url}\n")
 
+        # 设置流式延迟
+        self._stream_delay = stream_delay
+
         self.speak(disc_id, "coordinator", f"开场：围绕「{topic}」展开圆桌讨论。")
 
         # 2. Run rounds
@@ -966,7 +1036,7 @@ class RoundtableCore:
 
             # Use scripted speeches or generate simple defaults
             round_speeches = self._DEMO_SPEECHES.get(round_num, {})
-            for name in p_names:
+            for idx, name in enumerate(p_names):
                 content = round_speeches.get(
                     name,
                     f"Round {round_num} 发言：{name} 对本议题的看法（demo 默认内容）。",
@@ -982,7 +1052,7 @@ class RoundtableCore:
                         content,
                     )
 
-            # Add findings for this round
+            # Add findings for this round (after all speeches complete)
             round_findings = self._DEMO_FINDINGS.get(
                 round_num,
                 [
@@ -1008,6 +1078,7 @@ class RoundtableCore:
             f"采用 FastAPI 作为主力框架，预留 Go 微服务扩展接口，"
             f"两周内交付 MVP。"
         )
+
         self.end_discussion(disc_id, conclusion=conclusion)
 
         # 4. Get final summary

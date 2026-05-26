@@ -253,9 +253,16 @@ class WebPublisher:
         consensus_points: list[str] | None = None,
         disagreement_points: list[str] | None = None,
     ) -> None:
-        """Append a final summary stream event for end-of-discussion cards."""
+        """Append a final summary stream event for end-of-discussion cards.
+
+        Idempotent: only the first call emits the event. Subsequent calls are
+        silently ignored to prevent duplicates when multiple code paths
+        (auto-conclude, explicit end_discussion, manage_discussion) converge.
+        """
         if self._revoked:
             return
+        if self._final_summary is not None:
+            return  # already emitted — skip duplicate
 
         event: dict[str, Any] = {
             "type": "final_summary",

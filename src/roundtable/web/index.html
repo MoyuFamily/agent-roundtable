@@ -619,7 +619,7 @@
 
     /* Container */
     .container {
-      max-width: 768px;
+      max-width: 800px;
       margin: 0 auto;
       padding: var(--rt-space-4);
     }
@@ -1135,6 +1135,120 @@
       overflow: visible;
     }
 
+    /* ═══════════════════════════════════════
+       Sprint 3: 响应式三断点体系
+       mobile  < 768px
+       tablet  768px – 1024px
+       desktop > 1024px
+       ═══════════════════════════════════════ */
+
+    /* --- Desktop wide (>1024px) --- */
+    @media (min-width: 1025px) {
+      .container { padding: var(--rt-space-4) var(--rt-space-6); }
+      .header .container { padding: var(--rt-space-3) var(--rt-space-6); }
+    }
+
+    /* --- Tablet (768–1024px) --- */
+    @media (min-width: 768px) and (max-width: 1024px) {
+      .container { padding: var(--rt-space-3) var(--rt-space-4); }
+      .speech-card { padding: var(--rt-space-3) var(--rt-space-4); }
+    }
+
+    /* --- Mobile (<768px) --- */
+    @media (max-width: 767px) {
+      /* 全局字号保障：最小 14px */
+      body { font-size: 14px; -webkit-text-size-adjust: 100%; }
+
+      /* 容器：全宽，减小内边距 */
+      .container {
+        padding: var(--rt-space-3);
+        max-width: 100%;
+      }
+      .header .container {
+        padding: var(--rt-space-2) var(--rt-space-3);
+      }
+
+      /* 头部紧凑模式 */
+      .header h1 { font-size: 15px !important; }
+      .conn-status span:not(.conn-dot) { display: none; }
+      .share-btn span { display: none; }
+      .share-btn { padding: 6px; }
+
+      /* 参与者栏：横向滚动，不换行 */
+      .participants-bar {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding-bottom: var(--rt-space-1);
+      }
+      .participants-bar::-webkit-scrollbar { display: none; }
+      .participant-chip {
+        flex-shrink: 0;
+        font-size: 12px;
+        padding: 2px 8px 2px 4px;
+      }
+      .participant-chip .chip-avatar { font-size: 14px; }
+      .chip-count { display: none; }
+
+      /* 发言卡片：紧凑布局 */
+      .speech-card {
+        padding: var(--rt-space-3);
+        margin-bottom: var(--rt-space-3);
+        border-radius: var(--rt-radius-md);
+      }
+      .speaker-avatar {
+        width: 32px;
+        height: 32px;
+        font-size: 16px;
+      }
+      .speaker-role-tag { font-size: 10px; padding: 0 5px; }
+      .round-badge { font-size: 10px; padding: 1px 5px; }
+
+      /* 标题字号保障 */
+      .markdown-content h1 { font-size: 16px; }
+      .markdown-content h2 { font-size: 15px; }
+      .markdown-content h3 { font-size: 14px; }
+
+      /* 观点卡片：单列 */
+      .viewpoints-grid { grid-template-columns: 1fr !important; }
+
+      /* 收敛度栏简化 */
+      .convergence-bar { height: 3px; }
+
+      /* 结论区 */
+      .verdict-box { padding: var(--rt-space-3); }
+
+      /* 回放按钮 */
+      .replay-floating-btn {
+        bottom: 76px;  /* 避开 mobile share bar */
+        right: 12px;
+        padding: 8px 14px;
+        font-size: 12px;
+      }
+
+      /* Agent 信息弹窗 → 底部抽屉 */
+      .agent-info-popup {
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        top: auto !important;
+        max-width: 100% !important;
+        min-width: 100% !important;
+        border-radius: var(--rt-radius-lg) var(--rt-radius-lg) 0 0 !important;
+        padding: var(--rt-space-4) var(--rt-space-4) var(--rt-space-6) !important;
+        animation: slideUp 0.25s ease-out !important;
+      }
+
+      /* 主内容底部留白（给 mobile share bar） */
+      main { padding-bottom: 72px; }
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(100%); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
     /* Reduced motion accessibility */
     @media (prefers-reduced-motion: reduce) {
       .status-badge .badge-dot,
@@ -1144,6 +1258,226 @@
       }
       .speech-card.new { animation: none !important; }
       .conclusion-card { animation: none !important; }
+    }
+
+    /* === Sprint 3: 响应式布局 + 移动端参与者抽屉 === */
+
+    /* 移动端参与者抽屉 */
+    .participants-drawer-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 1050;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+    }
+    .participants-drawer-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .participants-drawer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 1060;
+      background: rgba(15, 23, 42, 0.98);
+      border-top: 1px solid var(--rt-border-light);
+      border-radius: 16px 16px 0 0;
+      padding: var(--rt-space-4);
+      max-height: 60vh;
+      overflow-y: auto;
+      transform: translateY(100%);
+      transition: transform 0.25s ease-out;
+      backdrop-filter: blur(12px);
+    }
+    .participants-drawer.open {
+      transform: translateY(0);
+    }
+    .drawer-handle {
+      width: 36px;
+      height: 4px;
+      background: var(--rt-border-light);
+      border-radius: 2px;
+      margin: 0 auto var(--rt-space-3);
+    }
+    .drawer-title {
+      font-size: var(--rt-font-size-sm);
+      font-weight: 700;
+      color: var(--rt-text-primary);
+      margin-bottom: var(--rt-space-3);
+    }
+    .drawer-participant-list {
+      display: flex;
+      flex-direction: column;
+      gap: var(--rt-space-2);
+    }
+    .drawer-participant-item {
+      display: flex;
+      align-items: center;
+      gap: var(--rt-space-3);
+      padding: var(--rt-space-2) var(--rt-space-3);
+      border-radius: var(--rt-radius-md);
+      background: var(--rt-surface-elevated);
+      border: 1px solid var(--rt-border);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .drawer-participant-item:hover {
+      background: rgba(99, 102, 241, 0.08);
+    }
+    .drawer-participant-item .speaker-avatar {
+      width: 40px;
+      height: 40px;
+      font-size: 22px;
+    }
+    .drawer-participant-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .drawer-participant-info .dp-name {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--rt-text-primary);
+    }
+    .drawer-participant-info .dp-role {
+      font-size: 12px;
+      color: var(--rt-text-secondary);
+    }
+    .drawer-participant-info .dp-desc {
+      font-size: 12px;
+      color: var(--rt-text-muted);
+      margin-top: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    /* 移动端参与栏触发按钮 */
+    .participants-trigger {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: var(--rt-surface-elevated);
+      border: 1px solid var(--rt-border);
+      font-size: 13px;
+      color: var(--rt-text-secondary);
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .participants-trigger:hover {
+      border-color: var(--rt-brand);
+    }
+    .participants-trigger .trigger-avatars {
+      display: flex;
+      margin-right: 4px;
+    }
+    .participants-trigger .trigger-avatars span {
+      margin-left: -6px;
+      font-size: 14px;
+    }
+    .participants-trigger .trigger-avatars span:first-child {
+      margin-left: 0;
+    }
+
+    /* ====== Tablet: 768px - 1024px ====== */
+    @media (max-width: 1024px) {
+      main {
+        padding: var(--rt-space-3) var(--rt-space-4) var(--rt-space-4);
+      }
+      .speech-card {
+        padding: var(--rt-space-3);
+      }
+      .speaker-avatar {
+        width: 32px;
+        height: 32px;
+        font-size: 18px;
+      }
+      .viewpoints-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* ====== Mobile: < 768px ====== */
+    @media (max-width: 768px) {
+      :root {
+        --rt-font-size-base: 15px;
+        --rt-font-size-sm: 13px;
+        --rt-font-size-xs: 11px;
+      }
+      /* Header 紧凑化 */
+      header {
+        padding: var(--rt-space-2) var(--rt-space-3);
+      }
+      header h1 {
+        font-size: 16px !important;
+      }
+      /* 参与者栏 → 隐藏，改用触发按钮 */
+      .participants-bar {
+        display: none !important;
+      }
+      .participants-trigger {
+        display: inline-flex;
+      }
+      /* 内容区域 */
+      main {
+        padding: var(--rt-space-2) var(--rt-space-3) var(--rt-space-3);
+      }
+      /* 发言卡片紧凑 */
+      .speech-card {
+        padding: var(--rt-space-2) var(--rt-space-3);
+      }
+      .speaker-avatar {
+        width: 28px;
+        height: 28px;
+        font-size: 16px;
+      }
+      .speech-header-meta {
+        gap: 4px;
+      }
+      .speaker-role-tag {
+        font-size: 10px;
+        padding: 0 5px;
+      }
+      .round-badge {
+        font-size: 10px;
+      }
+      /* 总结卡片 */
+      .final-summary-glow {
+        padding: var(--rt-space-3) !important;
+      }
+      /* 浮层适配 */
+      .agent-info-popup {
+        max-width: calc(100vw - 16px);
+        left: 8px !important;
+        right: 8px;
+      }
+      /* 滚动按钮 */
+      .scroll-to-bottom-btn {
+        bottom: 16px;
+        font-size: 13px;
+        padding: 6px 16px;
+      }
+      /* 观点卡 */
+      .viewpoints-card {
+        padding: var(--rt-space-3);
+      }
+    }
+
+    /* ====== Small phone: < 480px ====== */
+    @media (max-width: 480px) {
+      header h1 {
+        font-size: 14px !important;
+      }
+      .status-badge {
+        font-size: 11px;
+        padding: 2px 8px;
+      }
+      .conn-indicator span {
+        display: none;
+      }
     }
   </style>
 
@@ -1395,6 +1729,19 @@
     <div id="activeState" class="hidden">
       <!-- Participants bar -->
       <div id="participantsBar" class="flex gap-2 mb-4 overflow-x-auto pb-2"></div>
+      <!-- Participants trigger (mobile) -->
+      <div id="participantsTrigger" class="participants-trigger mb-3" onclick="toggleParticipantsDrawer()">
+        <span class="trigger-avatars" id="triggerAvatars"></span>
+        <span id="triggerCount">0 位参与者</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <!-- Participants drawer (mobile) -->
+      <div id="participantsDrawerOverlay" class="participants-drawer-overlay" onclick="toggleParticipantsDrawer()"></div>
+      <div id="participantsDrawer" class="participants-drawer">
+        <div class="drawer-handle"></div>
+        <div class="drawer-title">👥 参与者</div>
+        <div id="drawerParticipantList" class="drawer-participant-list"></div>
+      </div>
 
       <!-- Speeches container -->
       <div id="speechesContainer"></div>
@@ -1943,6 +2290,55 @@
           ${speechCount > 0 ? `<span class="chip-count">${speechCount}</span>` : ''}
         </div>`;
       }).join('');
+
+      // 更新移动端触发按钮
+      const $triggerAvatars = document.getElementById('triggerAvatars');
+      const $triggerCount = document.getElementById('triggerCount');
+      if ($triggerAvatars) {
+        $triggerAvatars.innerHTML = state.participants.slice(0, 4).map(p => {
+          const agent = p.profile || p.participant || '';
+          return `<span>${getParticipantAvatar(agent)}</span>`;
+        }).join('');
+      }
+      if ($triggerCount) {
+        $triggerCount.textContent = `${state.participants.length} 位参与者`;
+      }
+
+      // 更新移动端抽屉内容
+      const $drawerList = document.getElementById('drawerParticipantList');
+      if ($drawerList) {
+        $drawerList.innerHTML = state.participants.map(p => {
+          const agent = p.profile || p.participant || '';
+          const avatar = getParticipantAvatar(agent);
+          const name = escapeHtml(p.display_name || p.profile || '?');
+          const role = p.role || '';
+          const desc = p.description || '';
+          const speechCount = state.speeches ? state.speeches.filter(s => s.participant === agent).length : 0;
+          return `<div class="drawer-participant-item" onclick="toggleParticipantsDrawer(); showAgentInfo('${escapeHtml(agent)}', this)">
+            <div class="speaker-avatar" style="cursor:pointer">${avatar}</div>
+            <div class="drawer-participant-info">
+              <div class="dp-name">${name}</div>
+              ${role ? `<div class="dp-role">${escapeHtml(role)}</div>` : ''}
+              ${desc ? `<div class="dp-desc">${escapeHtml(desc)}</div>` : ''}
+            </div>
+            ${speechCount > 0 ? `<span class="chip-count" style="font-size:13px">${speechCount} 条</span>` : ''}
+          </div>`;
+        }).join('');
+      }
+    }
+
+    function toggleParticipantsDrawer() {
+      const overlay = document.getElementById('participantsDrawerOverlay');
+      const drawer = document.getElementById('participantsDrawer');
+      if (!overlay || !drawer) return;
+      const isOpen = drawer.classList.contains('open');
+      if (isOpen) {
+        drawer.classList.remove('open');
+        overlay.classList.remove('open');
+      } else {
+        drawer.classList.add('open');
+        overlay.classList.add('open');
+      }
     }
 
     function participantMeta(agent) {

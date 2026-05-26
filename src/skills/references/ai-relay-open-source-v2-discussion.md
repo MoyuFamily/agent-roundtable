@@ -5,13 +5,13 @@
 - **Date**: 2026-05-23
 - **Rounds**: 3
 - **Participants**: bingge (Product Director), pixiel (Designer), mafei (Dev Engineer)
-- **Pattern**: Hybrid workflow (delegate_task for reasoning + Direct Core API for recording)
+- **Pattern**: Standard tool invocation workflow (using platform roundtable_init and roundtable_speak tools natively)
 
-## Key Pattern: roundtable_init Tool Import Failure
+## Key Pattern: Standard Tool Invocation vs Python Script Execution
 
-The `roundtable_init` tool call failed with `ModuleNotFoundError: No module named 'hermes_tools'`. This is because the tool layer's import chain (`roundtable_tools.py` → `hermes_tools`) breaks when invoked via direct Python. The Direct Core API path (`_get_core()`) works fine because it only imports from the installed `roundtable` package.
+The tool invocation layer is designed to be called natively by the agent platform (MCP/Hermes tool caller). Running local Python scripts in a Terminal that try to `import hermes_tools` or import internal tool implementation files directly will fail with `ModuleNotFoundError` because they bypass the platform's execution context.
 
-**Lesson**: Don't waste time debugging `roundtable_init` import errors. Go straight to Direct Core API via `core = _get_core(); core.create_discussion(...)`.
+**Lesson**: Always call tools natively using the platform's tool calling protocol (e.g. executing roundtable_init as a native tool call). Never write terminal scripts to import or execute tool implementation files.
 
 ## Workflow Used
 

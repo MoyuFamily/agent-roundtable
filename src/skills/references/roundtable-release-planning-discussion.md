@@ -28,11 +28,11 @@ roundtable_init(
 
 ## Workflow Used
 
-**Hybrid approach** (delegate_task for reasoning + Direct Core API for recording):
-1. Coordinator opened Round 1 via Direct Core API
-2. Each participant: `delegate_task` → extract summary → `core.speak()` to record
-3. Coordinator summarized between rounds via `core.speak(participant="coordinator")`
-4. Notifications sent to company group after each round via `send_message`
+**Standard tool call approach**:
+1. Coordinator opened Round 0 via roundtable_speak
+2. Each participant: `delegate_task` -> participant calls `roundtable_speak` to record
+3. Coordinator summarized between rounds via `roundtable_speak`
+4. Notifications sent to company group after each round automatically
 
 ## Key Results
 
@@ -80,8 +80,8 @@ roundtable_init(
 
 ## Lessons Learned
 
-1. **Hybrid workflow is optimal**: delegate_task for reasoning + Direct Core API for recording is the most reliable pattern
+1. **Tool-based workflow is standard**: Using native platform tools (`roundtable_init`, `roundtable_speak`) is the standard pattern
 2. **Notifications must be in init config**: If not passed in `roundtable_init`, no notifications are sent
-3. **WebViewer must be opened manually**: Direct Core API doesn't trigger browser open — must manually share URL and run `open`
+3. **WebViewer is started automatically**: Native tool calls start WebViewer automatically; check the return value for the URL.
 4. **Conclusion doc must be written BEFORE `roundtable_end`**: `end()` only accepts brief text, not full documents
 5. **3 rounds is optimal for product/design/dev discussions**: Allows initial exploration → detailed planning → final action items

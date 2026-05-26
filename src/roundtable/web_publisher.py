@@ -81,9 +81,13 @@ class WebPublisher:
         self._pm2_process_name: str | None = None
         self._revoked: bool = False
         self._speeches: list[dict[str, Any]] = []
+        self._round_summaries: list[dict[str, Any]] = []
+        self._stream_events: list[dict[str, Any]] = []
+        self._event_seq: int = 0
         self._participants: list[dict[str, Any]] = []
         self._topic: str | None = None
         self._conclusion: str | None = None
+        self._final_summary: dict[str, Any] | None = None
         self._status: str = "active"
         self._actual_port: int | None = None
 
@@ -134,16 +138,139 @@ class WebPublisher:
         if self._revoked:
             return
 
-        self._speeches.append(
-            {
-                "id": speech.get("id", len(self._speeches) + 1),
-                "round": speech.get("round", 0),
-                "participant": speech.get("participant", ""),
-                "display_name": speech.get("display_name", ""),
-                "content": speech.get("content", ""),
-                "created_at": speech.get("created_at", int(time.time())),
-            }
-        )
+        speech_payload = {
+            "id": speech.get("id", len(self._speeches) + 1),
+            "round": speech.get("round", 0),
+            "participant": speech.get("participant", ""),
+            "display_name": speech.get("display_name", ""),
+            "content": speech.get("content", ""),
+            "created_at": speech.get("created_at", int(time.time())),
+        }
+        self._speeches.append(speech_payload)
+        self._append_stream_event("speech_delta", {"speech": speech_payload})
+        self._write_discussion_json()
+
+    def on_speech_start(
+        self,
+        speech_id: str | int,
+        agent: str,
+        avatar: str = "🤖",
+        round_num: int = 0,
+        *,
+        display_name: str | None = None,
+        role: str | None = None,
+    ) -> None:
+        """Append a PRD-shaped speech_start stream event."""
+        if self._revoked:
+            return
+
+        event: dict[str, Any] = {
+            "type": "speech_start",
+            "id": speech_id,
+            "agent": agent,
+            "avatar": avatar,
+            "round": round_num,
+            "timestamp": int(time.time()),
+        }
+        if display_name is not None:
+            event["display_name"] = display_name
+        if role is not None:
+            event["role"] = role
+        self._append_stream_event(event)
+        self._write_discussion_json()
+
+    def on_speech_token(self, speech_id: str | int, delta: str, seq: int | None = None) -> None:
+        """Append a PRD-shaped speech_token stream event."""
+        if self._revoked or not delta:
+            return
+
+        event = {
+            "type": "speech_token",
+            "id": speech_id,
+            "delta": delta,
+            "seq": seq if seq is not None else self._event_seq + 1,
+            "timestamp": int(time.time()),
+        }
+        self._append_stream_event(event)
+        self._write_discussion_json()
+
+    def on_speech_end(self, speech_id: str | int, total_tokens: int = 0) -> None:
+        """Append a PRD-shaped speech_end stream event."""
+        if self._revoked:
+            return
+
+        event = {
+            "type": "speech_end",
+            "id": speech_id,
+            "total_tokens": total_tokens,
+            "timestamp": int(time.time()),
+        }
+        self._append_stream_event(event)
+        self._write_discussion_json()
+
+    def on_round_summary(
+        self,
+        summary: dict[str, Any] | None = None,
+        *,
+        round_num: int | None = None,
+        consensus: list[dict[str, Any]] | None = None,
+        disagreement: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Hook: called when a round summary/viewpoint snapshot is available."""
+        if self._revoked:
+            return
+
+        source = summary or {}
+        normalized: dict[str, Any] = {
+            "type": "round_summary",
+            "round": round_num if round_num is not None else source.get("round", 0),
+            "consensus": consensus if consensus is not None else list(source.get("consensus", [])),
+            "disagreement": disagreement if disagreement is not None else list(source.get("disagreement", [])),
+            "timestamp": source.get("timestamp", int(time.time())),
+        }
+        if "consensus_points" in source:
+            normalized["consensus_points"] = list(source.get("consensus_points", []))
+        if "disagreement_points" in source:
+            normalized["disagreement_points"] = list(source.get("disagreement_points", []))
+        if "new_points" in source:
+            normalized["new_points"] = list(source.get("new_points", []))
+        if "convergence_score" in source:
+            normalized["convergence_score"] = source.get("convergence_score")
+
+        summary_round = normalized["round"]
+        self._round_summaries = [s for s in self._round_summaries if s.get("round") != summary_round]
+        self._round_summaries.append(normalized)
+        self._round_summaries.sort(key=lambda item: int(item.get("round", 0)))
+        self._append_stream_event(normalized)
+        self._write_discussion_json()
+
+    def on_final_summary(
+        self,
+        *,
+        consensus: list[dict[str, Any]] | None = None,
+        disagreement: list[dict[str, Any]] | None = None,
+        verdict: str = "",
+        consensus_points: list[str] | None = None,
+        disagreement_points: list[str] | None = None,
+    ) -> None:
+        """Append a final summary stream event for end-of-discussion cards."""
+        if self._revoked:
+            return
+
+        event: dict[str, Any] = {
+            "type": "final_summary",
+            "consensus": consensus if consensus is not None else [],
+            "disagreement": disagreement if disagreement is not None else [],
+            "verdict": verdict,
+            "timestamp": int(time.time()),
+        }
+        if consensus_points is not None:
+            event["consensus_points"] = consensus_points
+        if disagreement_points is not None:
+            event["disagreement_points"] = disagreement_points
+
+        self._final_summary = event
+        self._append_stream_event(event)
         self._write_discussion_json()
 
     def conclude(self, conclusion: str) -> None:
@@ -153,6 +280,7 @@ class WebPublisher:
         """
         self._conclusion = conclusion
         self._status = "concluded"
+        self._append_stream_event("status_delta", {"status": self._status, "conclusion": conclusion})
         self._write_discussion_json()
         logger.info("Discussion %s concluded", self._discussion_id)
 
@@ -287,11 +415,77 @@ class WebPublisher:
             "token": self._token,
             "participants": self._participants,
             "speeches": self._speeches,
+            "round_summaries": self._round_summaries,
+            "stream": {
+                "seq": self._event_seq,
+                "events": self._stream_events[-100:],
+            },
+            "latest_event": self._stream_events[-1] if self._stream_events else None,
             "conclusion": self._conclusion,
+            "final_summary": self._final_summary,
             "revoked_tokens": [self._token] if self._revoked else [],
             "updated_at": int(time.time()),
         }
         self._write_discussion_json_raw(data)
+
+    def _display_name_for_participant(self, participant: str) -> str:
+        for item in self._participants:
+            if item.get("profile") == participant or item.get("participant") == participant:
+                return str(item.get("display_name") or item.get("profile") or participant)
+        return participant
+
+    def _role_for_participant(self, participant: str) -> str:
+        for item in self._participants:
+            if item.get("profile") == participant or item.get("participant") == participant:
+                return str(item.get("role") or "")
+        return ""
+
+    def _avatar_for_participant(self, participant: str) -> str:
+        if participant == "coordinator":
+            return "📋"
+        role = self._role_for_participant(participant).lower()
+        if "design" in role or "设计" in role:
+            return "🎨"
+        if "product" in role or "产品" in role:
+            return "📦"
+        if "engineer" in role or "tech" in role or "技术" in role or "开发" in role:
+            return "⚡"
+        return "🤖"
+
+    def _append_stream_event(
+        self,
+        event_or_type: dict[str, Any] | str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Append an ordered event and mirror PRD-shaped events to token_stream.jsonl."""
+        self._event_seq += 1
+        if isinstance(event_or_type, dict):
+            jsonl_event = dict(event_or_type)
+            event = dict(event_or_type)
+            event["seq"] = self._event_seq
+            self._append_token_stream_jsonl(jsonl_event)
+        else:
+            event = {
+                "seq": self._event_seq,
+                "type": event_or_type,
+                "created_at": int(time.time()),
+                "payload": payload or {},
+            }
+        self._stream_events.append(event)
+        return event
+
+    def _append_token_stream_jsonl(self, event: dict[str, Any]) -> None:
+        """Append one event to token_stream.jsonl for SSE tailing/replay."""
+        target = self._discussion_dir / "token_stream.jsonl"
+        with open(target, "a") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
+                f.write("\n")
+                f.flush()
+                os.fsync(f.fileno())
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     def _write_discussion_json_raw(self, data: dict[str, Any]) -> None:
         """Atomic write: flock → write .tmp → fsync → rename."""

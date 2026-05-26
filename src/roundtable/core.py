@@ -312,6 +312,7 @@ class RoundtableCore:
                         consensus_pts = [f.content for f in round_findings if f.type == "consensus"]
                         disagreement_pts = [f.content for f in round_findings if f.type == "disagreement"]
                         publisher.on_round_summary(
+                            summary={"convergence_score": convergence_score} if convergence_score is not None else None,
                             round_num=speech.round,
                             consensus=[{"content": p} for p in consensus_pts],
                             disagreement=[{"content": p} for p in disagreement_pts],

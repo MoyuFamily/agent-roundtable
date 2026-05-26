@@ -1003,10 +1003,9 @@
       padding: 10px;
     }
 
-    @media (max-width: 768px) {
+    @media (max-width: 767px) {
       .header .share-btn { display: none; }
       .mobile-share-bar { display: block; }
-      main { padding-bottom: 72px; }
     }
 
     /* ═══════════════════════════════════════
@@ -2912,6 +2911,108 @@
         closeSheet();
       }, 3000);
     }
+
+    // ---- Sprint 3: 触摸交互优化 ----
+    (function initTouchInteractions() {
+      if (!('ontouchstart' in window)) return;  // 非触屏设备跳过
+
+      let longPressTimer = null;
+      let touchStartX = 0;
+      let touchStartY = 0;
+      let longPressTarget = null;
+
+      // 长按发言卡片 → 弹出操作菜单（复制、分享）
+      document.addEventListener('touchstart', function(e) {
+        const card = e.target.closest('.speech-card');
+        if (!card) return;
+
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        longPressTarget = card;
+
+        longPressTimer = setTimeout(function() {
+          if (!longPressTarget) return;
+          const contentEl = longPressTarget.querySelector('.markdown-content');
+          const text = contentEl ? contentEl.textContent : '';
+          showTouchMenu(longPressTarget, text);
+          longPressTarget = null;
+        }, 600);
+      }, { passive: true });
+
+      document.addEventListener('touchmove', function(e) {
+        if (!longPressTimer) return;
+        const dx = Math.abs(e.touches[0].clientX - touchStartX);
+        const dy = Math.abs(e.touches[0].clientY - touchStartY);
+        if (dx > 10 || dy > 10) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      }, { passive: true });
+
+      document.addEventListener('touchend', function() {
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      }, { passive: true });
+
+      // 长按菜单
+      function showTouchMenu(anchor, text) {
+        closeTouchMenu();
+        const rect = anchor.getBoundingClientRect();
+        const menu = document.createElement('div');
+        menu.className = 'touch-menu';
+        menu.style.cssText = 'position:fixed;z-index:1200;background:rgba(15,23,42,0.97);border:1px solid var(--rt-border-light);border-radius:var(--rt-radius-md);padding:4px;box-shadow:0 8px 32px rgba(0,0,0,0.5);backdrop-filter:blur(12px);min-width:140px;animation:popIn 0.18s ease-out;';
+        const top = Math.min(rect.top, window.innerHeight - 120);
+        menu.style.top = top + 'px';
+        menu.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 160)) + 'px';
+        menu.innerHTML = '<button class="touch-menu-item" data-action="copy" style="display:block;width:100%;text-align:left;padding:10px 14px;border:none;background:none;color:var(--rt-text-primary);font-size:14px;cursor:pointer;border-radius:6px">📋 复制内容</button>';
+        document.body.appendChild(menu);
+
+        menu.querySelector('[data-action="copy"]').addEventListener('click', function() {
+          navigator.clipboard.writeText(text).then(function() {
+            showCopyToast();
+          });
+          closeTouchMenu();
+        });
+
+        setTimeout(function() {
+          document.addEventListener('touchstart', onTouchOutside);
+        }, 50);
+
+        function onTouchOutside(e) {
+          if (!menu.contains(e.target)) closeTouchMenu();
+        }
+        menu._outsideHandler = onTouchOutside;
+      }
+
+      function closeTouchMenu() {
+        const menu = document.querySelector('.touch-menu');
+        if (menu) {
+          if (menu._outsideHandler) document.removeEventListener('touchstart', menu._outsideHandler);
+          menu.remove();
+        }
+      }
+
+      function showCopyToast() {
+        const toast = document.createElement('div');
+        toast.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:rgba(34,197,94,0.9);color:#fff;padding:8px 20px;border-radius:999px;font-size:14px;z-index:1300;animation:fadeSlideIn 0.3s ease-out;';
+        toast.textContent = '✓ 已复制';
+        document.body.appendChild(toast);
+        setTimeout(function() { toast.remove(); }, 1500);
+      }
+
+      // 双指下滑 → 快速回到顶部
+      let lastTouchEnd = 0;
+      document.addEventListener('touchend', function(e) {
+        const now = Date.now();
+        if (now - lastTouchEnd < 300) {
+          // 双击 → 回到顶部
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        lastTouchEnd = now;
+      }, { passive: true });
+    })();
 
     // ---- Init ----
     connectSSE();

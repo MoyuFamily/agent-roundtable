@@ -156,6 +156,14 @@ function send404(res) {
 
 /** @type {Map<string, Set<import("http").ServerResponse>>} */
 const sseClients = new Map(); // token → Set<res>
+const sseDeltaBuffers = new Map(); // token → {events, timer}
+const sseLastSeqByToken = new Map(); // token → latest stream seq broadcast by watcher
+
+function safeDiscussion(data) {
+  const safe = { ...data };
+  delete safe.token;
+  return safe;
+}
 
 function broadcastToSSE(token, event, data) {
   const clients = sseClients.get(token);
@@ -169,6 +177,43 @@ function broadcastToSSE(token, event, data) {
       clients.delete(res);
     }
   }
+}
+
+function queueSSEDelta(token, eventData) {
+  if (!token || !eventData) return;
+  const clients = sseClients.get(token);
+  if (!clients || clients.size === 0) return;
+
+  let buffer = sseDeltaBuffers.get(token);
+  if (!buffer) {
+    buffer = { events: [], timer: null };
+    sseDeltaBuffers.set(token, buffer);
+  }
+  buffer.events.push(eventData);
+
+  if (buffer.timer) return;
+  buffer.timer = setTimeout(() => {
+    const pending = buffer.events.splice(0, buffer.events.length);
+    buffer.timer = null;
+    if (pending.length === 0) return;
+    broadcastToSSE(token, "delta", { events: pending });
+  }, 50);
+}
+
+function streamEventsSince(data, previousSeq) {
+  const events = Array.isArray(data?.stream?.events) ? data.stream.events : [];
+  const nextEvents = events.filter((eventData) => {
+    const seq = Number(eventData?.seq ?? -1);
+    return Number.isFinite(seq) && seq > previousSeq;
+  });
+  if (nextEvents.length > 0) return nextEvents;
+
+  const latest = data?.latest_event;
+  const latestSeq = Number(latest?.seq ?? -1);
+  if (latest && Number.isFinite(latestSeq) && latestSeq > previousSeq) {
+    return [latest];
+  }
+  return [];
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +231,7 @@ function notifyPollWaiters(token) {
     clearTimeout(waiter.timer);
     const data = readDiscussion();
     if (data) {
-      sendJSON(waiter.res, data);
+      sendJSON(waiter.res, safeDiscussion(data));
     } else {
       sendJSON(waiter.res, { error: "Data not available" }, 500);
     }
@@ -234,9 +279,7 @@ router.get("/api/:token/data", (req, res, params) => {
   if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
 
   // Don't expose the token in API responses
-  const safe = { ...data };
-  delete safe.token;
-  sendJSON(res, safe);
+  sendJSON(res, safeDiscussion(data));
 });
 
 // GET /api/:token/events → SSE stream
@@ -254,9 +297,10 @@ router.get("/api/:token/events", (req, res, params) => {
   // Initial push
   const data = readDiscussion();
   if (data) {
-    const safe = { ...data };
-    delete safe.token;
-    res.write(`event: init\ndata: ${JSON.stringify(safe)}\n\n`);
+    const currentSeq = Number(data?.stream?.seq ?? 0);
+    if (Number.isFinite(currentSeq)) sseLastSeqByToken.set(params.token, currentSeq);
+    res.write(`event: init\ndata: ${JSON.stringify(safeDiscussion(data))}\n\n`);
+    if (typeof res.flushHeaders === "function") res.flushHeaders();
   }
 
   // Register SSE client
@@ -292,9 +336,7 @@ router.get("/api/:token/poll", (req, res, params) => {
   // If there's already a newer update, respond immediately
   const data = readDiscussion();
   if (data && data.updated_at > since) {
-    const safe = { ...data };
-    delete safe.token;
-    return sendJSON(res, safe);
+    return sendJSON(res, safeDiscussion(data));
   }
 
   // Otherwise, wait up to 25 seconds
@@ -306,9 +348,7 @@ router.get("/api/:token/poll", (req, res, params) => {
     // Timeout — return current data or empty
     const latest = readDiscussion();
     if (latest) {
-      const safe = { ...latest };
-      delete safe.token;
-      sendJSON(res, safe);
+      sendJSON(res, safeDiscussion(latest));
     } else {
       sendJSON(res, { updated_at: since });
     }
@@ -394,13 +434,17 @@ function startFileWatcher() {
       if (!data) return;
 
       const token = data.token;
-      const safe = { ...data };
-      delete safe.token;
+      const safe = safeDiscussion(data);
 
       lastUpdatedTimestamp = data.updated_at || Date.now();
+      const previousSeq = sseLastSeqByToken.get(token) ?? 0;
+      const deltaEvents = streamEventsSince(data, previousSeq);
+      const latestSeq = Number(data?.stream?.seq ?? previousSeq);
+      if (Number.isFinite(latestSeq)) sseLastSeqByToken.set(token, Math.max(previousSeq, latestSeq));
+      for (const eventData of deltaEvents) queueSSEDelta(token, eventData);
       broadcastToSSE(token, "update", safe);
       notifyPollWaiters(token);
-    }, 100); // 100ms debounce
+    }, 50); // 50ms flush buffer for streaming deltas
   });
 }
 

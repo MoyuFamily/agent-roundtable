@@ -19,6 +19,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+from roundtable.web_helpers import (
+    get_avatar_for_participant,
+    get_display_name_for_participant,
+    get_role_for_participant,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -429,28 +435,13 @@ class WebPublisher:
         self._write_discussion_json_raw(data)
 
     def _display_name_for_participant(self, participant: str) -> str:
-        for item in self._participants:
-            if item.get("profile") == participant or item.get("participant") == participant:
-                return str(item.get("display_name") or item.get("profile") or participant)
-        return participant
+        return get_display_name_for_participant(participant, self._participants)
 
     def _role_for_participant(self, participant: str) -> str:
-        for item in self._participants:
-            if item.get("profile") == participant or item.get("participant") == participant:
-                return str(item.get("role") or "")
-        return ""
+        return get_role_for_participant(participant, self._participants)
 
     def _avatar_for_participant(self, participant: str) -> str:
-        if participant == "coordinator":
-            return "📋"
-        role = self._role_for_participant(participant).lower()
-        if "design" in role or "设计" in role:
-            return "🎨"
-        if "product" in role or "产品" in role:
-            return "📦"
-        if "engineer" in role or "tech" in role or "技术" in role or "开发" in role:
-            return "⚡"
-        return "🤖"
+        return get_avatar_for_participant(participant, self._participants)
 
     def _append_stream_event(
         self,

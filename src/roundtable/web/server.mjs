@@ -408,6 +408,32 @@ router.get("/theme.css", (req, res) => {
   }
 });
 
+// GET /viewer.css → Serve viewer CSS
+router.get("/viewer.css", (req, res) => {
+  const cssPath = join(WEB_DIR, "viewer.css");
+  if (existsSync(cssPath)) {
+    const css = readFileSync(cssPath, "utf-8");
+    res.writeHead(200, { "Content-Type": "text/css" });
+    res.end(css);
+  } else {
+    res.writeHead(404);
+    res.end("/* viewer.css not found */");
+  }
+});
+
+// GET /viewer.js → Serve viewer JS
+router.get("/viewer.js", (req, res) => {
+  const jsPath = join(WEB_DIR, "viewer.js");
+  if (existsSync(jsPath)) {
+    const js = readFileSync(jsPath, "utf-8");
+    res.writeHead(200, { "Content-Type": "application/javascript" });
+    res.end(js);
+  } else {
+    res.writeHead(404);
+    res.end("/* viewer.js not found */");
+  }
+});
+
 // ---------------------------------------------------------------------------
 // File watcher → broadcast to SSE + polling
 // ---------------------------------------------------------------------------
@@ -510,6 +536,20 @@ async function main() {
     app.get("/theme.css", (req, res) => {
       const handler = router._routes.find(
         (r) => r.method === "GET" && r.path === "/theme.css"
+      );
+      if (handler) handler.handlers[0](req, res, {});
+    });
+
+    app.get("/viewer.css", (req, res) => {
+      const handler = router._routes.find(
+        (r) => r.method === "GET" && r.path === "/viewer.css"
+      );
+      if (handler) handler.handlers[0](req, res, {});
+    });
+
+    app.get("/viewer.js", (req, res) => {
+      const handler = router._routes.find(
+        (r) => r.method === "GET" && r.path === "/viewer.js"
       );
       if (handler) handler.handlers[0](req, res, {});
     });

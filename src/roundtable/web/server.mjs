@@ -38,7 +38,7 @@ function parseArgs() {
 
 const { port, discussionDir } = parseArgs();
 const DISCUSSION_PATH = resolve(discussionDir, "discussion.json");
-const TOKEN_STREAM_PATH = resolve(discussionDir, "token_stream.jsonl");
+const TOKEN_STREAM_PATH=resolv...Dir, "token_stream.jsonl");
 const REVOKED_PATH = resolve(discussionDir, ".revoked_tokens");
 const WEB_DIR = new URL(".", import.meta.url).pathname;
 
@@ -114,7 +114,10 @@ function readDiscussion() {
   try {
     if (!existsSync(DISCUSSION_PATH)) return null;
     const raw = readFileSync(DISCUSSION_PATH, "utf-8");
-    return JSON.parse(raw);
+    const data = JSON.parse(raw);
+    // Backward compat: old files without schema_version are treated as v1
+    if (data.schema_version === undefined) data.schema_version = 1;
+    return data;
   } catch {
     return null;
   }
@@ -125,7 +128,10 @@ function isTokenValid(token) {
   if (!data) return false;
   if (data.token !== token) return false;
   const revoked = data.revoked_tokens || [];
-  return !revoked.includes(token);
+  if (revoked.includes(token)) return false;
+  // Expiry check
+  if (data.expires_at && Date.now() / 1000 > data.expires_at) return false;
+  return true;
 }
 
 function sendJSON(res, data, status = 200) {
@@ -159,6 +165,40 @@ function sendHTML(res, html) {
 
 function send403(res) {
   sendJSON(res, { error: "Access denied or token revoked" }, 403);
+}
+
+function sendExpired(res) {
+  const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>链接已过期</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{min-height:100vh;display:flex;align-items:center;justify-content:center;
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+      background:#0f172a;color:#e2e8f0}
+    .card{max-width:480px;padding:3rem 2.5rem;text-align:center;
+      background:#1e293b;border-radius:16px;border:1px solid #334155}
+    .icon{font-size:4rem;margin-bottom:1rem}
+    h1{font-size:1.5rem;font-weight:600;margin-bottom:.75rem;color:#f1f5f9}
+    p{color:#94a3b8;line-height:1.6}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">⏳</div>
+    <h1>此讨论链接已过期</h1>
+    <p>该讨论的访问链接已超过有效期，无法继续查看。请联系讨论发起者获取新链接。</p>
+  </div>
+</body>
+</html>`;
+  res.writeHead(410, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Access-Control-Allow-Origin": "*",
+  });
+  res.end(html);
 }
 
 function send404(res) {
@@ -258,8 +298,118 @@ function notifyPollWaiters(token) {
 // Routes
 // ---------------------------------------------------------------------------
 
+// GET /share/:token → Standalone share page with rich OG tags
+router.get("/share/:token", (req, res, params) => {
+  if (!isTokenValid(params.token)) return send403(res);
+
+  const disc = readDiscussion();
+  if (!disc) return send404(res);
+
+  const templatePath = join(WEB_DIR, "share.html");
+  if (!existsSync(templatePath)) {
+    return sendHTML(res, "<h1>Share page template not found</h1>");
+  }
+
+  try {
+    let html = readFileSync(templatePath, "utf-8");
+    const participants = disc.participants || [];
+    const topic = disc.topic || "圆桌讨论";
+    const status = disc.status || "ongoing";
+    const rounds = disc.rounds?.length || 0;
+    const speeches = disc.speeches || [];
+    const consensus = disc.consensus_score != null ? Math.round(disc.consensus_score * 100) : null;
+    const durationMin = disc.duration_min || null;
+    const agentColors = ["#58a6ff", "#3fb950", "#d29922", "#bc8cff", "#f85149", "#f0883e", "#a5d6ff", "#7ee787"];
+
+    // OG title & description
+    const ogTitle = `圆桌讨论: ${topic}`;
+    const participantNames = participants.map(p => p.name || p.id).join("、");
+    const ogDesc = `多位 AI Agent 正在围绕「${topic}」展开圆桌讨论${participantNames ? `。参与者: ${participantNames}` : ""}`;
+
+    // Status badge
+    const statusClass = status === "completed" ? "completed" : "ongoing";
+    const statusLabel = status === "completed" ? "已结束" : "进行中";
+
+    // Meta text
+    const metaParts = [];
+    if (participants.length) metaParts.push(`${participants.length} 位参与者`);
+    if (rounds > 0) metaParts.push(`${rounds} 轮讨论`);
+    if (durationMin) metaParts.push(`约 ${durationMin} 分钟`);
+    const metaText = metaParts.join(" · ") || "多 Agent 圆桌讨论";
+
+    // Participant chips
+    const participantsHtml = participants.map((p, i) => {
+      const name = p.name || p.id || `Agent ${i + 1}`;
+      const color = agentColors[i % agentColors.length];
+      return `<span class="participant-chip"><span class="dot" style="background:${color}"></span>${escapeHtmlAttr(name)}</span>`;
+    }).join("");
+
+    // Stats
+    let statsHtml = "";
+    if (rounds > 0 || speeches.length > 0) {
+      statsHtml = `<div class="rounds-info">
+        ${rounds > 0 ? `<div class="stat"><span class="val">${rounds}</span><span class="lbl">讨论轮次</span></div>` : ""}
+        ${speeches.length > 0 ? `<div class="stat"><span class="val">${speeches.length}</span><span class="lbl">发言数</span></div>` : ""}
+        ${participants.length > 0 ? `<div class="stat"><span class="val">${participants.length}</span><span class="lbl">参与者</span></div>` : ""}
+        ${durationMin ? `<div class="stat"><span class="val">${durationMin}</span><span class="lbl">分钟</span></div>` : ""}
+      </div>`;
+    }
+
+    // Consensus bar
+    let consensusHtml = "";
+    if (consensus != null) {
+      const level = consensus >= 70 ? "high" : consensus >= 40 ? "medium" : "low";
+      consensusHtml = `<div class="consensus-bar">
+        <div class="label">共识度</div>
+        <div class="consensus-track"><div class="consensus-fill ${level}" style="width:${consensus}%"></div></div>
+        <div class="consensus-value">${consensus}%</div>
+      </div>`;
+    }
+
+    // Preview messages (first 3 speeches)
+    const previewSpeeches = speeches.slice(0, 3);
+    const messagesHtml = previewSpeeches.length > 0
+      ? previewSpeeches.map((s, i) => {
+          const agentName = s.display_name || s.agent_id || `Agent ${i + 1}`;
+          const text = (s.text || s.content || "").slice(0, 200);
+          const color = agentColors[(s.agent_index || i) % agentColors.length];
+          return `<div class="preview-msg">
+            <div class="agent" style="color:${color}">${escapeHtmlAttr(agentName)}</div>
+            <div class="text">${escapeHtmlAttr(text)}</div>
+          </div>`;
+        }).join("")
+      : '<div class="preview-msg"><div class="text" style="color:var(--muted)">讨论即将开始...</div></div>';
+
+    const viewerUrl = `/r/${params.token}`;
+    const shareUrl = `/share/${params.token}`;
+
+    html = html
+      .replace(/\{\{ogTitle\}\}/g, escapeHtmlAttr(ogTitle))
+      .replace(/\{\{ogDesc\}\}/g, escapeHtmlAttr(ogDesc))
+      .replace(/\{\{shareUrl\}\}/g, shareUrl)
+      .replace(/\{\{topic\}\}/g, escapeHtmlAttr(topic))
+      .replace(/\{\{statusClass\}\}/g, statusClass)
+      .replace(/\{\{statusLabel\}\}/g, statusLabel)
+      .replace(/\{\{metaText\}\}/g, metaText)
+      .replace(/\{\{participantsHtml\}\}/g, participantsHtml)
+      .replace(/\{\{statsHtml\}\}/g, statsHtml)
+      .replace(/\{\{consensusHtml\}\}/g, consensusHtml)
+      .replace(/\{\{messagesHtml\}\}/g, messagesHtml)
+      .replace(/\{\{viewerUrl\}\}/g, viewerUrl);
+
+    sendHTML(res, html);
+  } catch (err) {
+    sendHTML(res, `<h1>Error</h1><pre>${err.message}</pre>`);
+  }
+});
+
 // GET /r/:token → Serve SPA
 router.get("/r/:token", (req, res, params) => {
+  // Check expiry first — show friendly expired page instead of generic 403
+  const disc = readDiscussion();
+  if (disc && disc.expires_at && Date.now() / 1000 > disc.expires_at) {
+    return sendExpired(res);
+  }
   if (!isTokenValid(params.token)) return send403(res);
 
   // Serve index.html from web/ directory
@@ -397,8 +547,8 @@ router.post("/api/:token/share", (req, res, params) => {
   const data = readDiscussion();
   if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
 
-  // Share link is just the viewer URL with the token
-  sendJSON(res, { ok: true, share_url: `/r/${params.token}` });
+  // Share link points to the standalone share page with OG tags
+  sendJSON(res, { ok: true, share_url: `/share/${params.token}` });
 });
 
 // POST /api/:token/revoke → Revoke token
@@ -730,6 +880,21 @@ async function main() {
 
   if (hasExpress && app) {
     // Use express
+    app.get("/share/:token", (req, res) => {
+      const handler = router._routes.find(
+        (r) => r.method === "GET" && r.path === "/share/:token"
+      );
+      if (handler) {
+        const params = router._matchPath(handler.path, req.path);
+        if (params) {
+          req.url = req.originalUrl;
+          handler.handlers[0](req, res, params);
+          return;
+        }
+      }
+      send404(res);
+    });
+
     app.get("/r/:token", (req, res) => {
       const handler = router._routes.find(
         (r) => r.method === "GET" && r.path === "/r/:token"

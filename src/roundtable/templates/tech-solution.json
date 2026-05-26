@@ -1,0 +1,14 @@
+{
+  "name": "技术方案",
+  "description": "多角色围绕技术方案进行评估，输出选型依据、风险和实施建议。",
+  "topic_template": "技术方案评审：{subject}",
+  "context_template": "本次讨论的目标是对 {subject} 进行技术方案评估，比较可行方案的优劣势，明确技术选型依据、已知风险和实施路径。",
+  "participants": [
+    {"profile": "architect", "role": "架构师", "avatar": "🏗️", "perspective": "系统架构与可扩展性"},
+    {"profile": "backend", "role": "后端工程师", "avatar": "⚙️", "perspective": "服务端实现与性能"},
+    {"profile": "ops", "role": "运维工程师", "avatar": "🔧", "perspective": "部署运维与稳定性"},
+    {"profile": "security", "role": "安全工程师", "avatar": "🔒", "perspective": "安全合规与风险控制"}
+  ],
+  "max_rounds": 3,
+  "speech_order": "fixed"
+}

@@ -45,6 +45,7 @@ from roundtable.models import (
 )
 from roundtable.notify import Notifier
 from roundtable.web_publisher import WebPublisher
+from roundtable.webhook import WebhookSender
 
 __version__ = "0.2.0"
 
@@ -103,6 +104,7 @@ __all__ = [
     "SimpleAdapter",
     "Speech",
     "WebPublisher",
+    "WebhookSender",
     "get_adapter",
     "list_adapters",
     "register_adapter",

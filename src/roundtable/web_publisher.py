@@ -19,6 +19,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+from roundtable.web_helpers import (
+    get_avatar_for_participant,
+    get_display_name_for_participant,
+    get_role_for_participant,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -159,6 +165,8 @@ class WebPublisher:
         *,
         display_name: str | None = None,
         role: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
     ) -> None:
         """Append a PRD-shaped speech_start stream event."""
         if self._revoked:
@@ -176,6 +184,10 @@ class WebPublisher:
             event["display_name"] = display_name
         if role is not None:
             event["role"] = role
+        if title is not None:
+            event["title"] = title
+        if description is not None:
+            event["description"] = description
         self._append_stream_event(event)
         self._write_discussion_json()
 
@@ -253,9 +265,16 @@ class WebPublisher:
         consensus_points: list[str] | None = None,
         disagreement_points: list[str] | None = None,
     ) -> None:
-        """Append a final summary stream event for end-of-discussion cards."""
+        """Append a final summary stream event for end-of-discussion cards.
+
+        Idempotent: only the first call emits the event. Subsequent calls are
+        silently ignored to prevent duplicates when multiple code paths
+        (auto-conclude, explicit end_discussion, manage_discussion) converge.
+        """
         if self._revoked:
             return
+        if self._final_summary is not None:
+            return  # already emitted — skip duplicate
 
         event: dict[str, Any] = {
             "type": "final_summary",
@@ -429,28 +448,25 @@ class WebPublisher:
         self._write_discussion_json_raw(data)
 
     def _display_name_for_participant(self, participant: str) -> str:
-        for item in self._participants:
-            if item.get("profile") == participant or item.get("participant") == participant:
-                return str(item.get("display_name") or item.get("profile") or participant)
-        return participant
+        return get_display_name_for_participant(participant, self._participants)
 
     def _role_for_participant(self, participant: str) -> str:
+        return get_role_for_participant(participant, self._participants)
+
+    def _title_for_participant(self, participant: str) -> str:
         for item in self._participants:
             if item.get("profile") == participant or item.get("participant") == participant:
-                return str(item.get("role") or "")
+                return str(item.get("title") or "")
+        return ""
+
+    def _description_for_participant(self, participant: str) -> str:
+        for item in self._participants:
+            if item.get("profile") == participant or item.get("participant") == participant:
+                return str(item.get("description") or "")
         return ""
 
     def _avatar_for_participant(self, participant: str) -> str:
-        if participant == "coordinator":
-            return "📋"
-        role = self._role_for_participant(participant).lower()
-        if "design" in role or "设计" in role:
-            return "🎨"
-        if "product" in role or "产品" in role:
-            return "📦"
-        if "engineer" in role or "tech" in role or "技术" in role or "开发" in role:
-            return "⚡"
-        return "🤖"
+        return get_avatar_for_participant(participant, self._participants)
 
     def _append_stream_event(
         self,

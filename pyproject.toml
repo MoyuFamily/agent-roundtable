@@ -85,6 +85,8 @@ select = [
 ]
 ignore = [
     "RUF001",  # ambiguous unicode in Chinese strings (fullwidth punctuation)
+    "RUF003",  # ambiguous unicode in comments (fullwidth punctuation)
+    "B027",    # empty method in abstract base class without abstract decorator
 ]
 
 [tool.ruff.lint.isort]
@@ -110,7 +112,5 @@ mypy_path = "src"
 module = [
     "tools.registry",
     "hermes_cli.config",
-    "hermes_cli.*",
-    "tools.*",
 ]
 ignore_missing_imports = true

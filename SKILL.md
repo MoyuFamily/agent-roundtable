@@ -350,47 +350,7 @@ watch(dir, (eventType, changedFilename) => {
 ```
 **Alternative**: Add server-side polling fallback (`setInterval` + mtime check) as defense-in-depth. **See also**: Bug task `t_xxxxxxxx` for the specific fix.
 
-**⚠️ Direct Core API does NOT auto-open browser**: When creating discussions via Direct Core API (`core.create_discussion()`) instead of the `roundtable_init` tool, the adapter's `_handle_init` is NOT called, so:
-1. The browser does NOT auto-open
-2. The WebViewer URL is NOT printed to the user
-3. The coordinator MUST manually extract `web_url` from the response and: (a) share it with the user, and (b) run `open "{web_url}"` to open the browser.
-
-**Pattern**: After `core.create_discussion()` returns, parse `web_url` from the JSON response, then:
-```bash
-# Share URL with user (via send_message or inline)
-# Then open browser
-open "http://0.0.0.0:{port}/r/{token}"
-```
-
-## Install roundtable in Hermes venv (required for agent to import it):
-```bash
-# hermes venv may lack pip — bootstrap it first
-~/.hermes/hermes-agent/venv/bin/python3 -m ensurepip
-~/.hermes/hermes-agent/venv/bin/python3 -m pip install /path/to/roundtable
-```
-
-Note: system Python 3.9 on macOS is too old (package requires >=3.10). Always install into the hermes venv (Python 3.11+).
-
-**Alternative: uv venv (when hermes venv is missing or broken)**:
-```bash
-# Create a dedicated venv with Python 3.12 via uv
-uv venv /tmp/roundtable-venv --python 3.12
-uv pip install -e /path/to/roundtable --python /tmp/roundtable-venv/bin/python3
-
-# Then use this venv for all Direct Core API calls:
-/tmp/roundtable-venv/bin/python3 << 'PYEOF'
-import json, sys
-sys.path.insert(0, "/Users/parsifal/.hermes/hermes-agent")
-from tools.roundtable_tools import _get_core
-core = _get_core()
-# ...
-PYEOF
-```
-
-This pattern is useful when:
-- System Python is 3.9 (macOS default) and roundtable requires >=3.10
-- The hermes venv doesn't exist or lacks pip
-- You need a clean, isolated environment for roundtable
+*Note: Tool calls executed natively on the platform handle environment and browser integration automatically.*
 
 ## Convergence Detection
 
@@ -457,89 +417,15 @@ Discussions can be linked to kanban tasks:
 kanban_comment(task_id="t_xxx", body="Roundtable conclusion: {conclusion_path}")
 ```
 
-## Direct Core API Fallback (Last Resort Only)
+## Direct Core API (Developer Debugging Only — Agents Prohibited)
 
-> **⚠️ IMPORTANT**: The standard flow is ALWAYS `roundtable_init` + `delegate_task(toolsets=["roundtable"])`. Do NOT default to Direct Core API. If sub-agents fail to call `roundtable_speak`, treat it as a **bug to investigate and fix** — not a workaround to codify. The user explicitly rejected the workaround-first mindset: "不是本质问题吗？一直workaround？"
+> **⚠️ CRITICAL RULE FOR AGENTS**: The Direct Core API (importing and executing `RoundtableCore` directly) is a private backend code interface reserved exclusively for human developer troubleshooting. Agents are **STRICTLY PROHIBITED** from executing Direct Core API scripts or bypasses in terminal environments. 
 >
-> **Before using Direct Core API, exhaust these options first:**
-> 1. Check if the sub-agent's `enabled_toolsets` actually includes `"roundtable"`
-> 2. Check if the sub-agent's profile has the `roundtable` toolset registered
-> 3. Try with a different profile to isolate the issue
-> 4. Report the bug as a kanban task for investigation (bug tracking task: `t_xxxxxxxx`)
->
-> **Only use Direct Core API when**: (a) the bug is confirmed and (b) you need the discussion to proceed NOW while the fix is in progress.
-
-**Known Issue**: Sub-agents spawned via `delegate_task` with `toolsets=["roundtable"]` sometimes fail to invoke `roundtable_speak` — the sub-agent outputs speech text but `tool_trace` is empty. This is a **bug**, not a design limitation. Root cause is under investigation.
-
-**Direct Core API (emergency bypass only)**: Bypass the Hermes tool layer and call `RoundtableCore` directly:
-
-```bash
-~/.hermes/hermes-agent/venv/bin/python3 << 'PYEOF'
-import json, sys
-sys.path.insert(0, "/Users/parsifal/.hermes/hermes-agent")
-from tools.roundtable_tools import _get_core
-
-core = _get_core()
-
-# Record a speech
-result = core.speak(
-    discussion_id="rt_xxxxxxxx",
-    participant="bingge",           # must match participants list exactly
-    content='Speech content here'   # use single quotes to avoid heredoc issues
-)
-print(json.dumps(result, ensure_ascii=False))
-
-# Read discussion history
-history = core.read(discussion_id="rt_xxxxxxxx")
-print(json.dumps(history, ensure_ascii=False, indent=2))
-
-# End discussion
-core.end_discussion(discussion_id="rt_xxxxxxxx", conclusion="Brief conclusion text")
-PYEOF
-```
-
-**Key gotchas**:
-- **NEVER import `RoundtableCore` directly** — always use `_get_core()` from `tools.roundtable_tools`. Direct import bypasses `send_fn` wiring, so notifications silently fail. Boss explicitly corrected this (2026-05-23): "你这压根不是用我们开发的圆桌技能做啊".
-- Use single quotes for content strings containing double quotes (heredoc escaping)
-- `participant` must exactly match the profile name in participants list
-- `coordinator` is always allowed (bypasses participant check)
-- Each `core.speak()` returns `round_complete` and `next_speaker` — use to track progress
-- `core._send_fn` must be non-None for notifications to fire (wired by `_hermes_send_fn`)
-- **Cross-process singleton**: `_get_core()` returns a singleton, BUT each Python invocation is a fresh process, so the singleton only lives for that one script execution. The `_publishers` dict (WebPublisher) is in-memory and lost between invocations. This is handled by the `_update_web_discussion_json` fallback — see "Cross-Process WebPublisher Data Sync" section.
-
-**Hybrid Workflow (temporary measure only)**: If `roundtable_speak` is confirmed broken in sub-agents, use `delegate_task` for reasoning and Direct Core API for recording — but treat this as a **temporary workaround** while the bug is being fixed, not a permanent pattern.
-
-```python
-# Step 1: Delegate to sub-agent for thought generation
-result = delegate_task(
-    goal="You are the Product Director. Share your viewpoint on '{topic}' from a product perspective...",
-    context="...",
-    toolsets=["roundtable"]  # sub-agent will fail to call roundtable_speak — that's expected
-)
-
-# Step 2: Extract speech text from sub-agent's summary
-speech_text = extract_from_summary(result)  # parse the sub-agent's output
-
-# Step 3: Record via Direct Core API (100% reliable)
-terminal(f"""
-~/.hermes/hermes-agent/venv/bin/python3 << 'PYEOF'
-import json, sys
-sys.path.insert(0, "/Users/parsifal/.hermes/hermes-agent")
-from tools.roundtable_tools import _get_core
-core = _get_core()
-result = core.speak(discussion_id="{discussion_id}", participant="{profile}", content='''{speech_text}''')
-print(json.dumps(result, ensure_ascii=False))
-PYEOF
-""")
-```
-
-**Key insight**: The sub-agent's reasoning is valuable — don't waste it. Just don't rely on it to persist the data.
-
-**When to use Direct Core API**: Any time reliability matters — demos, verification meetings, production discussions. The direct API is faster (no sub-agent overhead) and 100% reliable.
+> All agents **must** use the standard platform tools: `roundtable_init`, `roundtable_speak`, `roundtable_read`, and `roundtable_end` via standard platform tool call invocations. Never attempt to run local Python scripts importing `RoundtableCore` or `_get_core()`.
 
 24. **Quick verification meetings** — When Boss says "组织一次会议看效果", use the lightweight pattern: coordinator speaks for all participants directly via `roundtable_speak` (no `delegate_task`). Runs in ~2min vs ~15-20min. Always include notifications config even for demos — the goal is to verify the full pipeline including group chat sync. See `src/skills/references/quick-verification-example.md` for a working example.
-25. **delegate_task sub-agents can fail to call roundtable_speak** — Observed in 2026-05-23 session (6/6 failures). Sub-agents produce speech text in their response but `tool_trace` is empty. **DO NOT assume this is permanent** — it's a bug under investigation (`t_xxxxxxxx`). Before falling back to Direct Core API, check: (1) sub-agent's `enabled_toolsets` includes `"roundtable"`, (2) the profile has roundtable tools registered, (3) try a different profile. If confirmed broken, use Direct Core API as temporary bypass and file/update the bug task.
-26. **Direct Core API is an emergency bypass, NOT the default** — Use `roundtable_init` + `delegate_task` as the primary flow. Direct Core API (`core.speak()`) exists for when the standard flow is confirmed broken AND you need the discussion to proceed now. Always file a bug task when you're forced to use it.
+25. **Standard Tool Invocations** — Ensure that `roundtable_init` and `roundtable_speak` are invoked natively through the platform's tool calling mechanism rather than command-line subprocesses to ensure correct profile contexts, event telemetry, and permission auditing.
+26. **Emergency Bypass Prohibition** — Never write or execute custom Python wrappers or scripts to bypass standard tools. If a tool call fails, log the exception and report it as a bug task for human engineers to investigate.
 27. **`web` and `web_port` params on roundtable_init** — The core supports `web=True` to auto-start a WebPublisher HTTP server. The Hermes tool schema now includes these params. Default `web=True` in `_handle_init` so discussions always open WebViewer. Port auto-increments if 8199 is busy (check `web_url` in init response for actual port).
 28. **Adapter handles UX side-effects, core returns data** — When adding features that interact with the user's environment (browser, notifications, file watchers), implement them at the **adapter level** (`adapters/hermes.py`), not in `core.py`. The core library should be stateless and headless — it returns data (URLs, IDs, status) and the adapter decides what to do with it. Example: browser auto-open lives in `_handle_init` (adapter), not in `create_discussion` (core). The generic adapter may choose different UX behavior or none at all.
 > **Notifications implementation detail**: See `src/skills/references/notifications-implementation.md` for architecture, send_fn wiring, and execution flow diagrams. See `src/skills/references/notification-debugging.md` for verification pitfalls and debugging checklist.
@@ -600,7 +486,7 @@ See `src/skills/references/open-source-readiness.md` for the pre-release checkli
 - `src/skills/references/opc-experience-discussion-example.md` — 4-round, 4-participant discussion with timing data and workflow
 - `src/skills/references/notifications-example.md` — roundtable with real-time push notifications to Feishu
 - `src/skills/references/release-planning-discussion.md` — 3-round product/design/dev discussion for open-source release planning
-- `src/skills/references/ai-relay-open-source-discussion.md` — 3-round discussion with hybrid workflow (delegate_task + Direct Core API), notifications, and conclusion doc → 5/29 release plan
+- `src/skills/references/ai-relay-open-source-discussion.md` — 3-round discussion with standard tool workflow, notifications, and conclusion doc → 5/29 release plan
 - `src/skills/references/web-viewer-discussion-example.md` — Decision-oriented conclusion doc pattern: MVP scope, tech architecture, acceptance criteria, risk assessment, design deliverables. Use this format when the discussion goal is to produce a buildable specification.
 - `src/skills/references/post-discussion-kanban-dispatch.md` — After discussion concludes, create kanban tasks grouped by owner, subscribe notifications, and dispatch to team via Feishu groups.
 

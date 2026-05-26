@@ -419,3 +419,57 @@ def test_live_publisher_round_summary_has_convergence_score(tmp_path, monkeypatc
     events = [json.loads(line) for line in jsonl_path.read_text().splitlines()]
     r1_events_after = [e for e in events if e.get("type") == "round_summary" and e.get("round") == 1]
     assert len(r1_events_after) == len(r1_events_before)
+
+
+def test_concurrent_speeches_are_all_preserved_in_json(tmp_path, monkeypatch):
+    """Test that concurrent speak calls (cross-process fallback paths) do not overwrite each other."""
+    import concurrent.futures
+
+    db_path = tmp_path / "roundtable.db"
+    db = RoundtableDB(db_path)
+    core = RoundtableCore(db)
+
+    web_base_dir = tmp_path / "roundtable_web"
+    web_base_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(core, "_get_web_dir", lambda discussion_id: web_base_dir / discussion_id)
+
+    participants = [{"profile": f"user_{i}", "role": "Engineer", "display_name": f"User {i}"} for i in range(10)]
+    res = core.create_discussion("Topic", participants, web=True, max_rounds=20)
+    disc_id = res["discussion_id"]
+    disc_web_dir = web_base_dir / disc_id
+    disc_json_path = disc_web_dir / "discussion.json"
+
+    # Make sure _publishers doesn't have it (so it uses fallback cross-process path)
+    core._publishers.pop(disc_id, None)
+
+    # 1. Coordinator opening statement to advance to round 1
+    core.speak(disc_id, "coordinator", "Let's begin.")
+
+    # Let's perform 10 concurrent speeches from different participants.
+    # Each thread will use a separate RoundtableCore instance sharing
+    # the same RoundtableDB to simulate multi-process/multi-client environment.
+    cores = [RoundtableCore(db) for _ in range(10)]
+    for c in cores:
+        monkeypatch.setattr(c, "_get_web_dir", lambda discussion_id: web_base_dir / discussion_id)
+        c._publishers.pop(disc_id, None)
+
+    def run_speak(idx):
+        cores[idx].speak(disc_id, f"user_{idx}", f"speech from {idx}")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(run_speak, i) for i in range(10)]
+        concurrent.futures.wait(futures)
+
+    # Verify no exceptions were raised
+    for f in futures:
+        f.result()
+
+    # Verify that all 10 speeches (plus the coordinator opening statement) are preserved in discussion.json
+    data = json.loads(disc_json_path.read_text())
+    contents = [s["content"] for s in data.get("speeches", [])]
+
+    # 10 user speeches + 1 coordinator opening
+    assert len(contents) == 11
+    assert "Let's begin." in contents
+    for i in range(10):
+        assert f"speech from {i}" in contents

@@ -512,33 +512,36 @@ class WebPublisher:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     def _write_discussion_json_raw(self, data: dict[str, Any]) -> None:
-        """Atomic write: flock → write .tmp → fsync → rename."""
+        """Atomic write: flock lock file → write .tmp → fsync → rename."""
         target = self._discussion_dir / "discussion.json"
+        lock_path = target.with_suffix(".json.lock")
         tmp = target.with_suffix(".json.tmp")
 
-        with open(tmp, "w") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        with open(lock_path, "a") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
             try:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
+                with open(tmp, "w") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.rename(str(tmp), str(target))
             finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-
-        os.rename(str(tmp), str(target))
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     def _read_discussion_json(self) -> dict[str, Any] | None:
-        """Read discussion.json with shared lock."""
+        """Read discussion.json with shared lock on lock file."""
         target = self._discussion_dir / "discussion.json"
         if not target.exists():
             return None
 
-        with open(target) as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+        lock_path = target.with_suffix(".json.lock")
+        with open(lock_path, "a") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_SH)
             try:
-                result: dict[str, Any] | None = json.load(f)
-                return result
-            except json.JSONDecodeError:
+                with open(target) as f:
+                    result: dict[str, Any] | None = json.load(f)
+                    return result
+            except (json.JSONDecodeError, FileNotFoundError):
                 return None
             finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)

@@ -53,9 +53,8 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # Using Trusted Publishing (OIDC) — no token needed
-          # If Trusted Publishing not configured, uncomment:
-          # password: ${{ secrets.PYPI_API_TOKEN }}
+          # Try Trusted Publishing first, fallback to API token
+          password: ${{ secrets.PYPI_API_TOKEN }}
 
   # ─── Publish to ClawHub ─────────────────────────────────────────────
   publish-clawhub:

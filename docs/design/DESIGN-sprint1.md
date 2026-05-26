@@ -351,16 +351,115 @@ function flushTokens() {
 }
 ```
 
-### 4.4 标题栏
+### 4.4 收敛度进度条
+
+每张观点卡片标题栏下方展示一条**渐变色条**，直观反映本轮讨论的收敛程度。
+
+```
+┌─────────────────────────────────────────────────┐
+│  📋 第 1 轮 观点总结          [精简] [全文]  ▾  │
+│  ████████████████░░░░░░░░░░  收敛度 68%         │
+│  ← 共识绿 ───────────────→ ← 分歧橙 ────→      │
+├─────────────────────────────────────────────────┤
+```
+
+| 属性 | 值 | 说明 |
+|------|----|------|
+| 高度 | 4px | 细而不碍眼 |
+| 圆角 | 999px | 完全圆角 |
+| 背景轨道 | `rgba(255,255,255,0.06)` | 极淡灰底 |
+| 填充色 | `linear-gradient(90deg, var(--rt-success) 0%, var(--rt-warning) 100%)` | 从绿到橙 |
+| 填充宽度 | `{convergence}%` | 0%-100% 动态 |
+| 百分比文字 | `var(--rt-text-muted)`, 12px | 右对齐 |
+| 位置 | 标题栏下方、内容区上方 | 独立一行 |
+| 过渡动画 | `width 0.8s ease-out` | 数值变化时平滑过渡 |
+| 边距 | `8px 0` | 与标题栏和内容区的间距 |
+
+#### 收敛度含义
+
+| 区间 | 颜色感知 | 含义 |
+|------|----------|------|
+| 80%-100% | 深绿为主 | 高度共识，仅边缘分歧 |
+| 50%-79% | 绿→橙渐变 | 部分共识，有实质分歧 |
+| 0%-49% | 橙色为主 | 分歧严重，需下轮聚焦 |
+
+```css
+.convergence-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+.convergence-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--rt-success), var(--rt-warning));
+  transition: width 0.8s ease-out;
+}
+
+.convergence-label {
+  font-size: 12px;
+  color: var(--rt-text-muted);
+  text-align: right;
+  margin-top: 2px;
+}
+```
+
+### 4.5 标题栏与展示模式切换
 
 | 属性 | 值 |
-|------|------|
+|------|----|
 | 图标 | 📋 |
 | 文字 | `第 N 轮 观点总结` |
 | 字号 | 16px |
 | 字重 | 600 |
 | 颜色 | `var(--rt-text-primary)` #F1F5F9 |
-| 折叠按钮 | 右侧 `▸` / `▾`，14px，可点击区域 44×44px |
+| 展示模式切换 | 标题栏右侧 `[精简] [全文]` segmented control |
+| 折叠按钮 | 最右侧 `▸` / `▾`，14px，可点击区域 44×44px |
+
+#### 全文 / 精简展示模式
+
+观点卡片支持两种展示粒度，通过标题栏 segmented control 切换：
+
+| 模式 | 显示内容 | 适用场景 |
+|------|----------|----------|
+| **精简** (默认) | 核心观点标题 + 收敛度条 + 共识/分歧标签 | 快速浏览结论 |
+| **全文** | 核心观点 + 支撑论据 + 反对者头像 + 支持者归属 | 深入理解推理过程 |
+
+```
+📋 第 1 轮 观点总结    [精简] [全文]    ▾
+```
+
+| 属性 | 值 |
+|------|----|
+| 样式 | Segmented control，圆角按钮组 |
+| 默认状态 | 精简模式激活 |
+| 切换动画 | 内容区高度过渡 `300ms ease-out` |
+| 按钮尺寸 | 28×28px，12px 文字 |
+| 激活态 | `var(--rt-brand)` 背景 + 白色文字 |
+| 非激活态 | 透明背景 + `var(--rt-text-muted)` |
+
+```css
+.mode-toggle {
+  display: inline-flex;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.mode-toggle-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--rt-text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.mode-toggle-btn.active {
+  background: var(--rt-brand);
+  color: #fff;
+}
+```
 
 ```css
 .summary-header {
@@ -383,7 +482,7 @@ function flushTokens() {
 .summary-toggle.collapsed { transform: rotate(-90deg); }
 ```
 
-### 4.5 共识条目
+### 4.6 共识条目
 
 | 属性 | 值 |
 |------|------|
@@ -399,7 +498,7 @@ function flushTokens() {
 | 条目内边距 | 12px 16px |
 | 条目间距 | 8px |
 
-### 4.6 分歧条目
+### 4.7 分歧条目
 
 | 属性 | 值 |
 |------|------|
@@ -412,7 +511,7 @@ function flushTokens() {
 | 条目背景 | `rgba(245, 158, 11, 0.08)` |
 | 条目边框 | 1px solid `rgba(244, 158, 11, 0.2)` |
 
-### 4.7 Agent 归属标签
+### 4.8 Agent 归属标签
 
 ```html
 <span class="agent-tag" data-agent="alice" data-stance="support">
@@ -433,7 +532,7 @@ function flushTokens() {
 | 反对者背景 | `rgba(239, 68, 68, 0.15)` |
 | 反对者文字 | `#EF4444` |
 
-### 4.8 折叠/展开交互
+### 4.9 折叠/展开交互
 
 | 属性 | 值 |
 |------|------|
@@ -612,6 +711,62 @@ function flushTokens() {
 | 屏幕阅读器 | 气泡使用 `role="article"`；观点卡片使用 `role="region"` + `aria-label` |
 | 对比度 | 所有文字/背景组合 ≥ WCAG AA（4.5:1） |
 
+### 6.7 观看模式切换
+
+支持「实时」和「完成后查看」两种观看模式，通过顶栏右侧切换器切换。
+
+```
+┌─────────────────────────────────────────────────────┐
+│  ● 实时   ▶ 完成后查看    │  🟢 LIVE │  3/5 轮次  │
+└─────────────────────────────────────────────────────┘
+```
+
+#### 模式对比
+
+| 模式 | 图标 | 行为 | 适用场景 |
+|------|------|------|----------|
+| **实时** (默认) | ● (红色脉冲圆点) | 实时显示流式输出，启用自动滚动 | 观看进行中的讨论 |
+| **完成后查看** | ▶ (播放图标) | 不逐字渲染，讨论结束后一次性展示全部内容 | 回看历史讨论 |
+
+#### 切换器 UI
+
+| 属性 | 值 |
+|------|----|
+| 位置 | 顶栏左侧，LIVE 徽章之前 |
+| 样式 | Segmented control |
+| 实时模式激活态 | 红色脉冲圆点 `#EF4444` + `pulse 2s infinite` |
+| 完成后模式激活态 | `var(--rt-brand)` 背景 + 白色文字 |
+| 右侧信息 | 当前轮次进度 `N/M 轮次`，`var(--rt-text-muted)` 12px |
+| 切换行为 | 平滑过渡，不中断后台数据接收 |
+
+#### 「完成后查看」模式细节
+
+- 页面加载后不逐字渲染，显示居中等待态
+- 等待态：spinner + 「讨论进行中，完成后将自动展示...」
+- 讨论结束后自动渲染所有内容，各气泡 `fadeSlideIn 300ms` 依次出现（间隔 100ms）
+- 用户可随时切回「实时」模式追赶进度
+
+```css
+.view-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #EF4444;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+}
+```
+
 ---
 
 ## 7. 组件清单与交付物
@@ -627,11 +782,14 @@ function flushTokens() {
 | 5 | 自动滚动控制 | P0 | 待开发 |
 | 6 | "↓ 新消息"浮动按钮 | P0 | 待开发 |
 | 7 | SSE 断线重连提示条 | P0 | 待开发 |
-| 8 | 轮次观点卡片（`.summary-card`） | P1 | 待开发 |
-| 9 | 最终总结卡片（`.summary-card.final`） | P1 | 待开发 |
-| 10 | 共识/分歧条目 | P1 | 待开发 |
-| 11 | Agent 归属标签（`.agent-tag`） | P1 | 待开发 |
-| 12 | 折叠/展开交互 | P1 | 待开发 |
+| 8 | 观看模式切换器（实时/完成后查看） | P0 | 待开发 |
+| 9 | 轮次观点卡片（`.summary-card`） | P1 | 待开发 |
+| 10 | 最终总结卡片（`.summary-card.final`） | P1 | 待开发 |
+| 11 | 收敛度进度条（`.convergence-bar`） | P1 | 待开发 |
+| 12 | 共识/分歧条目 | P1 | 待开发 |
+| 13 | Agent 归属标签（`.agent-tag`） | P1 | 待开发 |
+| 14 | 全文/精简模式切换器（`.mode-toggle`） | P1 | 待开发 |
+| 15 | 折叠/展开交互 | P1 | 待开发 |
 
 ### 7.2 设计交付物清单
 

@@ -55,6 +55,7 @@ function parseCommits(sinceTag) {
     .split("\n")
     .map((line) => {
       const [hash, subject, body, date] = line.split("|||");
+      if (!subject) return null;
       const m = subject.match(COMMIT_RE);
       if (!m) return null;
       return {

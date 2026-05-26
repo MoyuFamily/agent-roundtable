@@ -400,7 +400,7 @@ kanban_comment(task_id="t_xxx", body="Roundtable conclusion: {conclusion_path}")
 8. **Write conclusion doc BEFORE roundtable_end** — The `roundtable_end` tool only accepts a brief summary text. Write and save the full conclusion document (via `write_file`) before ending the discussion.
 9. **WebViewer integration** — Setting `web=True` on `roundtable_init` automatically starts the WebViewer. It is supported across processes.
 10. **Notifications config** — Ensure you pass the `notifications` configuration parameter to `roundtable_init` if you want events to sync to messaging groups (e.g. Feishu). The adapter handles `send_fn` wiring automatically.
-11. **Developer Reference** — For direct Python Core API references, venv configurations, or cross-process sync implementation details, see the separate developer reference guide at [developer-guide.md](file:///Users/parsifal/Repo/Monorepo/agent-roundtable/src/skills/src/skills/references/developer-guide.md).
+11. **Developer Reference** — Maintainer-only implementation documentation exists separately and is not part of the agent execution workflow.
 
 ## Test Results
 

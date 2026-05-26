@@ -994,6 +994,7 @@ class RoundtableCore:
                 if not round_findings and r not in existing_rounds_map:
                     continue
 
+                score = conv_map.get(r)
                 existing = existing_rounds_map.get(r)
                 needs_update = False
                 if not existing:
@@ -1001,16 +1002,15 @@ class RoundtableCore:
                 else:
                     ex_consensus = existing.get("consensus", [])
                     ex_disagreement = existing.get("disagreement", [])
-                    if len(ex_consensus) != len(consensus_pts) or len(ex_disagreement) != len(disagreement_pts):
+                    ex_score = existing.get("convergence_score")
+                    if (
+                        ex_consensus != consensus_pts
+                        or ex_disagreement != disagreement_pts
+                        or ex_score != score
+                    ):
                         needs_update = True
-                    else:
-                        if any(ex_consensus[i].get("content") != consensus_pts[i]["content"] for i in range(len(consensus_pts))):
-                            needs_update = True
-                        elif any(ex_disagreement[i].get("content") != disagreement_pts[i]["content"] for i in range(len(disagreement_pts))):
-                            needs_update = True
 
                 if needs_update:
-                    score = conv_map.get(r)
                     summary_event = {
                         "type": "round_summary",
                         "round": r,
@@ -1025,7 +1025,7 @@ class RoundtableCore:
                         existing.update(summary_event)
                     else:
                         existing_summaries.append(summary_event)
-                    
+
                     changed = True
                     self._append_token_stream_jsonl_fallback(web_dir, summary_event)
 
@@ -1043,9 +1043,11 @@ class RoundtableCore:
                 else:
                     ex_consensus = final_summary.get("consensus", [])
                     ex_disagreement = final_summary.get("disagreement", [])
-                    if len(ex_consensus) != len(consensus_all) or len(ex_disagreement) != len(disagreement_all):
-                        needs_final_summary = True
-                    elif final_summary.get("verdict") != (disc.conclusion or ""):
+                    if (
+                        len(ex_consensus) != len(consensus_all)
+                        or len(ex_disagreement) != len(disagreement_all)
+                        or final_summary.get("verdict") != (disc.conclusion or "")
+                    ):
                         needs_final_summary = True
 
                 if needs_final_summary:
@@ -1122,7 +1124,14 @@ class RoundtableCore:
             data["updated_at"] = now
 
             # Write to token_stream.jsonl for replay
-            self._append_token_stream_jsonl_fallback(web_dir, {"type": "speech_delta", "speech": speech_data, "timestamp": now})
+            self._append_token_stream_jsonl_fallback(
+                web_dir,
+                {
+                    "type": "speech_delta",
+                    "speech": speech_data,
+                    "timestamp": now,
+                },
+            )
 
             # Write back with exclusive lock
             tmp = json_path.with_suffix(".json.tmp")
@@ -1169,7 +1178,15 @@ class RoundtableCore:
             data["updated_at"] = now
 
             # Write to token_stream.jsonl for replay
-            self._append_token_stream_jsonl_fallback(web_dir, {"type": "status_delta", "status": "concluded", "conclusion": conclusion, "timestamp": now})
+            self._append_token_stream_jsonl_fallback(
+                web_dir,
+                {
+                    "type": "status_delta",
+                    "status": "concluded",
+                    "conclusion": conclusion,
+                    "timestamp": now,
+                },
+            )
 
             tmp = json_path.with_suffix(".json.tmp")
             with open(tmp, "w") as f:

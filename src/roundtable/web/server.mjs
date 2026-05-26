@@ -140,6 +140,15 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Escape a string for safe use inside an HTML attribute value. */
+function escapeHtmlAttr(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function sendHTML(res, html) {
   res.writeHead(200, {
     "Content-Type": "text/html; charset=utf-8",
@@ -264,9 +273,25 @@ router.get("/r/:token", (req, res, params) => {
         port,
         host: "0.0.0.0",
       });
+      // Build Open Graph tags from discussion data
+      const disc = readDiscussion();
+      const ogTitle = disc?.topic ? `圆桌讨论: ${disc.topic}` : "Roundtable 圆桌讨论";
+      const ogDesc = disc?.topic
+        ? `多位 AI Agent 正在围绕「${disc.topic}」展开圆桌讨论。${disc.participants?.length ? `参与者: ${disc.participants.map(p => p.name || p.id).join("、")}` : ""}`
+        : "多 Agent 圆桌讨论引擎 — 让多个 AI Agent 像开会一样讨论、追踪共识分歧并生成结构化会议记录。";
+      const ogTags = [
+        `<meta property="og:title" content="${escapeHtmlAttr(ogTitle)}">`,
+        `<meta property="og:description" content="${escapeHtmlAttr(ogDesc)}">`,
+        `<meta property="og:type" content="article">`,
+        `<meta property="og:site_name" content="Roundtable">`,
+        `<meta name="twitter:card" content="summary">`,
+        `<meta name="twitter:title" content="${escapeHtmlAttr(ogTitle)}">`,
+        `<meta name="twitter:description" content="${escapeHtmlAttr(ogDesc)}">`,
+      ].join("\n    ");
+
       const injected = html.replace(
         "</head>",
-        `<script>window.__RT_CONFIG__ = ${config};</script></head>`
+        `${ogTags}\n    <script>window.__RT_CONFIG__ = ${config};</script></head>`
       );
       sendHTML(res, injected);
     } else {

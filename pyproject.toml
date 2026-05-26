@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-roundtable"
-version = "1.2.4"
+version = "2.0.0"
 description = "Multi-Agent Roundtable Discussion Engine / 多 Agent 圆桌讨论引擎"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -29,6 +29,7 @@ from roundtable.exceptions import (
 )
 from roundtable.models import ConvergenceRecord, Discussion, Participant, Speech
 from roundtable.notify import Notifier
+from roundtable.template import get_template, list_templates
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +68,35 @@ class RoundtableCore:
         notifications: dict[str, Any] | None = None,
         web: bool = False,
         web_port: int = 8199,
+        expires_at: float | None = None,
+        template: str | None = None,
     ) -> dict[str, Any]:
         """Create a new roundtable discussion.
 
         Returns dict with discussion_id, topic, participants, etc.
         Raises ValueError / RoundtableError on validation failure.
+
+        Args:
+            template: Optional template ID (e.g. 'product-review'). When set,
+                default values from the template are used for any argument
+                that is not explicitly provided (topic, context, participants,
+                max_rounds, speech_order).
         """
+        # --- Apply template defaults if a template ID is provided ---
+        if template:
+            tpl = get_template(template)
+            if tpl is None:
+                raise ValueError(f"Template '{template}' not found")
+            topic = topic or tpl.get("topic_template", topic)
+            context = context or tpl.get("context_template", context)
+            if not participants or participants == []:
+                tpl_participants = tpl.get("participants")
+                if tpl_participants:
+                    participants = tpl_participants
+            if max_rounds == 5 and tpl.get("max_rounds"):
+                max_rounds = tpl["max_rounds"]
+            if speech_order == "fixed" and tpl.get("speech_order"):
+                speech_order = tpl["speech_order"]
         if not topic or not topic.strip():
             raise ValueError("topic is required")
         if not participants or not isinstance(participants, list):
@@ -121,6 +145,7 @@ class RoundtableCore:
                             }
                             for p in participants
                         ],
+                        expires_at=expires_at,
                     )
                 except Exception as exc:
                     logger.exception("Failed to start web viewer for discussion %s", disc.id)

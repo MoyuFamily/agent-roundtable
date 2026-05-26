@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ogTitle}}</title>
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="{{ogTitle}}">
+  <meta property="og:description" content="{{ogDesc}}">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Roundtable 圆桌讨论">
+  <meta property="og:url" content="{{shareUrl}}">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="{{ogTitle}}">
+  <meta name="twitter:description" content="{{ogDesc}}">
+
+  <style>
+    :root {
+      --bg: #0c0f14;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --orange: #d29922;
+      --purple: #bc8cff;
+      --red: #f85149;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+    .share-card {
+      max-width: 640px;
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .share-header {
+      padding: 2rem 2rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .share-header .badge {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-bottom: 0.75rem;
+    }
+    .badge.ongoing { background: var(--green); color: #000; }
+    .badge.completed { background: var(--accent); color: #000; }
+    .share-header h1 {
+      font-size: 1.4rem;
+      line-height: 1.4;
+      margin-bottom: 0.5rem;
+    }
+    .share-header .meta {
+      color: var(--muted);
+      font-size: 0.85rem;
+      line-height: 1.6;
+    }
+    .participants {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      padding: 1.25rem 2rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .participant-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.65rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 0.8rem;
+      color: var(--text);
+    }
+    .participant-chip .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .consensus-bar {
+      padding: 1.25rem 2rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .consensus-bar .label {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+    .consensus-track {
+      height: 6px;
+      background: var(--bg);
+      border-radius: 3px;
+      position: relative;
+      overflow: hidden;
+    }
+    .consensus-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.5s ease;
+    }
+    .consensus-fill.high { background: var(--green); }
+    .consensus-fill.medium { background: var(--orange); }
+    .consensus-fill.low { background: var(--red); }
+    .consensus-value {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-top: 0.3rem;
+    }
+    .preview-messages {
+      padding: 1.25rem 2rem;
+    }
+    .preview-msg {
+      padding: 0.75rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .preview-msg:last-child { border-bottom: none; }
+    .preview-msg .agent {
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 0.3rem;
+    }
+    .preview-msg .text {
+      font-size: 0.85rem;
+      color: var(--muted);
+      line-height: 1.5;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .share-footer {
+      padding: 1.5rem 2rem;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 0.75rem;
+    }
+    .btn {
+      padding: 0.6rem 1.2rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: all 0.15s ease;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #000;
+    }
+    .btn-primary:hover { background: #79c0ff; }
+    .btn-secondary {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--muted); }
+    .rounds-info {
+      padding: 1rem 2rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .stat {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+    .stat .val {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .stat .lbl {
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .disclaimer {
+      margin-top: 1.5rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="share-card">
+    <div class="share-header">
+      <span class="badge {{statusClass}}">{{statusLabel}}</span>
+      <h1>{{topic}}</h1>
+      <div class="meta">{{metaText}}</div>
+    </div>
+
+    <div class="participants">
+      {{participantsHtml}}
+    </div>
+
+    {{statsHtml}}
+
+    {{consensusHtml}}
+
+    <div class="preview-messages">
+      {{messagesHtml}}
+    </div>
+
+    <div class="share-footer">
+      <a href="{{viewerUrl}}" class="btn btn-primary">▶ 查看完整讨论</a>
+      <button class="btn btn-secondary" onclick="copyLink()">📋 复制链接</button>
+    </div>
+  </div>
+
+  <div class="disclaimer">由 Roundtable 圆桌讨论引擎生成 · 多 Agent 协作式 AI 讨论</div>
+
+  <script>
+    function copyLink() {
+      navigator.clipboard.writeText(window.location.href).then(() => {
+        const btn = event.target.closest('.btn');
+        const orig = btn.textContent;
+        btn.textContent = '✓ 已复制';
+        setTimeout(() => { btn.textContent = orig; }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>

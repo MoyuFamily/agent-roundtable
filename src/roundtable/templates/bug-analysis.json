@@ -1,0 +1,14 @@
+{
+  "name": "Bug 分析",
+  "description": "多角色协作分析 Bug 根因，定位问题并制定修复方案。",
+  "topic_template": "Bug 分析：{subject}",
+  "context_template": "本次讨论的目标是分析 {subject} 的根因。请从复现路径、影响范围、可能根因和修复方案四个维度展开讨论。",
+  "participants": [
+    {"profile": "developer", "role": "开发工程师", "avatar": "💻", "perspective": "代码逻辑与实现细节"},
+    {"profile": "qa", "role": "测试工程师", "avatar": "🧪", "perspective": "复现路径与回归验证"},
+    {"profile": "sre", "role": "SRE 工程师", "avatar": "📊", "perspective": "监控指标与线上状态"},
+    {"profile": "product", "role": "产品经理", "avatar": "📋", "perspective": "用户影响与优先级"}
+  ],
+  "max_rounds": 3,
+  "speech_order": "fixed"
+}

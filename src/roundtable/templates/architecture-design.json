@@ -1,0 +1,15 @@
+{
+  "name": "架构设计",
+  "description": "多角色围绕系统架构进行设计评审，输出架构方案、技术风险和演进路径。",
+  "topic_template": "架构设计评审：{subject}",
+  "context_template": "本次讨论的目标是对 {subject} 的架构设计方案进行评审。请从系统分层、数据流、可扩展性、性能瓶颈和运维成本五个维度展开讨论。",
+  "participants": [
+    {"profile": "architect", "role": "架构师", "avatar": "🏗️", "perspective": "系统分层与模块边界"},
+    {"profile": "backend", "role": "后端工程师", "avatar": "⚙️", "perspective": "服务实现与 API 设计"},
+    {"profile": "data", "role": "数据工程师", "avatar": "🗄️", "perspective": "数据模型与存储方案"},
+    {"profile": "ops", "role": "运维工程师", "avatar": "🔧", "perspective": "部署架构与运维成本"},
+    {"profile": "security", "role": "安全工程师", "avatar": "🔒", "perspective": "安全边界与访问控制"}
+  ],
+  "max_rounds": 4,
+  "speech_order": "fixed"
+}

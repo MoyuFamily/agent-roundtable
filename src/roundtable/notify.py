@@ -46,10 +46,17 @@ class Notifier:
         self._enabled = self._config.get("enabled", bool(self._channels))
         self._events: set[str] = set(self._config.get("events", list(ALL_EVENTS)))
         self._send_fn = send_fn
+        self._webhooks: list[dict[str, str]] = self._config.get("webhooks", [])
+
+    @property
+    def has_webhooks(self) -> bool:
+        """Check if any webhook channels are configured."""
+        return bool(self._webhooks)
 
     @property
     def enabled(self) -> bool:
-        return self._enabled and bool(self._channels) and self._send_fn is not None
+        has_channels = bool(self._channels) and self._send_fn is not None
+        return self._enabled and (has_channels or self.has_webhooks)
 
     def should_notify(self, event: str) -> bool:
         """Check if this event should be notified."""
@@ -75,12 +82,13 @@ class Notifier:
             message = self._format_message(event, discussion_id=discussion_id, topic=topic, **kwargs)
             if not message:
                 return
-            self._dispatch(message)
+            self._dispatch(message, event=event, discussion_id=discussion_id, topic=topic, **kwargs)
         except Exception as e:
             logger.warning("Notification dispatch failed for event=%s: %s", event, e)
 
-    def _dispatch(self, message: str) -> None:
-        """Send message to all configured channels."""
+    def _dispatch(self, message: str, **kwargs: Any) -> None:
+        """Send message to all configured channels and webhooks."""
+        # 1. Legacy channels via send_fn
         for ch in self._channels:
             platform = ch.get("platform", "feishu")
             chat_id = ch.get("chat_id", "")
@@ -96,6 +104,10 @@ class Notifier:
                     chat_id,
                     e,
                 )
+
+        # 2. Webhook channels (Discord / Slack)
+        if self._webhooks:
+            self._dispatch_webhooks(**kwargs)
 
     def _format_message(
         self,
@@ -174,6 +186,42 @@ class Notifier:
         return None
 
 
+    def _dispatch_webhooks(self, **kwargs: Any) -> None:
+        """Send formatted webhook payloads to Discord / Slack."""
+        from roundtable.webhook import (
+            WebhookSender,
+            format_discord_embed,
+            format_discord_text,
+            format_slack_blocks,
+            format_slack_text,
+        )
+
+        sender = WebhookSender()
+        event = kwargs.get("event", "")
+        discussion_id = kwargs.get("discussion_id", "")
+        topic = kwargs.get("topic", "")
+
+        for wh in self._webhooks:
+            url = wh.get("url", "")
+            platform = wh.get("platform", "")
+            if not url or not platform:
+                continue
+            try:
+                if platform == "discord":
+                    embed = format_discord_embed(event, discussion_id=discussion_id, topic=topic, **kwargs)
+                    text = format_discord_text(event, discussion_id=discussion_id, topic=topic, **kwargs)
+                    embeds = [embed] if embed else None
+                    sender.send_discord(url, content=text or "", embeds=embeds)
+                elif platform == "slack":
+                    blocks = format_slack_blocks(event, discussion_id=discussion_id, topic=topic, **kwargs)
+                    text = format_slack_text(event, discussion_id=discussion_id, topic=topic, **kwargs)
+                    sender.send_slack(url, text=text or "", blocks=blocks)
+                else:
+                    logger.warning("Unknown webhook platform: %s", platform)
+            except Exception as e:
+                logger.warning("Webhook dispatch failed for %s: %s", platform, e)
+
+
 def validate_notification_config(config: Any) -> list[str]:
     """Validate notification config and return list of error messages.
 
@@ -202,5 +250,20 @@ def validate_notification_config(config: Any) -> list[str]:
             unknown = set(events) - ALL_EVENTS
             if unknown:
                 errors.append(f"unknown events: {', '.join(unknown)}")
+
+    if "webhooks" in config:
+        webhooks = config["webhooks"]
+        if not isinstance(webhooks, list):
+            errors.append("webhooks must be an array")
+        else:
+            for i, wh in enumerate(webhooks):
+                if not isinstance(wh, dict):
+                    errors.append(f"webhooks[{i}] must be an object")
+                elif not wh.get("url"):
+                    errors.append(f"webhooks[{i}].url is required")
+                elif not wh.get("platform"):
+                    errors.append(f"webhooks[{i}].platform is required (discord or slack)")
+                elif wh.get("platform") not in ("discord", "slack"):
+                    errors.append(f"webhooks[{i}].platform must be 'discord' or 'slack'")
 
     return errors

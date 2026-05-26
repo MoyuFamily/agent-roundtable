@@ -1,0 +1,14 @@
+{
+  "name": "需求讨论",
+  "description": "多角色追问模糊需求，沉淀共识、风险与未决问题。",
+  "topic_template": "需求讨论：{subject}",
+  "context_template": "本次讨论的目标是澄清 {subject} 的需求边界。请从用户场景、验收标准、技术约束和排期优先级四个维度展开讨论。",
+  "participants": [
+    {"profile": "product", "role": "产品经理", "avatar": "📋", "perspective": "用户场景与业务价值"},
+    {"profile": "design", "role": "设计师", "avatar": "🎨", "perspective": "交互流程与界面设计"},
+    {"profile": "dev", "role": "开发工程师", "avatar": "💻", "perspective": "技术可行性与实现成本"},
+    {"profile": "qa", "role": "测试工程师", "avatar": "🧪", "perspective": "验收标准与边界条件"}
+  ],
+  "max_rounds": 3,
+  "speech_order": "fixed"
+}

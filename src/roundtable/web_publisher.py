@@ -96,6 +96,7 @@ class WebPublisher:
         self._final_summary: dict[str, Any] | None = None
         self._status: str = "active"
         self._actual_port: int | None = None
+        self._expires_at: float | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -107,6 +108,7 @@ class WebPublisher:
         token: str | None = None,
         topic: str | None = None,
         participants: list[dict[str, Any]] | None = None,
+        expires_at: float | None = None,
     ) -> str:
         """Start the web viewer service and return the full URL.
 
@@ -119,6 +121,7 @@ class WebPublisher:
         self._token = token or _generate_token()
         self._topic = topic or f"Discussion {discussion_id}"
         self._participants = participants or []
+        self._expires_at = expires_at
 
         # Write initial discussion.json
         self._write_discussion_json()
@@ -436,6 +439,7 @@ class WebPublisher:
     def _write_discussion_json(self) -> None:
         """Write current state to discussion.json with atomic file lock."""
         data = {
+            "schema_version": 2,
             "discussion_id": self._discussion_id,
             "topic": self._topic,
             "status": self._status,
@@ -451,6 +455,7 @@ class WebPublisher:
             "conclusion": self._conclusion,
             "final_summary": self._final_summary,
             "revoked_tokens": [self._token] if self._revoked else [],
+            "expires_at": self._expires_at,
             "updated_at": time.time(),
         }
         self._write_discussion_json_raw(data)

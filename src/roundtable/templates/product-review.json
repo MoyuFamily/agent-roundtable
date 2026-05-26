@@ -1,0 +1,14 @@
+{
+  "name": "产品评审",
+  "description": "多角色围绕产品方案进行评审，输出优先级、风险和暂缓项。",
+  "topic_template": "产品评审：{subject}",
+  "context_template": "本次讨论的目标是对 {subject} 进行多角色评审，明确 MVP 范围、优先级排序、已知风险和需要暂缓的功能。",
+  "participants": [
+    {"profile": "product", "role": "产品经理", "avatar": "📋", "perspective": "用户价值与商业目标"},
+    {"profile": "design", "role": "设计师", "avatar": "🎨", "perspective": "用户体验与交互设计"},
+    {"profile": "dev", "role": "开发工程师", "avatar": "💻", "perspective": "技术可行性与实现成本"},
+    {"profile": "growth", "role": "增长运营", "avatar": "📈", "perspective": "增长策略与数据指标"}
+  ],
+  "max_rounds": 3,
+  "speech_order": "fixed"
+}

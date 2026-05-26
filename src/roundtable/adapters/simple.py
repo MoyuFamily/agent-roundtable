@@ -75,7 +75,7 @@ class SimpleAdapter(RoundtableAdapter):
         result = self._speak_fn(context)
         # Handle both sync and async speak_fn
         if hasattr(result, "__await__"):
-            return await result  # type: ignore[misc]
+            return str(await result)
         return str(result)
 
     async def listen(self, speech: dict[str, Any]) -> dict[str, Any] | None:
@@ -83,7 +83,7 @@ class SimpleAdapter(RoundtableAdapter):
             return None
         result = self._listen_fn(speech)
         if hasattr(result, "__await__"):
-            return await result  # type: ignore[misc]
+            return await result  # type: ignore[misc, no-any-return]
         return result
 
     @staticmethod

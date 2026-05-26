@@ -85,6 +85,7 @@ CREATE INDEX IF NOT EXISTS idx_findings_discussion
     ON findings(discussion_id, type);
 """
 
+
 def migrate_db(conn: sqlite3.Connection) -> None:
     """Apply schema migrations for existing databases."""
     # Add notifications column if missing

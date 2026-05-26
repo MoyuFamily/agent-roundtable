@@ -17,6 +17,7 @@ def format_history(speeches: list[Speech], participants_map: dict[str, Any]) -> 
         lines.append(f"[#{s.id}] Round {s.round} | {display}{role_str}{ref_str}:\n  {s.content}")
     return "\n\n".join(lines) if lines else "(暂无发言)"
 
+
 def build_structured_summary(
     disc: Discussion,
     participants: list[Participant],

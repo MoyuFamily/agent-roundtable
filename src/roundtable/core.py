@@ -247,9 +247,10 @@ class RoundtableCore:
                     chunk_size = 3  # 每次推送 3 个字符
                     token_seq = 0
                     import time as _time
+
                     for i in range(0, len(content), chunk_size):
                         token_seq += 1
-                        publisher.on_speech_token(speech.id, content[i:i + chunk_size], seq=token_seq)
+                        publisher.on_speech_token(speech.id, content[i : i + chunk_size], seq=token_seq)
                         if self._stream_delay > 0:
                             _time.sleep(self._stream_delay)
                     publisher.on_speech_end(speech.id, total_tokens=token_seq)
@@ -896,6 +897,7 @@ class RoundtableCore:
     ) -> dict[str, Any]:
         """Run a complete demo discussion with pre-scripted content."""
         from roundtable.demo import DemoRunner
+
         runner = DemoRunner(self)
         return runner.run(
             topic=topic,
@@ -1075,6 +1077,7 @@ class RoundtableCore:
     def _format_history(speeches: list[Speech], participants_map: dict[str, Any]) -> str:
         """Format speech history into a human-readable string."""
         from roundtable.formatter import format_history
+
         return format_history(speeches, participants_map)
 
     @staticmethod
@@ -1091,6 +1094,7 @@ class RoundtableCore:
     ) -> str:
         """Build a compact structured summary for LLM consumption."""
         from roundtable.formatter import build_structured_summary
+
         return build_structured_summary(
             disc,
             participants,

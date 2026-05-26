@@ -101,3 +101,38 @@ To avoid race conditions where concurrent writes or a lagging live publisher ove
 
 ### 3.3 High-Precision float timestamps
 To determine the ordering of concurrent/delayed updates, `final_summary` uses float timestamps (`time.time()`). When merging data, the newer timestamp on disk always takes precedence over stale in-memory state.
+
+---
+
+## 4. Internal Notification Wiring & Debugging
+
+The automatic notification system requires a `send_fn(platform, chat_id, message)` callback configured on the `RoundtableCore` singleton. The Hermes adapter (`adapters/hermes.py`) provides `_hermes_send_fn` which launches `feishu-send.py` via a subprocess (incurring ~1-2s overhead per notification).
+
+### 4.1 Verifying send_fn Wiring
+If `send_fn` is not wired correctly, notifications are silently disabled and the Notifier's `enabled` check returns `False`.
+You can verify this in Python with:
+```python
+assert core._send_fn is not None, "Notification callback is not wired!"
+```
+
+### 4.2 Logging Notification Subprocess Calls
+To debug issues where notifications appear to not fire, wrap the `send_fn` callback with logs to verify its execution:
+```python
+original_send = core._send_fn
+def debug_send_fn(platform, chat_id, message):
+    print(f"[DEBUG SEND] platform={platform}, chat={chat_id}, msg_len={len(message)}")
+    original_send(platform, chat_id, message)
+    print(f"[DEBUG SEND] OK")
+core._send_fn = debug_send_fn
+```
+
+---
+
+## 5. Multiple Database Isolation
+
+Different runtime environments may write to different database paths:
+- `~/.roundtable/roundtable.db` — Main agent discussions.
+- `~/.hermes/roundtable.db` — Hermes tool-layer discussions.
+- `~/.hermes/profiles/{profile}/home/.roundtable/roundtable.db` — Isolated sub-agent discussions.
+
+Ensure you inspect or query the correct database file depending on the active profile/runtime context.

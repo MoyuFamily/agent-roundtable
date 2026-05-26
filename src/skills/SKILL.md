@@ -122,7 +122,7 @@ roundtable_speak(
 )
 ```
 
-Optionally send opening notification:
+Optionally send opening notification (only if notifications are NOT automatically configured via roundtable_init):
 ```
 send_message(target="feishu:oc_xxx", message="🔔 Roundtable started [rt_xxx]\n📋 Topic: ...\n👥 Participants: ...")
 ```
@@ -170,12 +170,12 @@ roundtable_speak(discussion_id="{id}", participant="{profile}", content="your sp
 # Wait for completion, then send notification, then delegate to participant 2
 ```
 
-**3c. After each participant, send notification (if configured):**
+**3c. After each participant, send notification (only if notifications are NOT automatically configured via roundtable_init):**
 ```
 send_message(target="feishu:oc_xxx", message="💬 Round {N} | {role} ({display_name}) spoke:\n{summary}")
 ```
 
-**3d. After all participants in a round, send round_end notification:**
+**3d. After all participants in a round, send round_end notification (only if notifications are NOT automatically configured via roundtable_init):**
 ```
 send_message(target="feishu:oc_xxx", message="✅ Round {N} complete\nConsensus: ...\nDisagreements: ...")
 ```
@@ -214,7 +214,7 @@ roundtable_end(
 )
 ```
 
-Send concluded notification:
+Send concluded notification (only if notifications are NOT automatically configured via roundtable_init):
 ```
 send_message(target="feishu:oc_xxx", message="🏁 Discussion ended\nConclusion: ...")
 ```
@@ -275,26 +275,9 @@ roundtable_init(
 | `round_end` | All participants spoke in a round | Key points + convergence score |
 | `concluded` | Discussion ends | Final conclusion + consensus/disagreement points |
 
-### send_fn Requirement
-
-The notification system requires a `send_fn(platform, chat_id, message)` callback
-on `RoundtableCore`. The Hermes adapter (`adapters/hermes.py`) provides
-`_hermes_send_fn` which calls `feishu-send.py` via subprocess.
-
-**If send_fn is not wired**, notifications are silently disabled — the Notifier's
-`enabled` returns `False`. Verify with: `core._send_fn is not None`.
-
-**Manual fallback**: If send_fn is broken or unavailable, the coordinator can
-manually push notifications using `send_message` after each speech:
-```
-send_message(target="feishu:oc_xxx", message="💬 Round {N} | Speaker: summary...")
-```
-
-### Timing
-
-With automatic notifications (send_fn wired), each speech triggers a subprocess
-call to feishu-send.py (~1-2s overhead). With manual `send_message`, overhead is
-similar but requires explicit coordinator action after each speech.
+### Automatic vs. Manual Notification Rule
+- **Automatic Mode**: When `notifications` config is passed to `roundtable_init` with `"enabled": True`, the platform tool calls automatically trigger Feishu notifications on events (round_start, speech, round_end, concluded). In this mode, the coordinator agent **must NOT** send manual duplicate notifications via `send_message`.
+- **Manual Mode (Fallback)**: If `notifications` are not enabled in `roundtable_init`, the coordinator may manually call `send_message` after important milestones to notify the group chat.
 
 ### Verifying Notifications (Pitfall)
 
@@ -314,22 +297,6 @@ resp = requests.get('https://open.feishu.cn/open-apis/im/v1/messages',
 resp = requests.get('https://open.feishu.cn/open-apis/im/v1/messages',
     params={'container_id': 'oc_xxx', 'page_size': 10, 'sort_type': 'ByCreateTimeDesc'})
 ```
-
-**Debug pattern**: If notifications appear to not fire, add a wrapper `send_fn`
-with logging to confirm the callback is actually invoked:
-```python
-def debug_send_fn(platform, chat_id, message):
-    print(f"[DEBUG SEND] platform={platform}, chat={chat_id}, msg_len={len(message)}")
-    original_send(platform, chat_id, message)
-    print(f"[DEBUG SEND] OK")
-```
-
-**Multiple roundtable.db files**: The system may have multiple databases:
-- `~/.roundtable/roundtable.db` — main agent discussions
-- `~/.hermes/roundtable.db` — hermes tool layer discussions
-- `~/.hermes/profiles/{profile}/home/.roundtable/roundtable.db` — sub-agent discussions
-
-Always verify against the correct DB when checking discussion state.
 
 ## Web Viewer (default ON)
 

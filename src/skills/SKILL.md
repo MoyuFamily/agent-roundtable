@@ -1,7 +1,7 @@
 ---
 name: agent-roundtable
 description: "Multi-agent roundtable discussion — topic-driven multi-round debate with convergence detection and conclusion generation"
-version: 1.2.1
+version: 0.2.0
 platforms: [linux, macos, windows]
 metadata:
   hermes:

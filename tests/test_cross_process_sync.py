@@ -570,3 +570,66 @@ def test_stale_live_publisher_does_not_revert_fallback_conclusion(tmp_path, monk
     data = json.loads(disc_json_path.read_text())
     assert data["conclusion"] == "新结论"
     assert data["final_summary"]["verdict"] == "新结论"
+
+
+def test_stale_live_publisher_does_not_overwrite_newer_round_summary(tmp_path, monkeypatch):
+    """Test that a stale live publisher update does not revert a newer round summary written on disk."""
+    import time
+
+    db_path = tmp_path / "roundtable.db"
+    db = RoundtableDB(db_path)
+    core_live = RoundtableCore(db)
+    core_fallback = RoundtableCore(db)
+
+    web_base_dir = tmp_path / "roundtable_web"
+    web_base_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(core_live, "_get_web_dir", lambda discussion_id: web_base_dir / discussion_id)
+    monkeypatch.setattr(core_fallback, "_get_web_dir", lambda discussion_id: web_base_dir / discussion_id)
+
+    from roundtable.web_publisher import WebPublisher
+
+    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
+
+    participants = [
+        {"profile": "alice", "role": "Engineer", "display_name": "Alice"},
+        {"profile": "bob", "role": "Designer", "display_name": "Bob"},
+    ]
+    res = core_live.create_discussion("Topic", participants, web=True, max_rounds=5)
+    disc_id = res["discussion_id"]
+    disc_web_dir = web_base_dir / disc_id
+    disc_json_path = disc_web_dir / "discussion.json"
+
+    # core_live retains the live publisher (in memory)
+    # core_fallback acts as fallback writer (no publisher in memory)
+    core_fallback._publishers.pop(disc_id, None)
+
+    publisher = core_live._publishers[disc_id]
+
+    t1 = time.time()
+    t2 = t1 + 10.0
+
+    # 1. Live publisher writes round 1 summary with older timestamp t1 and no score
+    publisher.on_round_summary(summary={"consensus": [{"content": "Live Consensus"}], "timestamp": t1}, round_num=1)
+
+    # 2. Simulate fallback writer updating the disk with a newer round summary (with convergence_score and timestamp t2)
+    # Read existing
+    data = json.loads(disc_json_path.read_text())
+    # Modify round 1 summary
+    for r_s in data.get("round_summaries", []):
+        if r_s.get("round") == 1:
+            r_s["convergence_score"] = 0.83
+            r_s["timestamp"] = t2
+    # Write back
+    disc_json_path.write_text(json.dumps(data, indent=2))
+
+    # 3. Live publisher triggers a write using its old in-memory state (where round 1 has t1 and no score)
+    publisher._write_discussion_json()
+
+    # 4. Verify that the newer round 1 summary with convergence_score and t2 is retained on disk
+    data = json.loads(disc_json_path.read_text())
+    round_summaries = data.get("round_summaries", [])
+    assert len(round_summaries) == 1
+    assert round_summaries[0]["round"] == 1
+    assert round_summaries[0]["convergence_score"] == 0.83
+    assert round_summaries[0]["timestamp"] == t2

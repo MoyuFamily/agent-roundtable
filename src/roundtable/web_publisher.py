@@ -542,8 +542,37 @@ class WebPublisher:
                     existing_summaries = existing.get("round_summaries", [])
                     summary_map = {s["round"]: s for s in existing_summaries if "round" in s}
                     for s in data.get("round_summaries", []):
-                        if "round" in s:
-                            summary_map[s["round"]] = s
+                        r_num = s.get("round")
+                        if r_num is not None:
+                            if r_num in summary_map:
+                                existing_s = summary_map[r_num]
+                                existing_ts = existing_s.get("timestamp", 0.0)
+                                data_ts = s.get("timestamp", 0.0)
+                                if data_ts < existing_ts:
+                                    # Existing on disk is newer; keep it.
+                                    pass
+                                elif data_ts > existing_ts:
+                                    # Live memory version is newer; use it.
+                                    summary_map[r_num] = s
+                                else:
+                                    # Timestamps are equal, resolve by completeness
+                                    ex_has_score = "convergence_score" in existing_s
+                                    new_has_score = "convergence_score" in s
+                                    if ex_has_score and not new_has_score:
+                                        # Existing has score, keep existing
+                                        pass
+                                    elif not ex_has_score and new_has_score:
+                                        summary_map[r_num] = s
+                                    else:
+                                        # Compare information quantity (consensus + disagreement items count)
+                                        ex_items = len(existing_s.get("consensus", [])) + len(
+                                            existing_s.get("disagreement", [])
+                                        )
+                                        new_items = len(s.get("consensus", [])) + len(s.get("disagreement", []))
+                                        if new_items >= ex_items:
+                                            summary_map[r_num] = s
+                            else:
+                                summary_map[r_num] = s
                     data["round_summaries"] = sorted(summary_map.values(), key=lambda s: s.get("round", 0))
                     self._round_summaries = data["round_summaries"]
 

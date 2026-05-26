@@ -521,3 +521,52 @@ def test_live_publisher_does_not_overwrite_fallback_speech(tmp_path, monkeypatch
     assert "Fallback speech" in contents
     assert "Live speech" in contents
     assert "Opening speech" in contents
+
+
+def test_stale_live_publisher_does_not_revert_fallback_conclusion(tmp_path, monkeypatch):
+    """Test that a stale live publisher update does not revert a newer conclusion written by fallback sync."""
+    db_path = tmp_path / "roundtable.db"
+    db = RoundtableDB(db_path)
+    core_live = RoundtableCore(db)
+    core_fallback = RoundtableCore(db)
+
+    web_base_dir = tmp_path / "roundtable_web"
+    web_base_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(core_live, "_get_web_dir", lambda discussion_id: web_base_dir / discussion_id)
+    monkeypatch.setattr(core_fallback, "_get_web_dir", lambda discussion_id: web_base_dir / discussion_id)
+
+    from roundtable.web_publisher import WebPublisher
+
+    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
+
+    participants = [
+        {"profile": "alice", "role": "Engineer", "display_name": "Alice"},
+        {"profile": "bob", "role": "Designer", "display_name": "Bob"},
+    ]
+    res = core_live.create_discussion("Topic", participants, web=True, max_rounds=5)
+    disc_id = res["discussion_id"]
+    disc_web_dir = web_base_dir / disc_id
+    disc_json_path = disc_web_dir / "discussion.json"
+
+    # core_live retains the live publisher (in memory)
+    # core_fallback acts as fallback writer (no publisher in memory)
+    core_fallback._publishers.pop(disc_id, None)
+
+    # 1. Live publisher ends the discussion with "旧结论"
+    # This writes conclusion="旧结论" with t1
+    core_live.end_discussion(disc_id, conclusion="旧结论")
+
+    # 2. Fallback updates conclusion to "新结论"
+    # This writes conclusion="新结论" with t2 (where t2 > t1)
+    core_fallback.end_discussion(disc_id, conclusion="新结论")
+
+    # 3. Simulate a stale live publisher write using its old in-memory state
+    # Under old logic, this would revert the disk's conclusion/final_summary to "旧结论"
+    publisher = core_live._publishers[disc_id]
+    publisher._write_discussion_json()
+
+    # Verify that the conclusion and final summary verdict remain "新结论"
+    data = json.loads(disc_json_path.read_text())
+    assert data["conclusion"] == "新结论"
+    assert data["final_summary"]["verdict"] == "新结论"

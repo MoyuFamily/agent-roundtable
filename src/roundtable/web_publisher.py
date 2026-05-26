@@ -267,20 +267,21 @@ class WebPublisher:
     ) -> None:
         """Append a final summary stream event for end-of-discussion cards.
 
-        Supports updating the final summary if the new call provides a verdict when
-        the previous one did not, or if it contains a more complete set of consensus/
-        disagreement items.
+        Supports updating the final summary if the new call provides a different
+        verdict or a more complete set of consensus/disagreement items.
         """
         if self._revoked:
             return
-        # Allow updating final summary if it is more complete or has a verdict now
+        # Allow updating final summary if verdict changed or more items are available
         if self._final_summary is not None:
             old_verdict = self._final_summary.get("verdict", "")
             old_items_count = len(self._final_summary.get("consensus", [])) + len(
                 self._final_summary.get("disagreement", [])
             )
             new_items_count = len(consensus or []) + len(disagreement or [])
-            if (old_verdict or not verdict) and old_items_count >= new_items_count:
+            verdict_changed = verdict != old_verdict
+            has_more_items = new_items_count > old_items_count
+            if not verdict_changed and not has_more_items:
                 return
 
         event: dict[str, Any] = {

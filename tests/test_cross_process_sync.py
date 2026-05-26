@@ -319,3 +319,103 @@ def test_cross_process_auto_conclude_replay_events(tmp_path, monkeypatch):
     status_events_in_jsonl = [e for e in events_in_jsonl if e.get("type") == "status_delta"]
     assert len(status_events_in_jsonl) >= 1
     assert status_events_in_jsonl[-1]["status"] == "concluded"
+
+
+def test_reconclusion_updates_verdict(tmp_path, monkeypatch):
+    """Test that re-concluding a discussion with a new conclusion updates final_summary.verdict."""
+    db_path = tmp_path / "roundtable.db"
+    db = RoundtableDB(db_path)
+    core = RoundtableCore(db)
+
+    web_base_dir = tmp_path / "roundtable_web"
+    web_base_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(core, "_get_web_dir", lambda discussion_id: web_base_dir / discussion_id)
+
+    from roundtable.web_publisher import WebPublisher
+
+    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
+
+    participants = [
+        {"profile": "alice", "role": "Engineer", "display_name": "Alice"},
+        {"profile": "bob", "role": "Designer", "display_name": "Bob"},
+    ]
+    res = core.create_discussion("Topic", participants, web=True, max_rounds=2)
+    disc_id = res["discussion_id"]
+    disc_web_dir = web_base_dir / disc_id
+    disc_json_path = disc_web_dir / "discussion.json"
+
+    # Conclude with first conclusion (publisher is alive)
+    core.end_discussion(disc_id, conclusion="旧结论")
+
+    data = json.loads(disc_json_path.read_text())
+    assert data["conclusion"] == "旧结论"
+    assert data["final_summary"]["verdict"] == "旧结论"
+
+    # Re-conclude with new conclusion text
+    core.end_discussion(disc_id, conclusion="新结论")
+
+    data = json.loads(disc_json_path.read_text())
+    assert data["conclusion"] == "新结论"
+    assert data["final_summary"]["verdict"] == "新结论"
+
+
+def test_live_publisher_round_summary_has_convergence_score(tmp_path, monkeypatch):
+    """Test that live publisher writes convergence_score in round_summaries and doesn't produce duplicate events."""
+    db_path = tmp_path / "roundtable.db"
+    db = RoundtableDB(db_path)
+    core = RoundtableCore(db)
+
+    web_base_dir = tmp_path / "roundtable_web"
+    web_base_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(core, "_get_web_dir", lambda discussion_id: web_base_dir / discussion_id)
+
+    from roundtable.web_publisher import WebPublisher
+
+    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
+
+    participants = [
+        {"profile": "alice", "role": "Engineer", "display_name": "Alice"},
+        {"profile": "bob", "role": "Designer", "display_name": "Bob"},
+    ]
+    res = core.create_discussion("Topic", participants, web=True, max_rounds=3)
+    disc_id = res["discussion_id"]
+    disc_web_dir = web_base_dir / disc_id
+    disc_json_path = disc_web_dir / "discussion.json"
+    jsonl_path = disc_web_dir / "token_stream.jsonl"
+
+    # Publisher is alive (do NOT clear _publishers)
+    core.speak(disc_id, "coordinator", "Opening")
+    core.speak(disc_id, "alice", "Round 1 alice")
+
+    # Add findings BEFORE the round-completing speak so calculate_convergence returns a real score
+    conn = core.db.connect()
+    try:
+        core.db.add_finding(conn, disc_id, "consensus", "We agree on X", 1)
+        core.db.add_finding(conn, disc_id, "disagreement", "We disagree on Y", 1)
+    finally:
+        conn.close()
+
+    core.speak(disc_id, "bob", "Round 1 bob")
+
+    # After round 1 completes, check that convergence_score is in discussion.json
+    data = json.loads(disc_json_path.read_text())
+    assert len(data["round_summaries"]) == 1
+    assert "convergence_score" in data["round_summaries"][0]
+    assert data["round_summaries"][0]["convergence_score"] is not None
+
+    # Count round_summary events for round 1 in token_stream.jsonl
+    events = [json.loads(line) for line in jsonl_path.read_text().splitlines()]
+    r1_events_before = [e for e in events if e.get("type") == "round_summary" and e.get("round") == 1]
+
+    # Speak again in round 2 — this should NOT produce a duplicate round 1 summary event
+    core.speak(disc_id, "alice", "Round 2 alice")
+
+    # Re-read and verify no duplicate round 1 summary events appeared
+    data = json.loads(disc_json_path.read_text())
+    assert "convergence_score" in data["round_summaries"][0]
+
+    events = [json.loads(line) for line in jsonl_path.read_text().splitlines()]
+    r1_events_after = [e for e in events if e.get("type") == "round_summary" and e.get("round") == 1]
+    assert len(r1_events_after) == len(r1_events_before)

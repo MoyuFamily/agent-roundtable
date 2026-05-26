@@ -623,6 +623,8 @@
       const score = summary.convergence_score;
       const hasScore = score !== undefined && score !== null;
       const scorePercent = hasScore ? Math.round(Number(score) * 100) : 0;
+      // Dynamic color class based on score
+      const scoreClass = scorePercent >= 90 ? 'complete' : scorePercent >= 60 ? 'high' : scorePercent >= 30 ? 'medium' : 'low';
       card.innerHTML = `
         <div class="viewpoints-title" onclick="this.parentElement.classList.toggle('collapsed')">
           <span>🧠 第 ${roundNum} 轮观点汇总</span>
@@ -633,9 +635,9 @@
         </div>
         ${hasScore ? `
           <div class="convergence-bar">
-            <div class="convergence-bar-fill" style="width: ${scorePercent}%">
+            <div class="convergence-bar-fill ${scoreClass}" style="width: ${scorePercent}%">
             </div>
-            <span class="convergence-label">${scorePercent}%</span>
+            <span class="convergence-label"><span class="score-value">${scorePercent}%</span> 共识度</span>
           </div>
         ` : ''}
         <div class="mode-toggle">
@@ -916,14 +918,16 @@
         });
         if (resp.ok) {
           const data = await resp.json();
-          // Build full URL from the relative share_url
-          shareLink = `${location.origin}${data.share_url}`;
+          // Use share page URL for social media previews
+          const viewerPath = data.share_url || `/r/${CONFIG.token}`;
+          const sharePath = viewerPath.replace('/r/', '/share/');
+          shareLink = `${location.origin}${sharePath}`;
         } else {
-          // Fallback: just use current URL
-          shareLink = location.href;
+          // Fallback: use share page URL
+          shareLink = `${location.origin}/share/${CONFIG.token}`;
         }
       } catch {
-        shareLink = location.href;
+        shareLink = `${location.origin}/share/${CONFIG.token}`;
       }
 
       // Update UI

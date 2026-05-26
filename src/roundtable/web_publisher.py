@@ -150,7 +150,7 @@ class WebPublisher:
             "participant": speech.get("participant", ""),
             "display_name": speech.get("display_name", ""),
             "content": speech.get("content", ""),
-            "created_at": speech.get("created_at", int(time.time())),
+            "created_at": speech.get("created_at", time.time()),
         }
         self._speeches.append(speech_payload)
         self._append_stream_event("speech_delta", {"speech": speech_payload})
@@ -178,7 +178,7 @@ class WebPublisher:
             "agent": agent,
             "avatar": avatar,
             "round": round_num,
-            "timestamp": int(time.time()),
+            "timestamp": time.time(),
         }
         if display_name is not None:
             event["display_name"] = display_name
@@ -201,7 +201,7 @@ class WebPublisher:
             "id": speech_id,
             "delta": delta,
             "seq": seq if seq is not None else self._event_seq + 1,
-            "timestamp": int(time.time()),
+            "timestamp": time.time(),
         }
         self._append_stream_event(event)
         self._write_discussion_json()
@@ -215,7 +215,7 @@ class WebPublisher:
             "type": "speech_end",
             "id": speech_id,
             "total_tokens": total_tokens,
-            "timestamp": int(time.time()),
+            "timestamp": time.time(),
         }
         self._append_stream_event(event)
         self._write_discussion_json()
@@ -238,7 +238,7 @@ class WebPublisher:
             "round": round_num if round_num is not None else source.get("round", 0),
             "consensus": consensus if consensus is not None else list(source.get("consensus", [])),
             "disagreement": disagreement if disagreement is not None else list(source.get("disagreement", [])),
-            "timestamp": source.get("timestamp", int(time.time())),
+            "timestamp": source.get("timestamp", time.time()),
         }
         if "consensus_points" in source:
             normalized["consensus_points"] = list(source.get("consensus_points", []))
@@ -267,21 +267,29 @@ class WebPublisher:
     ) -> None:
         """Append a final summary stream event for end-of-discussion cards.
 
-        Idempotent: only the first call emits the event. Subsequent calls are
-        silently ignored to prevent duplicates when multiple code paths
-        (auto-conclude, explicit end_discussion, manage_discussion) converge.
+        Supports updating the final summary if the new call provides a different
+        verdict or a more complete set of consensus/disagreement items.
         """
         if self._revoked:
             return
+        # Allow updating final summary if verdict changed or more items are available
         if self._final_summary is not None:
-            return  # already emitted — skip duplicate
+            old_verdict = self._final_summary.get("verdict", "")
+            old_items_count = len(self._final_summary.get("consensus", [])) + len(
+                self._final_summary.get("disagreement", [])
+            )
+            new_items_count = len(consensus or []) + len(disagreement or [])
+            verdict_changed = verdict != old_verdict
+            has_more_items = new_items_count > old_items_count
+            if not verdict_changed and not has_more_items:
+                return
 
         event: dict[str, Any] = {
             "type": "final_summary",
             "consensus": consensus if consensus is not None else [],
             "disagreement": disagreement if disagreement is not None else [],
             "verdict": verdict,
-            "timestamp": int(time.time()),
+            "timestamp": time.time(),
         }
         if consensus_points is not None:
             event["consensus_points"] = consensus_points
@@ -312,7 +320,7 @@ class WebPublisher:
             if self._token and self._token not in revoked:
                 revoked.append(self._token)
             data["revoked_tokens"] = revoked
-            data["updated_at"] = int(time.time())
+            data["updated_at"] = time.time()
             self._write_discussion_json_raw(data)
         logger.info("Token revoked for discussion %s", self._discussion_id)
 
@@ -443,7 +451,7 @@ class WebPublisher:
             "conclusion": self._conclusion,
             "final_summary": self._final_summary,
             "revoked_tokens": [self._token] if self._revoked else [],
-            "updated_at": int(time.time()),
+            "updated_at": time.time(),
         }
         self._write_discussion_json_raw(data)
 
@@ -484,7 +492,7 @@ class WebPublisher:
             event = {
                 "seq": self._event_seq,
                 "type": event_or_type,
-                "created_at": int(time.time()),
+                "created_at": time.time(),
                 "payload": payload or {},
             }
         self._stream_events.append(event)
@@ -504,33 +512,174 @@ class WebPublisher:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     def _write_discussion_json_raw(self, data: dict[str, Any]) -> None:
-        """Atomic write: flock → write .tmp → fsync → rename."""
+        """Atomic write: flock lock file → read/merge existing disk state → write .tmp → fsync → rename."""
         target = self._discussion_dir / "discussion.json"
+        lock_path = target.with_suffix(".json.lock")
         tmp = target.with_suffix(".json.tmp")
 
-        with open(tmp, "w") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        with open(lock_path, "a") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
             try:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                # Read existing data to merge and prevent overwriting cross-process changes
+                existing = None
+                if target.exists():
+                    try:
+                        with open(target, encoding="utf-8") as f:
+                            existing = json.load(f)
+                    except (json.JSONDecodeError, FileNotFoundError):
+                        pass
 
-        os.rename(str(tmp), str(target))
+                if existing:
+                    # 1. Merge speeches by id
+                    existing_speeches = existing.get("speeches", [])
+                    speech_map = {s["id"]: s for s in existing_speeches}
+                    for s in data.get("speeches", []):
+                        speech_map[s["id"]] = s
+                    data["speeches"] = sorted(speech_map.values(), key=lambda s: s["id"])
+                    self._speeches = data["speeches"]
+
+                    # 2. Merge round_summaries by round
+                    existing_summaries = existing.get("round_summaries", [])
+                    summary_map = {s["round"]: s for s in existing_summaries if "round" in s}
+                    for s in data.get("round_summaries", []):
+                        r_num = s.get("round")
+                        if r_num is not None:
+                            if r_num in summary_map:
+                                existing_s = summary_map[r_num]
+                                existing_ts = existing_s.get("timestamp", 0.0)
+                                data_ts = s.get("timestamp", 0.0)
+                                if data_ts < existing_ts:
+                                    # Existing on disk is newer; keep it.
+                                    pass
+                                elif data_ts > existing_ts:
+                                    # Live memory version is newer; use it.
+                                    summary_map[r_num] = s
+                                else:
+                                    # Timestamps are equal, resolve by completeness
+                                    ex_has_score = "convergence_score" in existing_s
+                                    new_has_score = "convergence_score" in s
+                                    if ex_has_score and not new_has_score:
+                                        # Existing has score, keep existing
+                                        pass
+                                    elif not ex_has_score and new_has_score:
+                                        summary_map[r_num] = s
+                                    else:
+                                        # Compare information quantity (consensus + disagreement items count)
+                                        ex_items = len(existing_s.get("consensus", [])) + len(
+                                            existing_s.get("disagreement", [])
+                                        )
+                                        new_items = len(s.get("consensus", [])) + len(s.get("disagreement", []))
+                                        if new_items > ex_items:
+                                            summary_map[r_num] = s
+                            else:
+                                summary_map[r_num] = s
+                    data["round_summaries"] = sorted(summary_map.values(), key=lambda s: s.get("round", 0))
+                    self._round_summaries = data["round_summaries"]
+
+                    # 3. Merge final_summary
+                    existing_fs = existing.get("final_summary")
+                    data_fs = data.get("final_summary")
+                    existing_ts = existing_fs.get("timestamp", 0) if existing_fs else 0
+                    data_ts = data_fs.get("timestamp", 0) if data_fs else 0
+
+                    if existing_fs and not data_fs:
+                        data["final_summary"] = existing_fs
+                        self._final_summary = existing_fs
+                    elif existing_fs and data_fs:
+                        if data_ts < existing_ts:
+                            data["final_summary"] = existing_fs
+                            self._final_summary = existing_fs
+                        elif data_ts > existing_ts:
+                            self._final_summary = data_fs
+                        else:
+                            # Equal timestamps, merge based on completeness/verdict
+                            ex_verdict = existing_fs.get("verdict", "")
+                            new_verdict = data_fs.get("verdict", "")
+                            ex_items = len(existing_fs.get("consensus", [])) + len(existing_fs.get("disagreement", []))
+                            new_items = len(data_fs.get("consensus", [])) + len(data_fs.get("disagreement", []))
+                            verdict_changed = new_verdict != ex_verdict
+                            has_more_items = new_items > ex_items
+                            if not verdict_changed and not has_more_items:
+                                data["final_summary"] = existing_fs
+                                self._final_summary = existing_fs
+                            else:
+                                self._final_summary = data_fs
+
+                    # 4. Merge status & conclusion
+                    if existing.get("status") == "concluded" and data.get("status") != "concluded":
+                        data["status"] = "concluded"
+                        self._status = "concluded"
+
+                    existing_conclusion = existing.get("conclusion")
+                    new_conclusion = data.get("conclusion")
+                    if existing_conclusion:
+                        if not new_conclusion:
+                            data["conclusion"] = existing_conclusion
+                            self._conclusion = existing_conclusion
+                        elif new_conclusion != existing_conclusion:
+                            if data_ts < existing_ts:
+                                data["conclusion"] = existing_conclusion
+                                self._conclusion = existing_conclusion
+                            else:
+                                self._conclusion = new_conclusion
+
+                    # 5. Merge root events (e.g. speech_delta, status_delta from fallback sync)
+                    existing_events = existing.get("events", [])
+                    new_events = data.get("events", [])
+                    if existing_events:
+                        seen_events = set()
+                        merged_events = []
+
+                        def get_event_sig(ev: dict[str, Any]) -> Any:
+                            ev_type = ev.get("type")
+                            if ev_type == "speech_delta":
+                                return ("speech_delta", ev.get("speech", {}).get("id"))
+                            elif ev_type == "status_delta":
+                                return ("status_delta", ev.get("status"), ev.get("conclusion"))
+                            elif ev_type == "round_summary":
+                                return ("round_summary", ev.get("round"))
+                            elif ev_type == "final_summary":
+                                return ("final_summary", ev.get("verdict"))
+                            else:
+                                return json.dumps(ev, sort_keys=True)
+
+                        for ev in existing_events + new_events:
+                            sig = get_event_sig(ev)
+                            if sig not in seen_events:
+                                seen_events.add(sig)
+                                merged_events.append(ev)
+                        data["events"] = merged_events
+
+                    # 6. Merge revoked_tokens
+                    existing_revoked = existing.get("revoked_tokens", [])
+                    new_revoked = data.get("revoked_tokens", [])
+                    merged_revoked = list(set(existing_revoked + new_revoked))
+                    data["revoked_tokens"] = merged_revoked
+                    if self._token in merged_revoked:
+                        self._revoked = True
+
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.rename(str(tmp), str(target))
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     def _read_discussion_json(self) -> dict[str, Any] | None:
-        """Read discussion.json with shared lock."""
+        """Read discussion.json with shared lock on lock file."""
         target = self._discussion_dir / "discussion.json"
         if not target.exists():
             return None
 
-        with open(target) as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+        lock_path = target.with_suffix(".json.lock")
+        with open(lock_path, "a") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_SH)
             try:
-                result: dict[str, Any] | None = json.load(f)
-                return result
-            except json.JSONDecodeError:
+                with open(target) as f:
+                    result: dict[str, Any] | None = json.load(f)
+                    return result
+            except (json.JSONDecodeError, FileNotFoundError):
                 return None
             finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)

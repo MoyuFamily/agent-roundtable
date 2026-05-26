@@ -273,8 +273,13 @@ class WebPublisher:
         """
         if self._revoked:
             return
+        # Allow updating final summary if it is more complete or has a verdict now
         if self._final_summary is not None:
-            return  # already emitted — skip duplicate
+            old_verdict = self._final_summary.get("verdict", "")
+            old_items_count = len(self._final_summary.get("consensus", [])) + len(self._final_summary.get("disagreement", []))
+            new_items_count = len(consensus or []) + len(disagreement or [])
+            if (old_verdict or not verdict) and old_items_count >= new_items_count:
+                return
 
         event: dict[str, Any] = {
             "type": "final_summary",

@@ -569,7 +569,7 @@ class WebPublisher:
                                             existing_s.get("disagreement", [])
                                         )
                                         new_items = len(s.get("consensus", [])) + len(s.get("disagreement", []))
-                                        if new_items >= ex_items:
+                                        if new_items > ex_items:
                                             summary_map[r_num] = s
                             else:
                                 summary_map[r_num] = s

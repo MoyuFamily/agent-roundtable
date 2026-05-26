@@ -633,3 +633,62 @@ def test_stale_live_publisher_does_not_overwrite_newer_round_summary(tmp_path, m
     assert round_summaries[0]["round"] == 1
     assert round_summaries[0]["convergence_score"] == 0.83
     assert round_summaries[0]["timestamp"] == t2
+
+
+def test_equal_timestamp_keeps_more_complete_round_summary(tmp_path, monkeypatch):
+    """Test that if timestamps are equal, the more complete round summary is kept."""
+    db_path = tmp_path / "roundtable.db"
+    db = RoundtableDB(db_path)
+    core_live = RoundtableCore(db)
+
+    web_base_dir = tmp_path / "roundtable_web"
+    web_base_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(core_live, "_get_web_dir", lambda discussion_id: web_base_dir / discussion_id)
+
+    from roundtable.web_publisher import WebPublisher
+
+    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
+
+    participants = [
+        {"profile": "alice", "role": "Engineer", "display_name": "Alice"},
+        {"profile": "bob", "role": "Designer", "display_name": "Bob"},
+    ]
+    res = core_live.create_discussion("Topic", participants, web=True, max_rounds=5)
+    disc_id = res["discussion_id"]
+    disc_web_dir = web_base_dir / disc_id
+    disc_json_path = disc_web_dir / "discussion.json"
+
+    publisher = core_live._publishers[disc_id]
+
+    timestamp = 1234.5
+
+    # 1. Live publisher writes a less complete round summary
+    publisher.on_round_summary(
+        summary={
+            "timestamp": timestamp,
+            "convergence_score": 0.83,
+            "consensus": [{"content": "A"}],
+        },
+        round_num=1,
+    )
+
+    # 2. Simulate disk having a more complete round summary with the same timestamp
+    data = json.loads(disc_json_path.read_text())
+    data["round_summaries"][0] = {
+        "type": "round_summary",
+        "round": 1,
+        "timestamp": timestamp,
+        "convergence_score": 0.83,
+        "consensus": [{"content": "A"}, {"content": "B"}],
+        "disagreement": [],
+    }
+    disc_json_path.write_text(json.dumps(data, indent=2))
+
+    # 3. Stale live publisher triggers a write using its less complete in-memory version
+    publisher._write_discussion_json()
+
+    # 4. Verify that the more complete version (with 2 consensus items) is kept on disk
+    data = json.loads(disc_json_path.read_text())
+    assert len(data["round_summaries"]) == 1
+    assert len(data["round_summaries"][0]["consensus"]) == 2

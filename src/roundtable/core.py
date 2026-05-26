@@ -939,7 +939,23 @@ class RoundtableCore:
 
             # Append speech
             data.setdefault("speeches", []).append(speech_data)
-            data["updated_at"] = int(time.time())
+            # Also append replay event for cross-process replay
+            now = int(time.time())
+            data.setdefault("events", []).append({
+                "type": "speech_delta",
+                "speech": speech_data,
+                "timestamp": now,
+            })
+            data["updated_at"] = now
+
+            # Write to token_stream.jsonl for replay
+            jsonl_path = web_dir / "token_stream.jsonl"
+            try:
+                with open(jsonl_path, "a") as jf:
+                    json.dump({"type": "speech_delta", "speech": speech_data, "timestamp": now}, jf, ensure_ascii=False)
+                    jf.write("\n")
+            except Exception:
+                logger.debug("Failed to append to token_stream.jsonl for %s", discussion_id)
 
             # Write back with exclusive lock
             tmp = json_path.with_suffix(".json.tmp")
@@ -975,7 +991,24 @@ class RoundtableCore:
 
             data["conclusion"] = conclusion
             data["status"] = "concluded"
-            data["updated_at"] = int(time.time())
+            # Also append concluded event for cross-process replay
+            now = int(time.time())
+            data.setdefault("events", []).append({
+                "type": "status_delta",
+                "status": "concluded",
+                "conclusion": conclusion,
+                "timestamp": now,
+            })
+            data["updated_at"] = now
+
+            # Write to token_stream.jsonl for replay
+            jsonl_path = web_dir / "token_stream.jsonl"
+            try:
+                with open(jsonl_path, "a") as jf:
+                    json.dump({"type": "status_delta", "status": "concluded", "conclusion": conclusion, "timestamp": now}, jf, ensure_ascii=False)
+                    jf.write("\n")
+            except Exception:
+                logger.debug("Failed to append concluded to token_stream.jsonl for %s", discussion_id)
 
             tmp = json_path.with_suffix(".json.tmp")
             with open(tmp, "w") as f:

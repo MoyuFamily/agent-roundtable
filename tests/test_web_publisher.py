@@ -285,6 +285,96 @@ class TestWebPublisherLifecycle:
         assert data["status"] == "concluded"
         assert data["conclusion"] == "We agreed on X."
 
+    def test_streaming_speech_events_are_written_to_token_stream(self, tmp_path):
+        pub = WebPublisher(str(tmp_path), port=19021)
+        with patch.object(pub, "_start_pm2"):
+            pub.start("rt_stream", topic="Streaming")
+
+        pub.on_speech_start("s_1", agent="alice", avatar="🤖", round_num=1)
+        pub.on_speech_token("s_1", delta="我", seq=0)
+        pub.on_speech_token("s_1", delta="认为", seq=1)
+        pub.on_speech_end("s_1", total_tokens=2)
+
+        stream_path = tmp_path / "token_stream.jsonl"
+        assert stream_path.exists()
+        events = [json.loads(line) for line in stream_path.read_text().splitlines()]
+        assert [event["type"] for event in events] == [
+            "speech_start",
+            "speech_token",
+            "speech_token",
+            "speech_end",
+        ]
+        assert events[0] == {
+            "type": "speech_start",
+            "id": "s_1",
+            "agent": "alice",
+            "avatar": "🤖",
+            "round": 1,
+            "timestamp": events[0]["timestamp"],
+        }
+        assert events[1]["delta"] == "我"
+        assert events[1]["seq"] == 0
+        assert events[3]["total_tokens"] == 2
+
+    def test_streaming_events_after_revoke_are_noop(self, tmp_path):
+        pub = WebPublisher(str(tmp_path), port=19022)
+        with patch.object(pub, "_start_pm2"):
+            pub.start("rt_stream_revoke", topic="Streaming")
+
+        pub.revoke()
+        pub.on_speech_start("s_1", agent="alice", avatar="🤖", round_num=1)
+        pub.on_speech_token("s_1", delta="ignored", seq=0)
+        pub.on_speech_end("s_1")
+
+        assert not (tmp_path / "token_stream.jsonl").exists()
+
+    def test_round_summary_updates_json_and_stream(self, tmp_path):
+        pub = WebPublisher(str(tmp_path), port=19023)
+        with patch.object(pub, "_start_pm2"):
+            pub.start("rt_summary", topic="Summary")
+
+        consensus = [{"content": "Use FastAPI", "supporters": ["Alice", "Bob"]}]
+        disagreement = [{"content": "Migration timing", "supporters": ["Alice"], "opponents": ["Bob"]}]
+        pub.on_round_summary(round_num=1, consensus=consensus, disagreement=disagreement)
+
+        data = pub._read_discussion_json()
+        assert data["round_summaries"] == [
+            {
+                "type": "round_summary",
+                "round": 1,
+                "consensus": consensus,
+                "disagreement": disagreement,
+                "timestamp": data["round_summaries"][0]["timestamp"],
+            }
+        ]
+
+        events = [json.loads(line) for line in (tmp_path / "token_stream.jsonl").read_text().splitlines()]
+        assert events[-1]["type"] == "round_summary"
+        assert events[-1]["round"] == 1
+        assert events[-1]["consensus"] == consensus
+
+    def test_final_summary_updates_json_and_stream(self, tmp_path):
+        pub = WebPublisher(str(tmp_path), port=19024)
+        with patch.object(pub, "_start_pm2"):
+            pub.start("rt_final_summary", topic="Summary")
+
+        consensus = [{"content": "Ship Sprint 1", "supporters": ["Alice"]}]
+        disagreement = []
+        pub.on_final_summary(consensus=consensus, disagreement=disagreement, verdict="Ship it")
+
+        data = pub._read_discussion_json()
+        assert data["final_summary"] == {
+            "type": "final_summary",
+            "consensus": consensus,
+            "disagreement": disagreement,
+            "verdict": "Ship it",
+            "timestamp": data["final_summary"]["timestamp"],
+        }
+
+        events = [json.loads(line) for line in (tmp_path / "token_stream.jsonl").read_text().splitlines()]
+        assert events[-1]["type"] == "final_summary"
+        assert events[-1]["verdict"] == "Ship it"
+
     def test_revoke_marks_token(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19008)
         with patch.object(pub, "_start_pm2"):

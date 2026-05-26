@@ -226,6 +226,77 @@
       font-weight: 600;
     }
 
+    .speech-card.streaming {
+      border-left-color: var(--rt-brand);
+      box-shadow: 0 0 14px var(--rt-brand-glow), var(--rt-shadow-sm);
+    }
+    .speech-card.streaming .stream-cursor::after {
+      content: "▍";
+      color: var(--rt-brand-light);
+      animation: blink 1s ease-in-out infinite;
+      margin-left: 2px;
+    }
+    .viewpoints-card {
+      background: linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(30, 41, 59, 0.35));
+      border: 1px solid var(--rt-border-light);
+      border-radius: var(--rt-radius-lg);
+      padding: var(--rt-space-4);
+      margin: var(--rt-space-3) 0 var(--rt-space-4);
+      box-shadow: var(--rt-shadow-sm);
+      animation: fadeSlideIn 0.35s ease-out;
+    }
+    .viewpoints-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--rt-space-2);
+      margin-bottom: var(--rt-space-3);
+      color: var(--rt-text-primary);
+      font-weight: 700;
+      font-size: var(--rt-font-size-sm);
+    }
+    .viewpoints-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: var(--rt-space-3);
+    }
+    @media (min-width: 720px) {
+      .viewpoints-grid { grid-template-columns: 1fr 1fr; }
+    }
+    .viewpoints-column {
+      background: rgba(15, 23, 42, 0.35);
+      border: 1px solid var(--rt-border);
+      border-radius: var(--rt-radius-md);
+      padding: var(--rt-space-3);
+    }
+    .viewpoints-column h4 {
+      margin-bottom: var(--rt-space-2);
+      font-size: var(--rt-font-size-xs);
+      letter-spacing: 0.08em;
+      color: var(--rt-text-secondary);
+    }
+    .viewpoints-column ul {
+      display: flex;
+      flex-direction: column;
+      gap: var(--rt-space-2);
+      list-style: none;
+    }
+    .viewpoint-item {
+      color: var(--rt-text-secondary);
+      font-size: var(--rt-font-size-sm);
+      line-height: 1.55;
+      padding-left: var(--rt-space-3);
+      border-left: 2px solid var(--rt-border-light);
+    }
+    .viewpoint-item.consensus { border-left-color: var(--rt-success); }
+    .viewpoint-item.disagreement { border-left-color: var(--rt-warning); }
+    .viewpoint-supporters {
+      display: block;
+      margin-top: 2px;
+      color: var(--rt-text-muted);
+      font-size: var(--rt-font-size-xs);
+    }
+
     /* Status badge in header */
     .status-badge {
       display: inline-flex;
@@ -851,6 +922,9 @@
       conclusion: null,
       currentRound: 0,
       speechIdSet: new Set(),
+      roundSummaries: [],
+      roundSummarySet: new Set(),
+      streamSpeechMap: new Map(),
     };
 
     // DOM refs
@@ -889,6 +963,11 @@
         eventSource.addEventListener('update', (e) => {
           const data = JSON.parse(e.data);
           handleData(data);
+        });
+
+        eventSource.addEventListener('delta', (e) => {
+          const data = JSON.parse(e.data);
+          handleDelta(data);
         });
 
         eventSource.addEventListener('revoked', () => {
@@ -935,6 +1014,45 @@
     }
 
     // ---- Data handling ----
+    function handleDelta(data) {
+      const events = Array.isArray(data?.events) ? data.events : [];
+      for (const eventData of events) {
+        applyStreamEvent(eventData);
+      }
+      if (events.length > 0) {
+        $waitingState.classList.add('hidden');
+        $activeState.classList.remove('hidden');
+      }
+    }
+
+    function applyStreamEvent(eventData) {
+      if (!eventData || !eventData.type) return;
+      if (eventData.type === 'speech_start') {
+        renderStreamingSpeechStart(eventData);
+      } else if (eventData.type === 'speech_token') {
+        appendStreamingSpeechToken(eventData);
+      } else if (eventData.type === 'speech_end') {
+        markStreamingSpeechEnd(eventData);
+      } else if (eventData.type === 'speech_delta') {
+        const speech = eventData.speech || eventData.payload?.speech;
+        if (speech) mergeSpeech(speech, true);
+      } else if (eventData.type === 'status_delta') {
+        if (eventData.status || eventData.payload?.status) {
+          state.status = eventData.status || eventData.payload.status;
+          updateStatusUI();
+        }
+        const conclusion = eventData.conclusion || eventData.payload?.conclusion;
+        if (conclusion && !state.conclusion) {
+          state.conclusion = conclusion;
+          renderConclusion(conclusion);
+        }
+      } else if (eventData.type === 'round_summary') {
+        renderRoundSummary(eventData);
+      } else if (eventData.type === 'final_summary') {
+        renderFinalSummary(eventData);
+      }
+    }
+
     function handleData(data) {
       if (data.status === 'revoked' || (data.revoked_tokens && data.revoked_tokens.includes(CONFIG.token))) {
         showRevoked();
@@ -957,11 +1075,8 @@
       // Update speeches
       if (data.speeches) {
         const isInitialLoad = state.speeches.length === 0;
-        const newSpeeches = data.speeches.filter(s => !state.speechIdSet.has(s.id));
-        for (const s of newSpeeches) {
-          state.speechIdSet.add(s.id);
-          state.speeches.push(s);
-          renderSpeech(s, !isInitialLoad);
+        for (const speech of data.speeches) {
+          mergeSpeech(speech, !isInitialLoad);
         }
 
         // If it was the initial load, collapse older rounds
@@ -993,8 +1108,19 @@
         renderConclusion(data.conclusion);
       }
 
-      // Show active state if we have speeches
-      if (state.speeches.length > 0 && state.status !== 'waiting') {
+      // Round summaries / viewpoint cards
+      if (Array.isArray(data.round_summaries)) {
+        for (const summary of data.round_summaries) {
+          renderRoundSummary(summary);
+        }
+      }
+
+      if (data.final_summary) {
+        renderFinalSummary(data.final_summary);
+      }
+
+      // Show active state if we have speeches or viewpoint cards
+      if ((state.speeches.length > 0 || state.roundSummaries.length > 0) && state.status !== 'waiting') {
         $waitingState.classList.add('hidden');
         $activeState.classList.remove('hidden');
       }
@@ -1090,6 +1216,166 @@
           ${p.role ? `<span class="text-xs" style="color:var(--rt-text-muted)">${escapeHtml(p.role)}</span>` : ''}
         </div>
       `).join('');
+    }
+
+    function participantMeta(agent) {
+      const participantObj = state.participants.find(p => p.profile === agent || p.participant === agent);
+      return {
+        name: participantObj?.display_name || agent || 'Agent',
+        role: participantObj?.role || '',
+        roleType: agent === 'coordinator' ? 'coordinator' : getRoleType(participantObj?.role || ''),
+      };
+    }
+
+    function updateRoundCount(roundNum) {
+      const body = document.getElementById(`round-body-${roundNum}`);
+      const countEl = document.getElementById(`round-count-${roundNum}`);
+      if (body && countEl) {
+        const count = body.querySelectorAll('.speech-card').length;
+        countEl.textContent = `${count} 条发言`;
+      }
+    }
+
+    function renderStreamingSpeechStart(eventData) {
+      const id = eventData.id;
+      if (!id || state.streamSpeechMap.has(id)) return;
+      const agent = eventData.agent || eventData.participant || '';
+      const meta = participantMeta(agent);
+      const roundNum = Number(eventData.round || 0);
+      const div = document.createElement('div');
+      div.className = `speech-card role-${meta.roleType} new highlight streaming`;
+      div.id = `speech-${id}`;
+
+      const initial = escapeHtml((meta.name || agent || '?')[0]);
+      const speakerName = escapeHtml(meta.name);
+      const safeRoleName = escapeHtml(meta.role);
+      const round = roundNum > 0 ? `<span class="round-badge" style="background: var(--rt-role-${meta.roleType}-bg); color: var(--rt-role-${meta.roleType})">R${roundNum}</span>` : '';
+      div.innerHTML = `
+        <div class="flex items-start gap-3">
+          <div class="avatar" style="background: var(--rt-role-${meta.roleType}); color: var(--rt-text-inverse); box-shadow: 0 0 8px var(--rt-role-${meta.roleType}-bg)">${initial}</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="font-semibold text-sm" style="color:var(--rt-text-primary)">${speakerName}</span>
+              ${meta.role ? `<span class="text-xs px-2 py-0.5 rounded-full font-medium" style="background: var(--rt-role-${meta.roleType}-bg); color: var(--rt-role-${meta.roleType})">${safeRoleName}</span>` : ''}
+              ${round}
+              <span class="text-xs ml-auto" style="color:var(--rt-text-muted)">${formatTime(eventData.timestamp)}</span>
+            </div>
+            <div class="text-sm leading-relaxed markdown-content stream-content stream-cursor" style="color:var(--rt-text-secondary)"></div>
+          </div>
+        </div>
+      `;
+      getOrCreateRoundSection(roundNum, true);
+      const body = document.getElementById(`round-body-${roundNum}`);
+      body.appendChild(div);
+      state.streamSpeechMap.set(id, { el: div, content: '', round: roundNum });
+      updateRoundCount(roundNum);
+      setTimeout(() => div.classList.remove('highlight'), 2000);
+      div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+
+    function appendStreamingSpeechToken(eventData) {
+      const id = eventData.id;
+      let entry = state.streamSpeechMap.get(id);
+      if (!entry) {
+        renderStreamingSpeechStart({ id, agent: eventData.agent || 'agent', round: eventData.round || state.currentRound || 0, timestamp: eventData.timestamp });
+        entry = state.streamSpeechMap.get(id);
+      }
+      if (!entry) return;
+      entry.content += eventData.delta || '';
+      const contentEl = entry.el.querySelector('.stream-content');
+      if (contentEl) contentEl.innerHTML = renderMarkdown(entry.content);
+    }
+
+    function markStreamingSpeechEnd(eventData) {
+      const entry = state.streamSpeechMap.get(eventData.id);
+      if (!entry) return;
+      entry.el.classList.remove('streaming');
+      const contentEl = entry.el.querySelector('.stream-content');
+      if (contentEl) contentEl.classList.remove('stream-cursor');
+    }
+
+    function normalizeViewpointItems(items) {
+      if (!Array.isArray(items)) return [];
+      return items.map(item => typeof item === 'string' ? { content: item } : item).filter(Boolean);
+    }
+
+    function renderViewpointList(items, type) {
+      const normalized = normalizeViewpointItems(items);
+      if (normalized.length === 0) return '<li class="viewpoint-item">暂无</li>';
+      return normalized.map(item => {
+        const content = escapeHtml(item.content || item.text || item.title || String(item));
+        const supporters = Array.isArray(item.supporters) && item.supporters.length > 0
+          ? `<span class="viewpoint-supporters">支持：${escapeHtml(item.supporters.join('、'))}</span>`
+          : '';
+        return `<li class="viewpoint-item ${type}">${content}${supporters}</li>`;
+      }).join('');
+    }
+
+    function renderRoundSummary(summary) {
+      const roundNum = Number(summary.round || 0);
+      const key = `round-${roundNum}`;
+      state.roundSummarySet.add(key);
+      state.roundSummaries = state.roundSummaries.filter(item => Number(item.round || 0) !== roundNum).concat(summary);
+      getOrCreateRoundSection(roundNum, false);
+      const body = document.getElementById(`round-body-${roundNum}`);
+      let card = document.getElementById(`viewpoints-${key}`);
+      if (!card) {
+        card = document.createElement('div');
+        card.id = `viewpoints-${key}`;
+        card.className = 'viewpoints-card';
+        body.appendChild(card);
+      }
+      const consensus = summary.consensus || summary.consensus_points || [];
+      const disagreement = summary.disagreement || summary.disagreement_points || [];
+      card.innerHTML = `
+        <div class="viewpoints-title">
+          <span>🧠 第 ${roundNum} 轮观点汇总</span>
+          ${summary.convergence_score !== undefined ? `<span class="round-badge-count">收敛度 ${escapeHtml(summary.convergence_score)}</span>` : ''}
+        </div>
+        <div class="viewpoints-grid">
+          <div class="viewpoints-column">
+            <h4>✅ 共识观点</h4>
+            <ul>${renderViewpointList(consensus, 'consensus')}</ul>
+          </div>
+          <div class="viewpoints-column">
+            <h4>⚡ 分歧观点</h4>
+            <ul>${renderViewpointList(disagreement, 'disagreement')}</ul>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderFinalSummary(summary) {
+      if (!summary) return;
+      const consensus = summary.consensus || summary.consensus_points || [];
+      const disagreement = summary.disagreement || summary.disagreement_points || [];
+      const verdict = summary.verdict ? `<div class="markdown-content mt-3">${renderMarkdown(summary.verdict)}</div>` : '';
+      $conclusionContent.innerHTML = `
+        <div class="viewpoints-grid">
+          <div class="viewpoints-column">
+            <h4>✅ 最终共识</h4>
+            <ul>${renderViewpointList(consensus, 'consensus')}</ul>
+          </div>
+          <div class="viewpoints-column">
+            <h4>⚡ 保留分歧</h4>
+            <ul>${renderViewpointList(disagreement, 'disagreement')}</ul>
+          </div>
+        </div>
+        ${verdict}
+      `;
+      $conclusionCard.classList.remove('hidden');
+    }
+
+    function mergeSpeech(speech, isNew = false) {
+      if (!speech || speech.id === undefined || state.speechIdSet.has(speech.id)) return;
+      state.speechIdSet.add(speech.id);
+      state.speeches.push(speech);
+      const streaming = state.streamSpeechMap.get(speech.id);
+      if (streaming) {
+        streaming.el.remove();
+        state.streamSpeechMap.delete(speech.id);
+      }
+      renderSpeech(speech, isNew);
     }
 
     function renderSpeech(speech, isNew = false) {

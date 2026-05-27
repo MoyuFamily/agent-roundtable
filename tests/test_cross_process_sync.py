@@ -433,6 +433,7 @@ def test_concurrent_speeches_are_all_preserved_in_json(tmp_path, monkeypatch):
     web_base_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(core, "_get_web_dir", lambda discussion_id: web_base_dir / discussion_id)
 
+    # Patch WebPublisher to avoid PM2
     from roundtable.web_publisher import WebPublisher
 
     monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)

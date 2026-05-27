@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 try:
-    from nanoid import generate as _nanoid_generate
+    from nanoid import generate as _nanoid_generate  # type: ignore[import-untyped]
 
     def _generate_token(size: int = 21) -> str:
         return str(_nanoid_generate(size=size))
@@ -417,7 +417,7 @@ class WebPublisher:
 
         # Hash password with bcrypt and pass to server
         if self._password:
-            import bcrypt
+            import bcrypt  # type: ignore[import-not-found]
 
             pw_hash = bcrypt.hashpw(self._password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
             cmd.extend(["--password-hash", pw_hash])

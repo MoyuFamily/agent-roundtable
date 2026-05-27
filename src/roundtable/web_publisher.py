@@ -418,6 +418,7 @@ class WebPublisher:
         # Hash password with bcrypt and pass to server
         if self._password:
             import bcrypt
+
             pw_hash = bcrypt.hashpw(self._password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
             cmd.extend(["--password-hash", pw_hash])
 

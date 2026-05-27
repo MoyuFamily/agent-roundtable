@@ -253,10 +253,12 @@ def format_slack_blocks(
         ]
         prev_summary = kwargs.get("prev_summary", "")
         if prev_summary:
-            blocks.append({
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*上轮回顾:*\n{prev_summary[:200]}"},
-            })
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"*上轮回顾:*\n{prev_summary[:200]}"},
+                }
+            )
         return blocks
 
     if event == "speech":
@@ -288,10 +290,12 @@ def format_slack_blocks(
         ]
         if key_points:
             pts = "\n".join(f"• {p[:80]}" for p in key_points[:5])
-            blocks_r.append({
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*本轮关键观点:*\n{pts}"},
-            })
+            blocks_r.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"*本轮关键观点:*\n{pts}"},
+                }
+            )
         return blocks_r
 
     if event == "concluded":
@@ -308,16 +312,20 @@ def format_slack_blocks(
             },
         ]
         if conclusion:
-            blocks_c.append({
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*结论:*\n{conclusion[:300]}"},
-            })
+            blocks_c.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"*结论:*\n{conclusion[:300]}"},
+                }
+            )
         if consensus:
             pts = "\n".join(f"✅ {p[:80]}" for p in consensus[:5])
-            blocks_c.append({
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*共识点({len(consensus)}):*\n{pts}"},
-            })
+            blocks_c.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"*共识点({len(consensus)}):*\n{pts}"},
+                }
+            )
         return blocks_c
 
     return None

@@ -151,9 +151,12 @@ def pw_server(tmp_path):
 
     # Pre-computed bcrypt hash of "testpassword123"
     import subprocess as sp
+
     result = sp.run(
         ["node", "-e", "import('bcryptjs').then(b => b.hash('testpassword123', 10).then(h => console.log(h)))"],
-        capture_output=True, text=True, timeout=10,
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
     pw_hash = result.stdout.strip()
     if not pw_hash:
@@ -162,10 +165,14 @@ def pw_server(tmp_path):
     port = _find_free_port()
     proc = subprocess.Popen(
         [
-            "node", str(SERVER_SCRIPT),
-            "--port", str(port),
-            "--discussion-dir", str(tmp_path),
-            "--password-hash", pw_hash,
+            "node",
+            str(SERVER_SCRIPT),
+            "--port",
+            str(port),
+            "--discussion-dir",
+            str(tmp_path),
+            "--password-hash",
+            pw_hash,
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

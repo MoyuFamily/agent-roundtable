@@ -185,7 +185,6 @@ class Notifier:
 
         return None
 
-
     def _dispatch_webhooks(self, **kwargs: Any) -> None:
         """Send formatted webhook payloads to Discord / Slack."""
         from roundtable.webhook import (

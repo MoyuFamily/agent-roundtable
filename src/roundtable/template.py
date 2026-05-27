@@ -25,11 +25,13 @@ def list_templates() -> list[dict[str, Any]]:
     for p in sorted(_TEMPLATE_DIR.glob("*.json")):
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
-            templates.append({
-                "id": p.stem,
-                "name": data.get("name", p.stem),
-                "description": data.get("description", ""),
-            })
+            templates.append(
+                {
+                    "id": p.stem,
+                    "name": data.get("name", p.stem),
+                    "description": data.get("description", ""),
+                }
+            )
         except Exception as exc:
             logger.warning("Failed to load template %s: %s", p, exc)
     return templates

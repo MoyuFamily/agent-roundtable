@@ -21,6 +21,27 @@ import requests
 SERVER_SCRIPT = Path(__file__).resolve().parent.parent / "src" / "roundtable" / "web" / "server.mjs"
 
 
+def _can_generate_pdf() -> bool:
+    """Check if md-to-pdf can generate a PDF (needs Chromium/Puppeteer)."""
+    import os
+    import shutil
+
+    if not shutil.which("npx"):
+        return False
+    # Fast check: Chromium-based browsers (md-to-pdf uses Puppeteer)
+    for name in ("chromium", "chromium-browser", "google-chrome", "chrome"):
+        if shutil.which(name):
+            return True
+    # Check Puppeteer's bundled Chromium
+    if os.environ.get("PUPPETEER_EXECUTABLE_PATH"):
+        return True
+    # macOS: check /Applications
+    return os.path.exists("/Applications/Google Chrome.app")
+
+
+_has_pdf_support = _can_generate_pdf()
+
+
 def _find_free_port() -> int:
     """Find a free TCP port."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -370,6 +391,7 @@ class TestExportMarkdown:
 
 
 class TestExportPDF:
+    @pytest.mark.skipif(not _has_pdf_support, reason="md-to-pdf not available (needs Chromium)")
     def test_export_pdf_success(self, server):
         base, _, _ = server
         resp = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=90)
@@ -379,6 +401,7 @@ class TestExportPDF:
         # PDF should start with %PDF
         assert resp.content[:4] == b"%PDF"
 
+    @pytest.mark.skipif(not _has_pdf_support, reason="md-to-pdf not available (needs Chromium)")
     def test_export_pdf_filename(self, server):
         base, _, _ = server
         resp = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=90)

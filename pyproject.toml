@@ -34,8 +34,8 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-# Zero external dependencies — only stdlib
-dependencies = []
+# Minimal dependencies — bcrypt for password hashing
+dependencies = ["bcrypt>=4.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/MoyuFamily/agent-roundtable"

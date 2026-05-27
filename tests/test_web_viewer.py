@@ -10,14 +10,13 @@ Tests cover:
 from __future__ import annotations
 
 import json
+import socket
 import subprocess
 import time
-import socket
 from pathlib import Path
 
 import pytest
 import requests
-
 
 SERVER_SCRIPT = Path(__file__).resolve().parent.parent / "src" / "roundtable" / "web" / "server.mjs"
 
@@ -196,7 +195,7 @@ def pw_server(tmp_path):
 
 class TestServerLifecycle:
     def test_server_starts(self, server):
-        base, port, _ = server
+        base, _port, _ = server
         resp = requests.get(f"{base}/api/test_token_abc123/data", timeout=5)
         assert resp.status_code == 200
 

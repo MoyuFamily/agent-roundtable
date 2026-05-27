@@ -29,7 +29,7 @@ from roundtable.exceptions import (
 )
 from roundtable.models import ConvergenceRecord, Discussion, Participant, Speech
 from roundtable.notify import Notifier
-from roundtable.template import get_template, list_templates
+from roundtable.template import get_template
 
 logger = logging.getLogger(__name__)
 

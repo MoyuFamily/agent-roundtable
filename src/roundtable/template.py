@@ -44,7 +44,8 @@ def get_template(template_id: str) -> dict[str, Any] | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        result: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return result
     except Exception as exc:
         logger.warning("Failed to load template %s: %s", path, exc)
         return None

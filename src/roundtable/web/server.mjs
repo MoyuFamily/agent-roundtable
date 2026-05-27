@@ -40,7 +40,7 @@ function parseArgs() {
 
 const { port, discussionDir, passwordHash } = parseArgs();
 const DISCUSSION_PATH = resolve(discussionDir, "discussion.json");
-const TOKEN_STREAM_PATH=resolv...Dir, "token_stream.jsonl");
+const TOKEN_STREAM_PATH = resolve(discussionDir, "token_stream.jsonl");
 const REVOKED_PATH = resolve(discussionDir, ".revoked_tokens");
 const WEB_DIR = new URL(".", import.meta.url).pathname;
 
@@ -205,16 +205,6 @@ function sendExpired(res) {
 
 function send404(res) {
   sendJSON(res, { error: "Not found" }, 404);
-}
-
-function escapeHtmlAttr(str) {
-  if (typeof str !== "string") return "";
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/'/g, "&#39;");
 }
 
 // ---------------------------------------------------------------------------

@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 try:
-    from nanoid import generate as _nanoid_generate  # type: ignore[import-untyped]
+    from nanoid import generate as _nanoid_generate
 
     def _generate_token(size: int = 21) -> str:
         return str(_nanoid_generate(size=size))

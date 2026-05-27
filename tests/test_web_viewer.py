@@ -22,21 +22,17 @@ SERVER_SCRIPT = Path(__file__).resolve().parent.parent / "src" / "roundtable" / 
 
 
 def _can_generate_pdf() -> bool:
-    """Check if md-to-pdf can generate a PDF (needs Chromium/Puppeteer)."""
+    """Check if md-to-pdf can generate a PDF (needs Chromium/Puppeteer).
+
+    CI runners have Chrome installed but Puppeteer's bundled Chromium
+    often fails due to missing system libs / sandbox.  Skip there.
+    """
     import os
     import shutil
 
-    if not shutil.which("npx"):
+    if os.environ.get("CI"):
         return False
-    # Fast check: Chromium-based browsers (md-to-pdf uses Puppeteer)
-    for name in ("chromium", "chromium-browser", "google-chrome", "chrome"):
-        if shutil.which(name):
-            return True
-    # Check Puppeteer's bundled Chromium
-    if os.environ.get("PUPPETEER_EXECUTABLE_PATH"):
-        return True
-    # macOS: check /Applications
-    return os.path.exists("/Applications/Google Chrome.app")
+    return shutil.which("npx") is not None
 
 
 _has_pdf_support = _can_generate_pdf()

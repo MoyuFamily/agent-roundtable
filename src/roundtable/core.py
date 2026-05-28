@@ -947,7 +947,9 @@ class RoundtableCore:
 
     def _get_web_dir(self, discussion_id: str) -> Path:
         """Get the directory where web viewer files are stored."""
-        return Path("/tmp") / "roundtable_web" / discussion_id
+        from roundtable.web_publisher import SHARED_DATA_DIR
+
+        return SHARED_DATA_DIR / discussion_id
 
     def _append_token_stream_jsonl_fallback(self, web_dir: Path, event: dict[str, Any]) -> None:
         """Safely append an event to token_stream.jsonl under exclusive lock."""

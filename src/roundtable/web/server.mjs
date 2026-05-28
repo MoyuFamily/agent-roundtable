@@ -1,27 +1,31 @@
 #!/usr/bin/env node
 /**
- * Express server for Roundtable Web Viewer.
+ * Shared Express server for Roundtable Web Viewer.
  *
- * Zero extra npm dependencies beyond express itself.
- * Reads discussion.json via fs.watch + shared file lock (fcntl advisory).
- * Supports SSE (primary) and long-polling (WeChat fallback).
+ * One process serves every discussion under --data-dir/<id>/discussion.json,
+ * keyed by per-discussion token. Express discovers existing discussions on
+ * startup, and watches the data-dir for new subdirectories.
  *
  * CLI usage:
- *   node server.mjs --port 8199 --discussion-dir /path/to/output/rt_abc123
- *
- * PM2 usage:
- *   pm2 start server.mjs --name roundtable-web-rt_xxx --interpreter node \
- *     -- --port 8199 --discussion-dir /path/to/output/rt_abc123
+ *   node server.mjs --port 8199 --data-dir /tmp/roundtable_web
  */
 
 import { createServer } from "node:http";
-import { readFileSync, watch, existsSync, writeFileSync, renameSync, createReadStream } from "node:fs";
+import {
+  readFileSync,
+  watch,
+  existsSync,
+  writeFileSync,
+  renameSync,
+  createReadStream,
+  readdirSync,
+  mkdirSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import * as readline from "node:readline";
 import { join, resolve, dirname, basename } from "node:path";
-import { createRequire } from "node:module";
-import { createHmac } from "node:crypto";
-
-const require = createRequire(import.meta.url);
+import { createHmac, randomBytes } from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // CLI args
@@ -29,112 +33,190 @@ const require = createRequire(import.meta.url);
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const opts = { port: 8199, discussionDir: ".", passwordHash: "" };
+  const opts = { port: 8199, dataDir: "" };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port" && args[i + 1]) opts.port = parseInt(args[++i], 10);
-    if (args[i] === "--discussion-dir" && args[i + 1]) opts.discussionDir = args[++i];
-    if (args[i] === "--password-hash" && args[i + 1]) opts.passwordHash = args[++i];
+    if (args[i] === "--data-dir" && args[i + 1]) opts.dataDir = args[++i];
+  }
+  if (!opts.dataDir) {
+    console.error("[Roundtable Web] --data-dir is required");
+    process.exit(1);
   }
   return opts;
 }
 
-const { port, discussionDir, passwordHash } = parseArgs();
-const DISCUSSION_PATH = resolve(discussionDir, "discussion.json");
-const TOKEN_STREAM_PATH = resolve(discussionDir, "token_stream.jsonl");
-const REVOKED_PATH = resolve(discussionDir, ".revoked_tokens");
+const { port, dataDir: dataDirArg } = parseArgs();
+const DATA_DIR = resolve(dataDirArg);
 const WEB_DIR = new URL(".", import.meta.url).pathname;
+const SERVER_SECRET = randomBytes(32);
 
 // ---------------------------------------------------------------------------
-// Minimal Express (no npm: use built-in node:http + manual routing)
+// Discussion registry
 // ---------------------------------------------------------------------------
 
-// We bundle express as a local dependency. If not available, fall back to
-// a minimal built-in HTTP router.
-let app;
+/**
+ * @typedef {{
+ *   discussionId: string,
+ *   dir: string,
+ *   discussionPath: string,
+ *   tokenStreamPath: string,
+ *   passwordHash: string | null,
+ *   expiresAt: number | null,
+ *   revokedTokens: Set<string>,
+ *   token: string,
+ * }} DiscussionEntry
+ */
 
-async function loadExpress() {
+/** @type {Map<string, DiscussionEntry>} */
+const byToken = new Map();
+/** @type {Map<string, DiscussionEntry>} */
+const byDiscussionId = new Map();
+/** @type {Map<string, import("fs").FSWatcher>} */
+const subdirWatchers = new Map();
+
+function safeReadJSON(path) {
   try {
-    const express = (await import("express")).default;
-    app = express();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Minimal built-in router (fallback if express not installed)
-// ---------------------------------------------------------------------------
-
-class MiniRouter {
-  constructor() {
-    this._routes = [];
-  }
-
-  get(path, ...handlers) {
-    this._routes.push({ method: "GET", path, handlers });
-  }
-  post(path, ...handlers) {
-    this._routes.push({ method: "POST", path, handlers });
-  }
-
-  match(method, urlPath) {
-    for (const route of this._routes) {
-      if (route.method !== method) continue;
-      const params = this._matchPath(route.path, urlPath);
-      if (params !== null) {
-        return { handlers: route.handlers, params };
-      }
-    }
-    return null;
-  }
-
-  _matchPath(pattern, urlPath) {
-    // Convert /r/:token → regex
-    const parts = pattern.split("/");
-    const urlParts = urlPath.split("/");
-    if (parts.length !== urlParts.length) return null;
-    const params = {};
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i].startsWith(":")) {
-        params[parts[i].slice(1)] = decodeURIComponent(urlParts[i]);
-      } else if (parts[i] !== urlParts[i]) {
-        return null;
-      }
-    }
-    return params;
-  }
-}
-
-const router = new MiniRouter();
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function readDiscussion() {
-  try {
-    if (!existsSync(DISCUSSION_PATH)) return null;
-    const raw = readFileSync(DISCUSSION_PATH, "utf-8");
-    const data = JSON.parse(raw);
-    // Backward compat: old files without schema_version are treated as v1
-    if (data.schema_version === undefined) data.schema_version = 1;
-    return data;
+    if (!existsSync(path)) return null;
+    const raw = readFileSync(path, "utf-8");
+    return JSON.parse(raw);
   } catch {
     return null;
   }
 }
+
+function registerDiscussion(dir, discussionId) {
+  const discPath = join(dir, "discussion.json");
+  const data = safeReadJSON(discPath);
+  if (!data || !data.token) return null;
+
+  const previous = byDiscussionId.get(discussionId);
+  if (previous && previous.token !== data.token) {
+    byToken.delete(previous.token);
+  }
+
+  const entry = {
+    discussionId,
+    dir,
+    discussionPath: discPath,
+    tokenStreamPath: join(dir, "token_stream.jsonl"),
+    passwordHash: data.password_hash || null,
+    expiresAt: data.expires_at ?? null,
+    revokedTokens: new Set(data.revoked_tokens || []),
+    token: data.token,
+  };
+  byToken.set(data.token, entry);
+  byDiscussionId.set(discussionId, entry);
+
+  startSubdirWatcher(entry);
+  return entry;
+}
+
+function refreshEntry(entry) {
+  const data = safeReadJSON(entry.discussionPath);
+  if (!data || !data.token) return null;
+  if (data.token !== entry.token) {
+    byToken.delete(entry.token);
+    entry.token = data.token;
+    byToken.set(data.token, entry);
+  }
+  entry.passwordHash = data.password_hash || null;
+  entry.expiresAt = data.expires_at ?? null;
+  entry.revokedTokens = new Set(data.revoked_tokens || []);
+  return data;
+}
+
+function unregisterDiscussion(discussionId) {
+  const entry = byDiscussionId.get(discussionId);
+  if (!entry) return;
+  byToken.delete(entry.token);
+  byDiscussionId.delete(discussionId);
+  const w = subdirWatchers.get(discussionId);
+  if (w) {
+    try { w.close(); } catch { /* ignore */ }
+    subdirWatchers.delete(discussionId);
+  }
+  sseClients.delete(entry.token);
+  sseDeltaBuffers.delete(entry.token);
+  sseLastSeqByToken.delete(entry.token);
+  pollWaiters.delete(entry.token);
+}
+
+function discoverDiscussions() {
+  if (!existsSync(DATA_DIR)) return;
+  for (const entry of readdirSync(DATA_DIR, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    registerDiscussion(join(DATA_DIR, entry.name), entry.name);
+  }
+}
+
+function entryForToken(token) {
+  return byToken.get(token) || null;
+}
+
+function readDiscussionFor(entry) {
+  if (!entry) return null;
+  const data = safeReadJSON(entry.discussionPath);
+  if (!data) return null;
+  if (data.schema_version === undefined) data.schema_version = 1;
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Token + password validation
+// ---------------------------------------------------------------------------
 
 function isTokenValid(token) {
-  const data = readDiscussion();
+  const entry = entryForToken(token);
+  if (!entry) return false;
+  const data = readDiscussionFor(entry);
   if (!data) return false;
   if (data.token !== token) return false;
-  const revoked = data.revoked_tokens || [];
-  if (revoked.includes(token)) return false;
-  // Expiry check
+  if ((data.revoked_tokens || []).includes(token)) return false;
   if (data.expires_at && Date.now() / 1000 > data.expires_at) return false;
   return true;
 }
+
+let _bcrypt = null;
+let _bcryptLoadAttempted = false;
+async function loadBcrypt() {
+  if (_bcrypt || _bcryptLoadAttempted) return _bcrypt;
+  _bcryptLoadAttempted = true;
+  try {
+    _bcrypt = (await import("bcryptjs")).default;
+  } catch (err) {
+    console.error("[Roundtable Web] bcryptjs not available:", err.message);
+  }
+  return _bcrypt;
+}
+
+function _signSession(token) {
+  return createHmac("sha256", SERVER_SECRET).update(`auth:${token}`).digest("hex");
+}
+
+function _parseCookies(cookieHeader) {
+  const cookies = {};
+  if (!cookieHeader) return cookies;
+  for (const part of cookieHeader.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k) {
+      try { cookies[k.trim()] = decodeURIComponent(v.join("=").trim()); }
+      catch { cookies[k.trim()] = v.join("=").trim(); }
+    }
+  }
+  return cookies;
+}
+
+function isAuthenticated(req, entry) {
+  if (!entry.passwordHash) return true;
+  const cookies = _parseCookies(req.headers.cookie);
+  const sig = cookies[`rt_pw_${entry.token}`];
+  if (!sig) return false;
+  return sig === _signSession(entry.token);
+}
+
+// ---------------------------------------------------------------------------
+// HTTP helpers
+// ---------------------------------------------------------------------------
 
 function sendJSON(res, data, status = 200) {
   res.writeHead(status, {
@@ -148,7 +230,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Escape a string for safe use inside an HTML attribute value. */
 function escapeHtmlAttr(str) {
   return String(str)
     .replace(/&/g, "&amp;")
@@ -157,8 +238,8 @@ function escapeHtmlAttr(str) {
     .replace(/>/g, "&gt;");
 }
 
-function sendHTML(res, html) {
-  res.writeHead(200, {
+function sendHTML(res, html, status = 200) {
+  res.writeHead(status, {
     "Content-Type": "text/html; charset=utf-8",
     "Access-Control-Allow-Origin": "*",
   });
@@ -196,53 +277,11 @@ function sendExpired(res) {
   </div>
 </body>
 </html>`;
-  res.writeHead(410, {
-    "Content-Type": "text/html; charset=utf-8",
-    "Access-Control-Allow-Origin": "*",
-  });
-  res.end(html);
+  sendHTML(res, html, 410);
 }
 
 function send404(res) {
   sendJSON(res, { error: "Not found" }, 404);
-}
-
-// ---------------------------------------------------------------------------
-// Password protection (bcrypt + HMAC signed cookie)
-// ---------------------------------------------------------------------------
-
-let _bcrypt = null;
-const _bcryptPromise = passwordHash
-  ? import("bcryptjs").then(m => { _bcrypt = m.default; console.log("[Roundtable Web] Password protection enabled"); })
-      .catch(err => { console.error("[Roundtable Web] bcryptjs not available:", err.message); })
-  : Promise.resolve();
-
-function _signPwHash(pwHash) {
-  return createHmac("sha256", passwordHash.slice(0, 32)).update(pwHash).digest("hex").slice(0, 32);
-}
-
-function _parseCookies(cookieHeader) {
-  const cookies = {};
-  if (!cookieHeader) return cookies;
-  for (const part of cookieHeader.split(";")) {
-    const [k, ...v] = part.trim().split("=");
-    if (k) {
-      try { cookies[k.trim()] = decodeURIComponent(v.join("=").trim()); }
-      catch { cookies[k.trim()] = v.join("=").trim(); }
-    }
-  }
-  return cookies;
-}
-
-function checkPassword(req) {
-  if (!_bcrypt || !passwordHash) return true;
-  const cookies = _parseCookies(req.headers.cookie);
-  const rtPw = cookies["rt_pw"];
-  if (!rtPw) return false;
-  const [storedHash, sig] = rtPw.split(":");
-  if (!storedHash || !sig) return false;
-  const expectedSig = _signPwHash(storedHash);
-  return sig === expectedSig;
 }
 
 function sendPasswordPage(res) {
@@ -289,6 +328,7 @@ function sendPasswordPage(res) {
     <div class="brand">Roundtable AI</div>
   </div>
   <script>
+    const TOKEN = window.location.pathname.split('/').pop();
     document.getElementById('pwForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const pw = document.getElementById('pwInput').value.trim();
@@ -296,7 +336,7 @@ function sendPasswordPage(res) {
       const btn = document.getElementById('pwBtn');
       btn.disabled = true; btn.textContent = 'Verifying...';
       try {
-        const resp = await fetch('/api/validate-password', {
+        const resp = await fetch('/api/' + TOKEN + '/validate-password', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: pw })
@@ -319,20 +359,23 @@ function sendPasswordPage(res) {
   sendHTML(res, html);
 }
 
-// ---------------------------------------------------------------------------
-// SSE connections store
-// ---------------------------------------------------------------------------
-
-/** @type {Map<string, Set<import("http").ServerResponse>>} */
-const sseClients = new Map(); // token → Set<res>
-const sseDeltaBuffers = new Map(); // token → {events, timer}
-const sseLastSeqByToken = new Map(); // token → latest stream seq broadcast by watcher
-
 function safeDiscussion(data) {
   const safe = { ...data };
   delete safe.token;
+  delete safe.password_hash;
   return safe;
 }
+
+// ---------------------------------------------------------------------------
+// SSE + long-poll state
+// ---------------------------------------------------------------------------
+
+/** @type {Map<string, Set<import("http").ServerResponse>>} */
+const sseClients = new Map();
+const sseDeltaBuffers = new Map();
+const sseLastSeqByToken = new Map();
+const pollWaiters = new Map();
+let lastUpdatedTimestamp = 0;
 
 function broadcastToSSE(token, event, data) {
   const clients = sseClients.get(token);
@@ -385,20 +428,13 @@ function streamEventsSince(data, previousSeq) {
   return [];
 }
 
-// ---------------------------------------------------------------------------
-// Long-polling store
-// ---------------------------------------------------------------------------
-
-const pollWaiters = new Map(); // token → Set<{res, since, timer}>
-let lastUpdatedTimestamp = 0;
-
 function notifyPollWaiters(token) {
   const waiters = pollWaiters.get(token);
   if (!waiters) return;
-
+  const entry = entryForToken(token);
   for (const waiter of [...waiters]) {
     clearTimeout(waiter.timer);
-    const data = readDiscussion();
+    const data = entry ? readDiscussionFor(entry) : null;
     if (data) {
       sendJSON(waiter.res, safeDiscussion(data));
     } else {
@@ -409,14 +445,168 @@ function notifyPollWaiters(token) {
 }
 
 // ---------------------------------------------------------------------------
+// Markdown export (shared between MD and PDF routes)
+// ---------------------------------------------------------------------------
+
+function buildMarkdown(data) {
+  const topic = data.topic || "Discussion";
+  const participants = data.participants || [];
+  const speeches = data.speeches || [];
+  const roundSummaries = data.round_summaries || [];
+  const finalSummary = data.final_summary;
+  const conclusion = data.conclusion;
+
+  let md = `# ${topic}\n\n`;
+
+  if (participants.length > 0) {
+    md += `## Participants\n\n`;
+    for (const p of participants) {
+      const name = p.name || p.display_name || p.profile || p.id || "";
+      const role = p.role || "";
+      md += role ? `- **${name}** (${role})\n` : `- **${name}**\n`;
+    }
+    md += "\n";
+  }
+
+  const rounds = new Map();
+  for (const s of speeches) {
+    const r = s.round || 0;
+    if (!rounds.has(r)) rounds.set(r, []);
+    rounds.get(r).push(s);
+  }
+
+  const sortedRounds = [...rounds.keys()].sort((a, b) => a - b);
+  for (const r of sortedRounds) {
+    md += r === 0 ? `## Opening (Round 0)\n\n` : `## Round ${r}\n\n`;
+    for (const s of rounds.get(r)) {
+      const speaker = s.display_name || s.participant || "Unknown";
+      md += `### ${speaker}\n\n`;
+      md += `${s.content || ""}\n\n`;
+    }
+  }
+
+  if (roundSummaries.length > 0) {
+    md += `## Round Summaries\n\n`;
+    for (const rs of roundSummaries) {
+      md += `### Round ${rs.round || "?"}\n\n`;
+      const consensus = rs.consensus || rs.consensus_points || [];
+      const disagreement = rs.disagreement || rs.disagreement_points || [];
+      if (consensus.length > 0) {
+        md += `**Consensus:**\n`;
+        for (const c of consensus) {
+          const text = typeof c === "string" ? c : c.point || c.text || JSON.stringify(c);
+          md += `- ${text}\n`;
+        }
+        md += "\n";
+      }
+      if (disagreement.length > 0) {
+        md += `**Disagreement:**\n`;
+        for (const d of disagreement) {
+          const text = typeof d === "string" ? d : d.point || d.text || JSON.stringify(d);
+          md += `- ${text}\n`;
+        }
+        md += "\n";
+      }
+      if (rs.convergence_score !== undefined) {
+        md += `*Convergence: ${Math.round(rs.convergence_score * 100)}%*\n\n`;
+      }
+    }
+  }
+
+  if (finalSummary) {
+    md += `## Final Summary\n\n`;
+    const fsConsensus = finalSummary.consensus || finalSummary.consensus_points || [];
+    const fsDisagreement = finalSummary.disagreement || finalSummary.disagreement_points || [];
+    if (fsConsensus.length > 0) {
+      md += `### Consensus\n`;
+      for (const c of fsConsensus) {
+        const text = typeof c === "string" ? c : c.point || c.text || JSON.stringify(c);
+        md += `- ${text}\n`;
+      }
+      md += "\n";
+    }
+    if (fsDisagreement.length > 0) {
+      md += `### Disagreement\n`;
+      for (const d of fsDisagreement) {
+        const text = typeof d === "string" ? d : d.point || d.text || JSON.stringify(d);
+        md += `- ${text}\n`;
+      }
+      md += "\n";
+    }
+    if (finalSummary.verdict) {
+      md += `### Verdict\n\n${finalSummary.verdict}\n\n`;
+    }
+  }
+
+  if (conclusion) {
+    md += `## Conclusion\n\n${conclusion}\n\n`;
+  }
+
+  md += `---\n\n*Generated by Roundtable AI*\n`;
+  return md;
+}
+
+function safeFilename(topic) {
+  return topic.replace(/[^a-zA-Z0-9一-鿿_-]/g, "_").slice(0, 60) || "discussion";
+}
+
+// ---------------------------------------------------------------------------
+// Mini router (used as fallback when express isn't available, and as the
+// canonical route source — express main() bridges to these handlers)
+// ---------------------------------------------------------------------------
+
+class MiniRouter {
+  constructor() {
+    this._routes = [];
+  }
+
+  get(path, ...handlers) {
+    this._routes.push({ method: "GET", path, handlers });
+  }
+  post(path, ...handlers) {
+    this._routes.push({ method: "POST", path, handlers });
+  }
+
+  match(method, urlPath) {
+    for (const route of this._routes) {
+      if (route.method !== method) continue;
+      const params = this._matchPath(route.path, urlPath);
+      if (params !== null) {
+        return { route, params };
+      }
+    }
+    return null;
+  }
+
+  _matchPath(pattern, urlPath) {
+    const parts = pattern.split("/");
+    const urlParts = urlPath.split("/");
+    if (parts.length !== urlParts.length) return null;
+    const params = {};
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].startsWith(":")) {
+        params[parts[i].slice(1)] = decodeURIComponent(urlParts[i]);
+      } else if (parts[i] !== urlParts[i]) {
+        return null;
+      }
+    }
+    return params;
+  }
+}
+
+const router = new MiniRouter();
+
+// ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 
-// GET /share/:token → Standalone share page with rich OG tags
 router.get("/share/:token", (req, res, params) => {
+  const entry = entryForToken(params.token);
+  if (!entry) return send403(res);
+  if (entry.expiresAt && Date.now() / 1000 > entry.expiresAt) return sendExpired(res);
   if (!isTokenValid(params.token)) return send403(res);
 
-  const disc = readDiscussion();
+  const disc = readDiscussionFor(entry);
   if (!disc) return send404(res);
 
   const templatePath = join(WEB_DIR, "share.html");
@@ -429,47 +619,43 @@ router.get("/share/:token", (req, res, params) => {
     const participants = disc.participants || [];
     const topic = disc.topic || "圆桌讨论";
     const status = disc.status || "ongoing";
-    const rounds = disc.rounds?.length || 0;
+    const rounds = disc.round_summaries?.length || 0;
     const speeches = disc.speeches || [];
-    const consensus = disc.consensus_score != null ? Math.round(disc.consensus_score * 100) : null;
-    const durationMin = disc.duration_min || null;
+    const finalScore = disc.final_summary?.convergence_score;
+    const lastRoundScore = disc.round_summaries?.length
+      ? disc.round_summaries[disc.round_summaries.length - 1]?.convergence_score
+      : null;
+    const score = finalScore ?? lastRoundScore ?? null;
+    const consensus = score != null ? Math.round(score * 100) : null;
     const agentColors = ["#58a6ff", "#3fb950", "#d29922", "#bc8cff", "#f85149", "#f0883e", "#a5d6ff", "#7ee787"];
 
-    // OG title & description
     const ogTitle = `圆桌讨论: ${topic}`;
-    const participantNames = participants.map(p => p.name || p.id).join("、");
+    const participantNames = participants.map(p => p.display_name || p.profile || p.name || p.id).filter(Boolean).join("、");
     const ogDesc = `多位 AI Agent 正在围绕「${topic}」展开圆桌讨论${participantNames ? `。参与者: ${participantNames}` : ""}`;
 
-    // Status badge
-    const statusClass = status === "completed" ? "completed" : "ongoing";
-    const statusLabel = status === "completed" ? "已结束" : "进行中";
+    const statusClass = status === "concluded" ? "completed" : "ongoing";
+    const statusLabel = status === "concluded" ? "已结束" : "进行中";
 
-    // Meta text
     const metaParts = [];
     if (participants.length) metaParts.push(`${participants.length} 位参与者`);
     if (rounds > 0) metaParts.push(`${rounds} 轮讨论`);
-    if (durationMin) metaParts.push(`约 ${durationMin} 分钟`);
     const metaText = metaParts.join(" · ") || "多 Agent 圆桌讨论";
 
-    // Participant chips
     const participantsHtml = participants.map((p, i) => {
-      const name = p.name || p.id || `Agent ${i + 1}`;
+      const name = p.display_name || p.profile || p.name || p.id || `Agent ${i + 1}`;
       const color = agentColors[i % agentColors.length];
       return `<span class="participant-chip"><span class="dot" style="background:${color}"></span>${escapeHtmlAttr(name)}</span>`;
     }).join("");
 
-    // Stats
     let statsHtml = "";
     if (rounds > 0 || speeches.length > 0) {
       statsHtml = `<div class="rounds-info">
         ${rounds > 0 ? `<div class="stat"><span class="val">${rounds}</span><span class="lbl">讨论轮次</span></div>` : ""}
         ${speeches.length > 0 ? `<div class="stat"><span class="val">${speeches.length}</span><span class="lbl">发言数</span></div>` : ""}
         ${participants.length > 0 ? `<div class="stat"><span class="val">${participants.length}</span><span class="lbl">参与者</span></div>` : ""}
-        ${durationMin ? `<div class="stat"><span class="val">${durationMin}</span><span class="lbl">分钟</span></div>` : ""}
       </div>`;
     }
 
-    // Consensus bar
     let consensusHtml = "";
     if (consensus != null) {
       const level = consensus >= 70 ? "high" : consensus >= 40 ? "medium" : "low";
@@ -480,13 +666,12 @@ router.get("/share/:token", (req, res, params) => {
       </div>`;
     }
 
-    // Preview messages (first 3 speeches)
     const previewSpeeches = speeches.slice(0, 3);
     const messagesHtml = previewSpeeches.length > 0
       ? previewSpeeches.map((s, i) => {
-          const agentName = s.display_name || s.agent_id || `Agent ${i + 1}`;
-          const text = (s.text || s.content || "").slice(0, 200);
-          const color = agentColors[(s.agent_index || i) % agentColors.length];
+          const agentName = s.display_name || s.participant || `Agent ${i + 1}`;
+          const text = (s.content || "").slice(0, 200);
+          const color = agentColors[i % agentColors.length];
           return `<div class="preview-msg">
             <div class="agent" style="color:${color}">${escapeHtmlAttr(agentName)}</div>
             <div class="text">${escapeHtmlAttr(text)}</div>
@@ -517,36 +702,31 @@ router.get("/share/:token", (req, res, params) => {
   }
 });
 
-// GET /r/:token → Serve SPA
-router.get("/r/:token", (req, res, params) => {
-  // Check expiry first — show friendly expired page instead of generic 403
-  const disc = readDiscussion();
-  if (disc && disc.expires_at && Date.now() / 1000 > disc.expires_at) {
-    return sendExpired(res);
-  }
-  if (!isTokenValid(params.token)) return send403(res);
-  // Password gate: if password protection is enabled, check cookie
-  if (passwordHash && _bcrypt && !checkPassword(req)) {
-    return sendPasswordPage(res);
+router.get("/r/:token", async (req, res, params) => {
+  const entry = entryForToken(params.token);
+  if (entry && entry.expiresAt && Date.now() / 1000 > entry.expiresAt) return sendExpired(res);
+  if (!entry || !isTokenValid(params.token)) return send403(res);
+
+  if (entry.passwordHash) {
+    await loadBcrypt();
+    if (!isAuthenticated(req, entry)) return sendPasswordPage(res);
   }
 
-  // Serve index.html from web/ directory
   const indexPath = join(WEB_DIR, "index.html");
   try {
     if (existsSync(indexPath)) {
       const html = readFileSync(indexPath, "utf-8");
-      // Inject config for the SPA
       const config = JSON.stringify({
         token: params.token,
         port,
         host: "0.0.0.0",
-        hasPassword: !!(passwordHash && _bcrypt),
+        hasPassword: !!entry.passwordHash,
       });
-      // Build Open Graph tags from discussion data
-      const disc = readDiscussion();
+      const disc = readDiscussionFor(entry);
       const ogTitle = disc?.topic ? `圆桌讨论: ${disc.topic}` : "Roundtable 圆桌讨论";
+      const participantNames = (disc?.participants || []).map(p => p.display_name || p.profile || p.name).filter(Boolean).join("、");
       const ogDesc = disc?.topic
-        ? `多位 AI Agent 正在围绕「${disc.topic}」展开圆桌讨论。${disc.participants?.length ? `参与者: ${disc.participants.map(p => p.name || p.id).join("、")}` : ""}`
+        ? `多位 AI Agent 正在围绕「${disc.topic}」展开圆桌讨论。${participantNames ? `参与者: ${participantNames}` : ""}`
         : "多 Agent 圆桌讨论引擎 — 让多个 AI Agent 像开会一样讨论、追踪共识分歧并生成结构化会议记录。";
       const ogTags = [
         `<meta property="og:title" content="${escapeHtmlAttr(ogTitle)}">`,
@@ -571,33 +751,36 @@ router.get("/r/:token", (req, res, params) => {
   }
 });
 
-// GET /api/:token/data → Read discussion.json
-router.get("/api/:token/data", (req, res, params) => {
-  if (!isTokenValid(params.token)) return send403(res);
-  if (passwordHash && _bcrypt && !checkPassword(req)) return sendJSON(res, { error: "Password required" }, 401);
+router.get("/api/:token/data", async (req, res, params) => {
+  const entry = entryForToken(params.token);
+  if (!entry || !isTokenValid(params.token)) return send403(res);
+  if (entry.passwordHash) {
+    await loadBcrypt();
+    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
+  }
 
-  const data = readDiscussion();
+  const data = readDiscussionFor(entry);
   if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
-
-  // Don't expose the token in API responses
   sendJSON(res, safeDiscussion(data));
 });
 
-// GET /api/:token/events → SSE stream
-router.get("/api/:token/events", (req, res, params) => {
-  if (!isTokenValid(params.token)) return send403(res);
-  if (passwordHash && _bcrypt && !checkPassword(req)) return sendJSON(res, { error: "Password required" }, 401);
+router.get("/api/:token/events", async (req, res, params) => {
+  const entry = entryForToken(params.token);
+  if (!entry || !isTokenValid(params.token)) return send403(res);
+  if (entry.passwordHash) {
+    await loadBcrypt();
+    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
+  }
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
     "Access-Control-Allow-Origin": "*",
-    "X-Accel-Buffering": "no", // nginx passthrough
+    "X-Accel-Buffering": "no",
   });
 
-  // Initial push
-  const data = readDiscussion();
+  const data = readDiscussionFor(entry);
   if (data) {
     const currentSeq = Number(data?.stream?.seq ?? 0);
     if (Number.isFinite(currentSeq)) sseLastSeqByToken.set(params.token, currentSeq);
@@ -605,13 +788,11 @@ router.get("/api/:token/events", (req, res, params) => {
     if (typeof res.flushHeaders === "function") res.flushHeaders();
   }
 
-  // Register SSE client
   if (!sseClients.has(params.token)) {
     sseClients.set(params.token, new Set());
   }
   sseClients.get(params.token).add(res);
 
-  // Keep-alive ping every 30s
   const keepAlive = setInterval(() => {
     try {
       res.write(": keepalive\n\n");
@@ -627,29 +808,28 @@ router.get("/api/:token/events", (req, res, params) => {
   });
 });
 
-// GET /api/:token/poll?since=<timestamp> → Long-polling
-router.get("/api/:token/poll", (req, res, params) => {
-  if (!isTokenValid(params.token)) return send403(res);
-  if (passwordHash && _bcrypt && !checkPassword(req)) return sendJSON(res, { error: "Password required" }, 401);
+router.get("/api/:token/poll", async (req, res, params) => {
+  const entry = entryForToken(params.token);
+  if (!entry || !isTokenValid(params.token)) return send403(res);
+  if (entry.passwordHash) {
+    await loadBcrypt();
+    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
+  }
 
-  // Parse query manually (no express)
   const url = new URL(req.url, `http://${req.headers.host}`);
   const since = parseInt(url.searchParams.get("since") || "0", 10) || 0;
 
-  // If there's already a newer update, respond immediately
-  const data = readDiscussion();
+  const data = readDiscussionFor(entry);
   if (data && data.updated_at > since) {
     return sendJSON(res, safeDiscussion(data));
   }
 
-  // Otherwise, wait up to 25 seconds
   if (!pollWaiters.has(params.token)) {
     pollWaiters.set(params.token, new Set());
   }
 
   const timer = setTimeout(() => {
-    // Timeout — return current data or empty
-    const latest = readDiscussion();
+    const latest = readDiscussionFor(entry);
     if (latest) {
       sendJSON(res, safeDiscussion(latest));
     } else {
@@ -662,23 +842,16 @@ router.get("/api/:token/poll", (req, res, params) => {
   pollWaiters.get(params.token).add(waiter);
 });
 
-// POST /api/:token/share → Generate share link (link is simply the page URL)
 router.post("/api/:token/share", (req, res, params) => {
   if (!isTokenValid(params.token)) return send403(res);
-
-  const data = readDiscussion();
-  if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
-
-  // Share link points to the standalone share page with OG tags
   sendJSON(res, { ok: true, share_url: `/share/${params.token}` });
 });
 
-// POST /api/:token/revoke → Revoke token
 router.post("/api/:token/revoke", (req, res, params) => {
-  if (!isTokenValid(params.token)) return send403(res);
+  const entry = entryForToken(params.token);
+  if (!entry || !isTokenValid(params.token)) return send403(res);
 
-  // Mark as revoked
-  const data = readDiscussion();
+  const data = readDiscussionFor(entry);
   if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
 
   if (!data.revoked_tokens) data.revoked_tokens = [];
@@ -687,20 +860,23 @@ router.post("/api/:token/revoke", (req, res, params) => {
   }
   data.updated_at = Math.floor(Date.now() / 1000);
 
-  // Write back
-  const tmpPath = DISCUSSION_PATH + ".tmp";
+  const tmpPath = entry.discussionPath + ".tmp";
   writeFileSync(tmpPath, JSON.stringify(data, null, 2));
-  renameSync(tmpPath, DISCUSSION_PATH);
+  renameSync(tmpPath, entry.discussionPath);
 
-  // Notify all clients
+  entry.revokedTokens.add(params.token);
   broadcastToSSE(params.token, "revoked", { revoked: true });
 
   sendJSON(res, { ok: true, revoked: true });
 });
 
-// POST /api/validate-password → Password validation (no auth required)
-router.post("/api/validate-password", async (req, res) => {
-  if (!_bcrypt || !passwordHash) return sendJSON(res, { ok: true, noPassword: true });
+router.post("/api/:token/validate-password", async (req, res, params) => {
+  const entry = entryForToken(params.token);
+  if (!entry) return send403(res);
+  if (!entry.passwordHash) return sendJSON(res, { ok: true, noPassword: true });
+
+  const bcrypt = await loadBcrypt();
+  if (!bcrypt) return sendJSON(res, { ok: false, error: "Password verification unavailable" }, 500);
 
   let body = "";
   for await (const chunk of req) body += chunk;
@@ -708,10 +884,13 @@ router.post("/api/validate-password", async (req, res) => {
     const { password } = JSON.parse(body);
     if (!password) return sendJSON(res, { ok: false, error: "Password required" }, 400);
 
-    const match = await _bcrypt.compare(password, passwordHash);
+    const match = await bcrypt.compare(password, entry.passwordHash);
     if (match) {
-      const sig = _signPwHash(passwordHash);
-      res.setHeader("Set-Cookie", `rt_pw=${encodeURIComponent(passwordHash + ":" + sig)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}`);
+      const sig = _signSession(entry.token);
+      res.setHeader(
+        "Set-Cookie",
+        `rt_pw_${entry.token}=${sig}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}`
+      );
       return sendJSON(res, { ok: true });
     }
     return sendJSON(res, { ok: false, error: "Incorrect password" }, 401);
@@ -720,116 +899,19 @@ router.post("/api/validate-password", async (req, res) => {
   }
 });
 
-// GET /api/:token/export/markdown → Export discussion as Markdown
-router.get("/api/:token/export/markdown", (req, res, params) => {
-  if (!isTokenValid(params.token)) return send403(res);
-  if (passwordHash && _bcrypt && !checkPassword(req)) return sendJSON(res, { error: "Password required" }, 401);
+router.get("/api/:token/export/markdown", async (req, res, params) => {
+  const entry = entryForToken(params.token);
+  if (!entry || !isTokenValid(params.token)) return send403(res);
+  if (entry.passwordHash) {
+    await loadBcrypt();
+    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
+  }
 
-  const data = readDiscussion();
+  const data = readDiscussionFor(entry);
   if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
 
-  const topic = data.topic || "Discussion";
-  const participants = data.participants || [];
-  const speeches = data.speeches || [];
-  const roundSummaries = data.round_summaries || [];
-  const finalSummary = data.final_summary;
-  const conclusion = data.conclusion;
-
-  let md = `# ${topic}\n\n`;
-
-  // Participants
-  if (participants.length > 0) {
-    md += `## Participants\n\n`;
-    for (const p of participants) {
-      const name = p.name || p.display_name || p.profile || p.id || "";
-      const role = p.role || "";
-      md += role ? `- **${name}** (${role})\n` : `- **${name}**\n`;
-    }
-    md += "\n";
-  }
-
-  // Speeches grouped by round
-  const rounds = new Map();
-  for (const s of speeches) {
-    const r = s.round || 0;
-    if (!rounds.has(r)) rounds.set(r, []);
-    rounds.get(r).push(s);
-  }
-
-  const sortedRounds = [...rounds.keys()].sort((a, b) => a - b);
-  for (const r of sortedRounds) {
-    md += r === 0 ? `## Opening (Round 0)\n\n` : `## Round ${r}\n\n`;
-    for (const s of rounds.get(r)) {
-      const speaker = s.display_name || s.participant || "Unknown";
-      md += `### ${speaker}\n\n`;
-      md += `${s.content || ""}\n\n`;
-    }
-  }
-
-  // Round summaries
-  if (roundSummaries.length > 0) {
-    md += `## Round Summaries\n\n`;
-    for (const rs of roundSummaries) {
-      md += `### Round ${rs.round || "?"}\n\n`;
-      const consensus = rs.consensus || rs.consensus_points || [];
-      const disagreement = rs.disagreement || rs.disagreement_points || [];
-      if (consensus.length > 0) {
-        md += `**Consensus:**\n`;
-        for (const c of consensus) {
-          const text = typeof c === "string" ? c : c.point || c.text || JSON.stringify(c);
-          md += `- ${text}\n`;
-        }
-        md += "\n";
-      }
-      if (disagreement.length > 0) {
-        md += `**Disagreement:**\n`;
-        for (const d of disagreement) {
-          const text = typeof d === "string" ? d : d.point || d.text || JSON.stringify(d);
-          md += `- ${text}\n`;
-        }
-        md += "\n";
-      }
-      if (rs.convergence_score !== undefined) {
-        md += `*Convergence: ${Math.round(rs.convergence_score * 100)}%*\n\n`;
-      }
-    }
-  }
-
-  // Final summary
-  if (finalSummary) {
-    md += `## Final Summary\n\n`;
-    const fsConsensus = finalSummary.consensus || finalSummary.consensus_points || [];
-    const fsDisagreement = finalSummary.disagreement || finalSummary.disagreement_points || [];
-    if (fsConsensus.length > 0) {
-      md += `### Consensus\n`;
-      for (const c of fsConsensus) {
-        const text = typeof c === "string" ? c : c.point || c.text || JSON.stringify(c);
-        md += `- ${text}\n`;
-      }
-      md += "\n";
-    }
-    if (fsDisagreement.length > 0) {
-      md += `### Disagreement\n`;
-      for (const d of fsDisagreement) {
-        const text = typeof d === "string" ? d : d.point || d.text || JSON.stringify(d);
-        md += `- ${text}\n`;
-      }
-      md += "\n";
-    }
-    if (finalSummary.verdict) {
-      md += `### Verdict\n\n${finalSummary.verdict}\n\n`;
-    }
-  }
-
-  // Conclusion
-  if (conclusion) {
-    md += `## Conclusion\n\n${conclusion}\n\n`;
-  }
-
-  // Footer
-  md += `---\n\n*Generated by Roundtable AI*\n`;
-
-  const filename = topic.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "_").slice(0, 60) || "discussion";
+  const md = buildMarkdown(data);
+  const filename = safeFilename(data.topic || "Discussion");
   res.writeHead(200, {
     "Content-Type": "text/markdown; charset=utf-8",
     "Content-Disposition": `attachment; filename="${filename}.md"`,
@@ -838,123 +920,38 @@ router.get("/api/:token/export/markdown", (req, res, params) => {
   res.end(md);
 });
 
-// GET /api/:token/export/pdf → Export discussion as PDF (via md-to-pdf)
 router.get("/api/:token/export/pdf", async (req, res, params) => {
-  if (!isTokenValid(params.token)) return send403(res);
-  if (passwordHash && _bcrypt && !checkPassword(req)) return sendJSON(res, { error: "Password required" }, 401);
+  const entry = entryForToken(params.token);
+  if (!entry || !isTokenValid(params.token)) return send403(res);
+  if (entry.passwordHash) {
+    await loadBcrypt();
+    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
+  }
 
-  const data = readDiscussion();
+  const data = readDiscussionFor(entry);
   if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
 
   const { spawn } = await import("node:child_process");
-
-  // Reuse the markdown generation logic
-  const topic = data.topic || "Discussion";
-  const participants = data.participants || [];
-  const speeches = data.speeches || [];
-  const roundSummaries = data.round_summaries || [];
-  const finalSummary = data.final_summary;
-  const conclusion = data.conclusion;
-
-  let md = `# ${topic}\n\n`;
-
-  if (participants.length > 0) {
-    md += `## Participants\n\n`;
-    for (const p of participants) {
-      const name = p.name || p.display_name || p.profile || p.id || "";
-      const role = p.role || "";
-      md += role ? `- **${name}** (${role})\n` : `- **${name}**\n`;
-    }
-    md += "\n";
-  }
-
-  const rounds = new Map();
-  for (const s of speeches) {
-    const r = s.round || 0;
-    if (!rounds.has(r)) rounds.set(r, []);
-    rounds.get(r).push(s);
-  }
-
-  const sortedRounds = [...rounds.keys()].sort((a, b) => a - b);
-  for (const r of sortedRounds) {
-    md += r === 0 ? `## Opening (Round 0)\n\n` : `## Round ${r}\n\n`;
-    for (const s of rounds.get(r)) {
-      const speaker = s.display_name || s.participant || "Unknown";
-      md += `### ${speaker}\n\n`;
-      md += `${s.content || ""}\n\n`;
-    }
-  }
-
-  if (roundSummaries.length > 0) {
-    md += `## Round Summaries\n\n`;
-    for (const rs of roundSummaries) {
-      md += `### Round ${rs.round || "?"}\n\n`;
-      const consensus = rs.consensus || rs.consensus_points || [];
-      const disagreement = rs.disagreement || rs.disagreement_points || [];
-      if (consensus.length > 0) {
-        md += `**Consensus:**\n`;
-        for (const c of consensus) {
-          const text = typeof c === "string" ? c : c.point || c.text || JSON.stringify(c);
-          md += `- ${text}\n`;
-        }
-        md += "\n";
-      }
-      if (disagreement.length > 0) {
-        md += `**Disagreement:**\n`;
-        for (const d of disagreement) {
-          const text = typeof d === "string" ? d : d.point || d.text || JSON.stringify(d);
-          md += `- ${text}\n`;
-        }
-        md += "\n";
-      }
-      if (rs.convergence_score !== undefined) {
-        md += `*Convergence: ${Math.round(rs.convergence_score * 100)}%*\n\n`;
-      }
-    }
-  }
-
-  if (finalSummary) {
-    md += `## Final Summary\n\n`;
-    const fsConsensus = finalSummary.consensus || finalSummary.consensus_points || [];
-    const fsDisagreement = finalSummary.disagreement || finalSummary.disagreement_points || [];
-    if (fsConsensus.length > 0) {
-      md += `### Consensus\n`;
-      for (const c of fsConsensus) {
-        const text = typeof c === "string" ? c : c.point || c.text || JSON.stringify(c);
-        md += `- ${text}\n`;
-      }
-      md += "\n";
-    }
-    if (fsDisagreement.length > 0) {
-      md += `### Disagreement\n`;
-      for (const d of fsDisagreement) {
-        const text = typeof d === "string" ? d : d.point || d.text || JSON.stringify(d);
-        md += `- ${text}\n`;
-      }
-      md += "\n";
-    }
-    if (finalSummary.verdict) {
-      md += `### Verdict\n\n${finalSummary.verdict}\n\n`;
-    }
-  }
-
-  if (conclusion) {
-    md += `## Conclusion\n\n${conclusion}\n\n`;
-  }
-
-  md += `---\n\n*Generated by Roundtable AI*\n`;
-
-  const filename = topic.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "_").slice(0, 60) || "discussion";
-
-  // Convert Markdown to PDF using md-to-pdf via npx
-  const tmpMdPath = resolve(discussionDir, `.${filename}.tmp.md`);
+  const md = buildMarkdown(data);
+  const filename = safeFilename(data.topic || "Discussion");
+  const tmpMdPath = resolve(entry.dir, `.${filename}.tmp.md`);
   const expectedPdfPath = tmpMdPath.replace(/\.md$/, ".pdf");
+
+  let child = null;
+  let clientClosed = false;
+  req.on("close", () => {
+    clientClosed = true;
+    if (child) {
+      try { child.kill("SIGTERM"); } catch { /* ignore */ }
+    }
+  });
+
   try {
     writeFileSync(tmpMdPath, md, "utf-8");
 
     const pdfOk = await new Promise((resolveP, rejectP) => {
       let stderr = "";
-      const child = spawn("npx", ["--yes", "md-to-pdf", basename(tmpMdPath)], {
+      child = spawn("npx", ["--yes", "md-to-pdf", basename(tmpMdPath)], {
         cwd: dirname(tmpMdPath),
         env: { ...process.env },
         stdio: ["pipe", "pipe", "pipe"],
@@ -968,8 +965,9 @@ router.get("/api/:token/export/pdf", async (req, res, params) => {
       child.on("error", rejectP);
     });
 
+    if (clientClosed) return;
+
     if (pdfOk && existsSync(expectedPdfPath)) {
-      const { unlinkSync } = await import("node:fs");
       const pdfBuffer = readFileSync(expectedPdfPath);
       res.writeHead(200, {
         "Content-Type": "application/pdf",
@@ -978,87 +976,54 @@ router.get("/api/:token/export/pdf", async (req, res, params) => {
         "Access-Control-Allow-Origin": "*",
       });
       res.end(pdfBuffer);
-      // Cleanup
-      try { unlinkSync(tmpMdPath); unlinkSync(expectedPdfPath); } catch { /* ignore */ }
     } else {
       sendJSON(res, { error: "PDF generation failed — output not found" }, 500);
     }
   } catch (err) {
-    console.error("[export/pdf] Error:", err.message);
-    // Cleanup temp files
+    if (!clientClosed) {
+      console.error("[export/pdf] Error:", err.message);
+      sendJSON(res, { error: "PDF generation failed", detail: err.message }, 500);
+    }
+  } finally {
     try { unlinkSync(tmpMdPath); } catch { /* ignore */ }
     try { unlinkSync(expectedPdfPath); } catch { /* ignore */ }
-    sendJSON(res, { error: "PDF generation failed", detail: err.message }, 500);
-  }
-});
-
-// GET /theme.css → Serve theme CSS
-router.get("/theme.css", (req, res) => {
-  const cssPath = join(WEB_DIR, "theme.css");
-  if (existsSync(cssPath)) {
-    const css = readFileSync(cssPath, "utf-8");
-    res.writeHead(200, { "Content-Type": "text/css" });
-    res.end(css);
-  } else {
-    res.writeHead(404);
-    res.end("/* theme.css not found */");
-  }
-});
-
-// GET /viewer.css → Serve viewer CSS
-router.get("/viewer.css", (req, res) => {
-  const cssPath = join(WEB_DIR, "viewer.css");
-  if (existsSync(cssPath)) {
-    const css = readFileSync(cssPath, "utf-8");
-    res.writeHead(200, { "Content-Type": "text/css" });
-    res.end(css);
-  } else {
-    res.writeHead(404);
-    res.end("/* viewer.css not found */");
-  }
-});
-
-// GET /i18n.js → Serve i18n JS
-router.get("/i18n.js", (req, res) => {
-  const jsPath = join(WEB_DIR, "i18n.js");
-  if (existsSync(jsPath)) {
-    const js = readFileSync(jsPath, "utf-8");
-    res.writeHead(200, { "Content-Type": "application/javascript" });
-    res.end(js);
-  } else {
-    res.writeHead(404);
-    res.end("/* i18n.js not found */");
-  }
-});
-
-// GET /viewer.js → Serve viewer JS
-router.get("/viewer.js", (req, res) => {
-  const jsPath = join(WEB_DIR, "viewer.js");
-  if (existsSync(jsPath)) {
-    const js = readFileSync(jsPath, "utf-8");
-    res.writeHead(200, { "Content-Type": "application/javascript" });
-    res.end(js);
-  } else {
-    res.writeHead(404);
-    res.end("/* viewer.js not found */");
   }
 });
 
 // ---------------------------------------------------------------------------
-// Discussion Replay API
+// Static assets (shared across all discussions)
 // ---------------------------------------------------------------------------
 
-/**
- * Read and parse token_stream.jsonl, returning an array of event objects.
- * Each event has: type, created_at, and various payload fields.
- */
-async function readTokenStream() {
+function staticHandler(filename, contentType) {
+  return (req, res) => {
+    const path = join(WEB_DIR, filename);
+    if (existsSync(path)) {
+      const content = readFileSync(path, "utf-8");
+      res.writeHead(200, { "Content-Type": contentType });
+      res.end(content);
+    } else {
+      res.writeHead(404);
+      res.end(`/* ${filename} not found */`);
+    }
+  };
+}
+
+router.get("/theme.css", staticHandler("theme.css", "text/css"));
+router.get("/viewer.css", staticHandler("viewer.css", "text/css"));
+router.get("/i18n.js", staticHandler("i18n.js", "application/javascript"));
+router.get("/viewer.js", staticHandler("viewer.js", "application/javascript"));
+
+// ---------------------------------------------------------------------------
+// Replay API
+// ---------------------------------------------------------------------------
+
+async function readTokenStream(path) {
   const events = [];
-  if (!existsSync(TOKEN_STREAM_PATH)) return events;
+  if (!existsSync(path)) return events;
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolveP, rejectP) => {
     const rl = readline.createInterface({
-      input: createReadStream(TOKEN_STREAM_PATH, { encoding: "utf-8" }),
+      input: createReadStream(path, { encoding: "utf-8" }),
       crlfDelay: Infinity,
     });
     rl.on("line", (line) => {
@@ -1068,15 +1033,11 @@ async function readTokenStream() {
         events.push(JSON.parse(trimmed));
       } catch { /* skip malformed lines */ }
     });
-    rl.on("close", () => resolve(events));
-    rl.on("error", reject);
+    rl.on("close", () => resolveP(events));
+    rl.on("error", rejectP);
   });
 }
 
-/**
- * Build replay metadata from a list of parsed events.
- * Returns: { totalEvents, duration, startTime, endTime, rounds, agents }
- */
 function buildReplayMeta(events) {
   if (events.length === 0) {
     return { totalEvents: 0, duration: 0, startTime: 0, endTime: 0, rounds: [], agents: [] };
@@ -1086,14 +1047,12 @@ function buildReplayMeta(events) {
   const endTime = events[events.length - 1].timestamp || events[events.length - 1].created_at || 0;
   const duration = endTime - startTime;
 
-  // Track rounds: each round_summary marks a boundary
   const roundBoundaries = [];
   const seenRounds = new Set();
   const agents = new Map();
 
   for (const ev of events) {
     const evTime = ev.timestamp || ev.created_at || 0;
-    // Track round boundaries from speech_start or speech_delta events
     const round = ev.round ?? ev.payload?.speech?.round ?? ev.speech?.round;
     if (round != null && !seenRounds.has(round)) {
       seenRounds.add(round);
@@ -1104,7 +1063,6 @@ function buildReplayMeta(events) {
       });
     }
 
-    // Track unique agents
     const agentId = ev.agent ?? ev.agent_id ?? ev.payload?.speech?.agent_id ?? ev.speech?.agent_id ?? ev.payload?.speech?.participant ?? ev.speech?.participant;
     const agentName = ev.display_name ?? ev.agent_name ?? ev.payload?.speech?.agent_name ?? ev.speech?.agent_name ?? ev.payload?.speech?.display_name ?? ev.speech?.display_name;
     if (agentId && !agents.has(agentId)) {
@@ -1112,12 +1070,11 @@ function buildReplayMeta(events) {
     }
   }
 
-  // Sort round boundaries by round number
   roundBoundaries.sort((a, b) => a.round - b.round);
 
   return {
     totalEvents: events.length,
-    duration: duration * 1000, // convert to ms
+    duration: duration * 1000,
     startTime,
     endTime,
     rounds: roundBoundaries,
@@ -1125,17 +1082,12 @@ function buildReplayMeta(events) {
   };
 }
 
-// GET /api/:token/replay/meta → Replay metadata for the progress bar
 router.get("/api/:token/replay/meta", async (req, res, params) => {
-  const token = params?.token || req.params?.token;
-
-  // Validate token
-  if (!isTokenValid(token)) {
-    return sendJSON(res, { error: "Invalid or expired token" }, 403);
-  }
+  const entry = entryForToken(params.token);
+  if (!entry || !isTokenValid(params.token)) return send403(res);
 
   try {
-    const events = await readTokenStream();
+    const events = await readTokenStream(entry.tokenStreamPath);
     const meta = buildReplayMeta(events);
     sendJSON(res, { ok: true, ...meta });
   } catch (err) {
@@ -1143,17 +1095,9 @@ router.get("/api/:token/replay/meta", async (req, res, params) => {
   }
 });
 
-// GET /api/:token/replay/stream → SSE replay stream
-// Query params:
-//   speed=1     — playback speed multiplier (1 = realtime, 2 = 2x, 0 = instant)
-//   from=0      — start offset in ms from beginning
 router.get("/api/:token/replay/stream", async (req, res, params) => {
-  const token = params?.token || req.params?.token;
-
-  // Validate token
-  if (!isTokenValid(token)) {
-    return sendJSON(res, { error: "Invalid or expired token" }, 403);
-  }
+  const entry = entryForToken(params.token);
+  if (!entry || !isTokenValid(params.token)) return send403(res);
 
   let speedVal, fromVal;
   if (req.query) {
@@ -1172,11 +1116,10 @@ router.get("/api/:token/replay/stream", async (req, res, params) => {
   const speed = Math.max(0, parseFloat(speedVal) || 1);
   const fromMs = Math.max(0, parseInt(fromVal, 10) || 0);
 
-  // Parse the JSONL file
   let events;
   try {
-    events = await readTokenStream();
-  } catch (err) {
+    events = await readTokenStream(entry.tokenStreamPath);
+  } catch {
     return sendJSON(res, { error: "Failed to read replay data" }, 500);
   }
 
@@ -1184,7 +1127,6 @@ router.get("/api/:token/replay/stream", async (req, res, params) => {
     return sendJSON(res, { error: "No replay data available" }, 404);
   }
 
-  // Set up SSE
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache, no-transform",
@@ -1198,7 +1140,6 @@ router.get("/api/:token/replay/stream", async (req, res, params) => {
   const startTime = events[0].timestamp || events[0].created_at || 0;
   const startOffsetSec = fromMs / 1000;
 
-  // Filter events from the requested offset
   const filteredEvents = events.filter((ev) => {
     const offsetSec = (ev.timestamp || ev.created_at || 0) - startTime;
     return offsetSec >= startOffsetSec;
@@ -1208,7 +1149,6 @@ router.get("/api/:token/replay/stream", async (req, res, params) => {
   req.on("close", () => { closed = true; });
 
   if (speed === 0) {
-    // Instant mode — send all events immediately
     for (const ev of filteredEvents) {
       if (closed) break;
       const offsetMs = ((ev.timestamp || ev.created_at || 0) - startTime) * 1000;
@@ -1221,7 +1161,6 @@ router.get("/api/:token/replay/stream", async (req, res, params) => {
     return;
   }
 
-  // Realtime mode — delay events according to their timestamps
   for (let i = 0; i < filteredEvents.length; i++) {
     if (closed) break;
 
@@ -1229,7 +1168,6 @@ router.get("/api/:token/replay/stream", async (req, res, params) => {
     const eventTime = (ev.timestamp || ev.created_at || 0) - startTime;
     const delayMs = Math.max(0, (eventTime - startOffsetSec) * 1000 / speed);
 
-    // Calculate progress for the client
     const progress = {
       currentMs: eventTime * 1000,
       totalMs: meta.duration,
@@ -1243,11 +1181,9 @@ router.get("/api/:token/replay/stream", async (req, res, params) => {
     res.write(`event: replay_progress\ndata: ${JSON.stringify(progress)}\n\n`);
     res.write(`event: replay_event\ndata: ${JSON.stringify(ev)}\n\n`);
 
-    // Calculate inter-event delay for the next iteration
     if (i < filteredEvents.length - 1) {
       const nextTime = (filteredEvents[i + 1].timestamp || filteredEvents[i + 1].created_at || 0) - startTime;
       const interDelay = Math.max(0, (nextTime - eventTime) * 1000 / speed);
-      // Cap individual delays at 5s for UX (e.g. long pauses between rounds)
       const cappedDelay = Math.min(interDelay, 5000);
       if (cappedDelay > 0) await sleep(cappedDelay);
       if (closed) break;
@@ -1261,202 +1197,107 @@ router.get("/api/:token/replay/stream", async (req, res, params) => {
 });
 
 // ---------------------------------------------------------------------------
-// File watcher → broadcast to SSE + polling
+// File watchers
 // ---------------------------------------------------------------------------
 
-function startFileWatcher() {
-  if (!existsSync(DISCUSSION_PATH)) {
-    // Retry in 2 seconds if file doesn't exist yet
-    setTimeout(startFileWatcher, 2000);
-    return;
-  }
-
+function startSubdirWatcher(entry) {
+  if (subdirWatchers.has(entry.discussionId)) return;
   let debounceTimer = null;
-  // Watch the directory instead of the file — macOS fs.watch() doesn't
-  // reliably detect changes after atomic rename (os.rename replaces inode).
-  // Watching the parent directory catches the rename event on all platforms.
-  const watchDir = dirname(DISCUSSION_PATH);
-  const targetName = basename(DISCUSSION_PATH);
-  watch(watchDir, (_eventType, changedFilename) => {
-    if (changedFilename !== targetName) return;
-    // Debounce: avoid rapid-fire during atomic writes
+  const w = watch(entry.dir, (_eventType, changedFilename) => {
+    if (changedFilename !== "discussion.json") return;
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      const data = readDiscussion();
+      if (!existsSync(entry.discussionPath)) {
+        unregisterDiscussion(entry.discussionId);
+        return;
+      }
+      const data = refreshEntry(entry);
       if (!data) return;
 
-      const token = data.token;
       const safe = safeDiscussion(data);
-
       lastUpdatedTimestamp = data.updated_at || Date.now();
-      const previousSeq = sseLastSeqByToken.get(token) ?? 0;
+      const previousSeq = sseLastSeqByToken.get(entry.token) ?? 0;
       const deltaEvents = streamEventsSince(data, previousSeq);
       const latestSeq = Number(data?.stream?.seq ?? previousSeq);
-      if (Number.isFinite(latestSeq)) sseLastSeqByToken.set(token, Math.max(previousSeq, latestSeq));
-      for (const eventData of deltaEvents) queueSSEDelta(token, eventData);
-      broadcastToSSE(token, "update", safe);
-      notifyPollWaiters(token);
-    }, 50); // 50ms flush buffer for streaming deltas
+      if (Number.isFinite(latestSeq)) sseLastSeqByToken.set(entry.token, Math.max(previousSeq, latestSeq));
+      for (const eventData of deltaEvents) queueSSEDelta(entry.token, eventData);
+      broadcastToSSE(entry.token, "update", safe);
+      notifyPollWaiters(entry.token);
+    }, 50);
+  });
+  subdirWatchers.set(entry.discussionId, w);
+}
+
+function startDataDirWatcher() {
+  watch(DATA_DIR, (_eventType, filename) => {
+    if (!filename) return;
+    if (byDiscussionId.has(filename)) return;
+    const candidatePath = join(DATA_DIR, filename);
+    setTimeout(() => {
+      try {
+        if (!existsSync(candidatePath)) return;
+        if (!statSync(candidatePath).isDirectory()) return;
+        if (!existsSync(join(candidatePath, "discussion.json"))) return;
+        registerDiscussion(candidatePath, filename);
+      } catch { /* ignore transient races */ }
+    }, 100);
   });
 }
 
 // ---------------------------------------------------------------------------
-// HTTP server
+// HTTP server bootstrap
 // ---------------------------------------------------------------------------
 
+async function loadExpress() {
+  try {
+    const express = (await import("express")).default;
+    return express();
+  } catch {
+    return null;
+  }
+}
+
+function bridge(app) {
+  for (const route of router._routes) {
+    const handler = (req, res) => {
+      const params = route.path.includes(":")
+        ? router._matchPath(route.path, req.path) ?? {}
+        : {};
+      route.handlers[0](req, res, params);
+    };
+    app[route.method.toLowerCase()](route.path, handler);
+  }
+}
+
 async function main() {
-  const hasExpress = await loadExpress();
+  mkdirSync(DATA_DIR, { recursive: true });
+  discoverDiscussions();
 
-  if (hasExpress && app) {
-    // Use express
-    app.get("/share/:token", (req, res) => {
-      const handler = router._routes.find(
-        (r) => r.method === "GET" && r.path === "/share/:token"
-      );
-      if (handler) {
-        const params = router._matchPath(handler.path, req.path);
-        if (params) {
-          req.url = req.originalUrl;
-          handler.handlers[0](req, res, params);
-          return;
-        }
-      }
-      send404(res);
-    });
+  const app = await loadExpress();
 
-    app.get("/r/:token", (req, res) => {
-      const handler = router._routes.find(
-        (r) => r.method === "GET" && r.path === "/r/:token"
-      );
-      if (handler) {
-        const params = router._matchPath(handler.path, req.path);
-        if (params) {
-          req.url = req.originalUrl;
-          handler.handlers[0](req, res, params);
-          return;
-        }
-      }
-      send404(res);
-    });
-
-    app.get("/api/:token/data", (req, res) => {
-      const params = { token: req.params.token };
-      router._routes
-        .find((r) => r.method === "GET" && r.path === "/api/:token/data")
-        ?.handlers[0](req, res, params);
-    });
-
-    app.get("/api/:token/events", (req, res) => {
-      const params = { token: req.params.token };
-      router._routes
-        .find((r) => r.method === "GET" && r.path === "/api/:token/events")
-        ?.handlers[0](req, res, params);
-    });
-
-    app.get("/api/:token/poll", (req, res) => {
-      const params = { token: req.params.token };
-      router._routes
-        .find((r) => r.method === "GET" && r.path === "/api/:token/poll")
-        ?.handlers[0](req, res, params);
-    });
-
-    app.post("/api/:token/share", (req, res) => {
-      const params = { token: req.params.token };
-      router._routes
-        .find((r) => r.method === "POST" && r.path === "/api/:token/share")
-        ?.handlers[0](req, res, params);
-    });
-
-    app.post("/api/:token/revoke", (req, res) => {
-      const params = { token: req.params.token };
-      router._routes
-        .find((r) => r.method === "POST" && r.path === "/api/:token/revoke")
-        ?.handlers[0](req, res, params);
-    });
-
-    app.post("/api/validate-password", (req, res) => {
-      router._routes
-        .find((r) => r.method === "POST" && r.path === "/api/validate-password")
-        ?.handlers[0](req, res, {});
-    });
-
-    app.get("/api/:token/export/markdown", (req, res) => {
-      const params = { token: req.params.token };
-      router._routes
-        .find((r) => r.method === "GET" && r.path === "/api/:token/export/markdown")
-        ?.handlers[0](req, res, params);
-    });
-
-    app.get("/api/:token/export/pdf", (req, res) => {
-      const params = { token: req.params.token };
-      router._routes
-        .find((r) => r.method === "GET" && r.path === "/api/:token/export/pdf")
-        ?.handlers[0](req, res, params);
-    });
-
-    app.get("/api/:token/replay/meta", (req, res) => {
-      const params = { token: req.params.token };
-      router._routes
-        .find((r) => r.method === "GET" && r.path === "/api/:token/replay/meta")
-        ?.handlers[0](req, res, params);
-    });
-
-    app.get("/api/:token/replay/stream", (req, res) => {
-      const params = { token: req.params.token };
-      router._routes
-        .find((r) => r.method === "GET" && r.path === "/api/:token/replay/stream")
-        ?.handlers[0](req, res, params);
-    });
-
-    app.get("/theme.css", (req, res) => {
-      const handler = router._routes.find(
-        (r) => r.method === "GET" && r.path === "/theme.css"
-      );
-      if (handler) handler.handlers[0](req, res, {});
-    });
-
-    app.get("/viewer.css", (req, res) => {
-      const handler = router._routes.find(
-        (r) => r.method === "GET" && r.path === "/viewer.css"
-      );
-      if (handler) handler.handlers[0](req, res, {});
-    });
-
-    app.get("/i18n.js", (req, res) => {
-      const handler = router._routes.find(
-        (r) => r.method === "GET" && r.path === "/i18n.js"
-      );
-      if (handler) handler.handlers[0](req, res, {});
-    });
-
-    app.get("/viewer.js", (req, res) => {
-      const handler = router._routes.find(
-        (r) => r.method === "GET" && r.path === "/viewer.js"
-      );
-      if (handler) handler.handlers[0](req, res, {});
-    });
-
+  if (app) {
+    bridge(app);
     app.listen(port, "0.0.0.0", () => {
-      console.log(`[Roundtable Web] Listening on http://0.0.0.0:${port}`);
-      startFileWatcher();
+      console.log(`[Roundtable Web] Listening on http://0.0.0.0:${port} (data-dir=${DATA_DIR})`);
+      console.log(`[Roundtable Web] Discovered ${byDiscussionId.size} existing discussion(s)`);
+      startDataDirWatcher();
     });
   } else {
-    // Fallback: raw http server
     const server = createServer((req, res) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
       const method = req.method.toUpperCase();
-
       const match = router.match(method, url.pathname);
       if (match) {
-        match.handlers[0](req, res, match.params);
+        match.route.handlers[0](req, res, match.params);
       } else {
         send404(res);
       }
     });
 
     server.listen(port, "0.0.0.0", () => {
-      console.log(`[Roundtable Web] Listening on http://0.0.0.0:${port} (builtin)`);
-      startFileWatcher();
+      console.log(`[Roundtable Web] Listening on http://0.0.0.0:${port} (builtin, data-dir=${DATA_DIR})`);
+      console.log(`[Roundtable Web] Discovered ${byDiscussionId.size} existing discussion(s)`);
+      startDataDirWatcher();
     });
   }
 }

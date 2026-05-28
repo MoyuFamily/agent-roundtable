@@ -47,7 +47,13 @@ def _find_free_port() -> int:
 
 @pytest.fixture
 def discussion_dir(tmp_path):
-    """Create a temporary discussion directory with test data."""
+    """Create a temporary discussion directory with test data.
+
+    The server expects --data-dir pointing to a parent directory.
+    Each discussion lives in a subdirectory: <data-dir>/<id>/discussion.json
+    """
+    disc_subdir = tmp_path / "test_disc"
+    disc_subdir.mkdir()
     disc = {
         "token": "test_token_abc123",
         "topic": "Test Discussion Topic",
@@ -102,9 +108,9 @@ def discussion_dir(tmp_path):
         "stream": {"seq": 3, "events": []},
         "updated_at": int(time.time()),
     }
-    disc_path = tmp_path / "discussion.json"
+    disc_path = disc_subdir / "discussion.json"
     disc_path.write_text(json.dumps(disc, indent=2))
-    return tmp_path
+    return tmp_path  # return the parent (data-dir)
 
 
 @pytest.fixture
@@ -112,7 +118,7 @@ def server(discussion_dir):
     """Start the web server and yield the base URL."""
     port = _find_free_port()
     proc = subprocess.Popen(
-        ["node", str(SERVER_SCRIPT), "--port", str(port), "--discussion-dir", str(discussion_dir)],
+        ["node", str(SERVER_SCRIPT), "--port", str(port), "--data-dir", str(discussion_dir)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -137,12 +143,28 @@ def server(discussion_dir):
 
 @pytest.fixture
 def pw_server(tmp_path):
-    """Start a server WITH password protection."""
+    """Start a server WITH password protection (password_hash in discussion.json)."""
+    # Pre-computed bcrypt hash of "testpassword123"
+    import subprocess as sp
+
+    result = sp.run(
+        ["node", "-e", "import('bcryptjs').then(b => b.hash('testpassword123', 10).then(h => console.log(h)))"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    pw_hash = result.stdout.strip()
+    if not pw_hash:
+        pytest.skip("bcryptjs not available for password hash generation")
+
+    disc_subdir = tmp_path / "pw_disc"
+    disc_subdir.mkdir()
     disc = {
         "token": "pw_token_456",
         "topic": "Secret Discussion",
         "status": "completed",
         "schema_version": 2,
+        "password_hash": pw_hash,
         "participants": [
             {"id": "alice", "name": "Alice", "role": "Engineer", "display_name": "Alice"},
         ],
@@ -163,21 +185,8 @@ def pw_server(tmp_path):
         "stream": {"seq": 1, "events": []},
         "updated_at": int(time.time()),
     }
-    disc_path = tmp_path / "discussion.json"
+    disc_path = disc_subdir / "discussion.json"
     disc_path.write_text(json.dumps(disc, indent=2))
-
-    # Pre-computed bcrypt hash of "testpassword123"
-    import subprocess as sp
-
-    result = sp.run(
-        ["node", "-e", "import('bcryptjs').then(b => b.hash('testpassword123', 10).then(h => console.log(h)))"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    pw_hash = result.stdout.strip()
-    if not pw_hash:
-        pytest.skip("bcryptjs not available for password hash generation")
 
     port = _find_free_port()
     proc = subprocess.Popen(
@@ -186,10 +195,8 @@ def pw_server(tmp_path):
             str(SERVER_SCRIPT),
             "--port",
             str(port),
-            "--discussion-dir",
+            "--data-dir",
             str(tmp_path),
-            "--password-hash",
-            pw_hash,
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -250,7 +257,7 @@ class TestServerLifecycle:
 
 class TestPasswordProtection:
     def test_no_password_allows_access(self, server):
-        """Server started without --password-hash should allow free access."""
+        """Server started without password_hash in JSON should allow free access."""
         base, _, _ = server
         resp = requests.get(f"{base}/r/test_token_abc123", timeout=5)
         assert resp.status_code == 200
@@ -269,7 +276,7 @@ class TestPasswordProtection:
     def test_wrong_password_returns_401(self, pw_server):
         base, _, _ = pw_server
         resp = requests.post(
-            f"{base}/api/validate-password",
+            f"{base}/api/pw_token_456/validate-password",
             json={"password": "wrong_password"},
             timeout=5,
         )
@@ -280,15 +287,15 @@ class TestPasswordProtection:
     def test_correct_password_sets_cookie(self, pw_server):
         base, _, _ = pw_server
         resp = requests.post(
-            f"{base}/api/validate-password",
+            f"{base}/api/pw_token_456/validate-password",
             json={"password": "testpassword123"},
             timeout=5,
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True
-        # Should set rt_pw cookie
-        assert "rt_pw" in resp.cookies
+        # Should set rt_pw_<token> cookie
+        assert "rt_pw_pw_token_456" in resp.cookies
 
     def test_password_cookie_grants_access(self, pw_server):
         """After authenticating, the cookie should allow direct access."""
@@ -296,7 +303,7 @@ class TestPasswordProtection:
         session = requests.Session()
         # First, authenticate
         resp = session.post(
-            f"{base}/api/validate-password",
+            f"{base}/api/pw_token_456/validate-password",
             json={"password": "testpassword123"},
             timeout=5,
         )
@@ -320,7 +327,7 @@ class TestPasswordProtection:
         session = requests.Session()
         # Authenticate
         session.post(
-            f"{base}/api/validate-password",
+            f"{base}/api/pw_token_456/validate-password",
             json={"password": "testpassword123"},
             timeout=5,
         )
@@ -376,7 +383,7 @@ class TestExportMarkdown:
         base, _, _ = pw_server
         session = requests.Session()
         session.post(
-            f"{base}/api/validate-password",
+            f"{base}/api/pw_token_456/validate-password",
             json={"password": "testpassword123"},
             timeout=5,
         )

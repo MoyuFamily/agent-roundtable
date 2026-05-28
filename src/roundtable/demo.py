@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import textwrap
 from typing import Any
 
@@ -148,7 +147,7 @@ class DemoRunner:
         if web:
             from roundtable.web_publisher import WebPublisher
 
-            output_dir = os.path.join("/tmp", "roundtable_web", disc_id)
+            output_dir = self.core._get_web_dir(disc_id)
             publisher = WebPublisher(output_dir, port=web_port)
             url = publisher.start(
                 disc_id,

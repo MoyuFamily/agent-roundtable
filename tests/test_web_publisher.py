@@ -7,7 +7,6 @@ File I/O uses real tmp_path for integration confidence.
 
 from __future__ import annotations
 
-import errno
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -62,55 +61,8 @@ class TestWebPublisherInit:
         assert pub._host == "0.0.0.0"
         assert pub._token is None
         assert pub.url is None
-        assert pub.port is None
+        assert pub.port == 8199
         assert pub.token is None
-
-
-# ---------------------------------------------------------------------------
-# Port finding
-# ---------------------------------------------------------------------------
-
-
-class TestPortFinding:
-    def test_finds_available_port(self, tmp_path):
-        pub = WebPublisher(str(tmp_path), port=18199)
-        port = pub._find_available_port(18199)
-        assert port >= 18199
-        assert port < 18209  # within 10 attempts
-
-    def test_skips_busy_port(self, tmp_path):
-        """If the preferred port is busy, finds the next one."""
-        import socket
-
-        pub = WebPublisher(str(tmp_path), port=18299)
-
-        # Block the first port
-        blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            blocker.bind(("", 18299))
-            port = pub._find_available_port(18299)
-            assert port == 18300  # next one
-        finally:
-            blocker.close()
-
-    def test_raises_if_no_port_available(self, tmp_path):
-        """Raises RuntimeError when all 10 ports are busy."""
-        import socket
-
-        pub = WebPublisher(str(tmp_path), port=18399)
-
-        blockers = []
-        try:
-            for i in range(10):
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.bind(("", 18399 + i))
-                blockers.append(s)
-
-            with pytest.raises(RuntimeError, match="No available port"):
-                pub._find_available_port(18399)
-        finally:
-            for s in blockers:
-                s.close()
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +142,7 @@ class TestWebPublisherLifecycle:
         pub = WebPublisher(str(tmp_path), port=19001)
 
         # Mock port probe to succeed immediately
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             url = pub.start("rt_lifecycle01", topic="Test Topic")
 
         assert url is not None
@@ -201,7 +153,7 @@ class TestWebPublisherLifecycle:
     def test_start_writes_initial_json(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19002)
 
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             pub.start(
                 "rt_init",
                 topic="AI Ethics",
@@ -220,14 +172,14 @@ class TestWebPublisherLifecycle:
 
     def test_start_with_custom_token(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19003)
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             pub.start("rt_tok", token="my-custom-token")
 
         assert pub.token == "my-custom-token"
 
     def test_on_speech_appends_and_updates_json(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19004)
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             pub.start("rt_speech", topic="Test")
 
         pub.on_speech(
@@ -247,7 +199,7 @@ class TestWebPublisherLifecycle:
 
     def test_on_speech_multiple(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19005)
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             pub.start("rt_multi", topic="Test")
 
         for i in range(5):
@@ -263,7 +215,7 @@ class TestWebPublisherLifecycle:
 
     def test_on_speech_after_revoke_is_noop(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19006)
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             pub.start("rt_revoke_speech", topic="Test")
 
         pub.on_speech({"participant": "alice", "content": "Before revoke"})
@@ -275,7 +227,7 @@ class TestWebPublisherLifecycle:
 
     def test_conclude_sets_status_and_conclusion(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19007)
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             pub.start("rt_conclude", topic="Test")
 
         pub.on_speech({"participant": "alice", "content": "I think..."})
@@ -287,7 +239,7 @@ class TestWebPublisherLifecycle:
 
     def test_streaming_speech_events_are_written_to_token_stream(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19021)
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             pub.start("rt_stream", topic="Streaming")
 
         pub.on_speech_start("s_1", agent="alice", avatar="🤖", round_num=1)
@@ -318,7 +270,7 @@ class TestWebPublisherLifecycle:
 
     def test_streaming_events_after_revoke_are_noop(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19022)
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             pub.start("rt_stream_revoke", topic="Streaming")
 
         pub.revoke()
@@ -330,7 +282,7 @@ class TestWebPublisherLifecycle:
 
     def test_round_summary_updates_json_and_stream(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19023)
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             pub.start("rt_summary", topic="Summary")
 
         consensus = [{"content": "Use FastAPI", "supporters": ["Alice", "Bob"]}]
@@ -355,7 +307,7 @@ class TestWebPublisherLifecycle:
 
     def test_final_summary_updates_json_and_stream(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19024)
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             pub.start("rt_final_summary", topic="Summary")
 
         consensus = [{"content": "Ship Sprint 1", "supporters": ["Alice"]}]
@@ -377,7 +329,7 @@ class TestWebPublisherLifecycle:
 
     def test_revoke_marks_token(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19008)
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             pub.start("rt_revoke", topic="Test")
 
         token = pub.token
@@ -388,7 +340,7 @@ class TestWebPublisherLifecycle:
 
     def test_revoke_sets_internal_flag(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19009)
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             pub.start("rt_revoke2", topic="Test")
 
         assert not pub._revoked
@@ -397,27 +349,24 @@ class TestWebPublisherLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# stop() — PM2 process cleanup
+# stop() — discussion dir cleanup
 # ---------------------------------------------------------------------------
 
 
 class TestStop:
-    @patch("roundtable.web_publisher.subprocess.run")
-    def test_stop_calls_pm2_delete(self, mock_run, tmp_path):
-        mock_run.return_value = MagicMock(returncode=0)
-
+    def test_stop_removes_discussion_files(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19010)
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             pub.start("rt_stop")
 
-        # _start_pm2 is mocked, so _pm2_process_name wasn't set — set it manually
-        pub._pm2_process_name = "roundtable-web-rt_stop"
+        # Verify files exist before stop
+        assert (tmp_path / "discussion.json").exists()
+
         pub.stop()
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        assert "pm2" in cmd
-        assert "delete" in cmd
-        assert pub._pm2_process_name is None
+
+        # Files should be removed
+        assert not (tmp_path / "discussion.json").exists()
+        assert not (tmp_path / "token_stream.jsonl").exists()
 
     def test_stop_when_not_started(self, tmp_path):
         """stop() on a publisher that never started should be a no-op."""
@@ -426,65 +375,57 @@ class TestStop:
 
 
 # ---------------------------------------------------------------------------
-# start() — PM2 integration
+# start() — shared PM2 integration
 # ---------------------------------------------------------------------------
 
 
-class TestPM2Start:
+class TestSharedServer:
     @patch("roundtable.web_publisher.subprocess.run")
-    @patch("roundtable.web_publisher.time.sleep", return_value=None)
-    def test_start_pm2_builds_correct_command(self, mock_sleep, mock_run, tmp_path):
-        mock_run.return_value = MagicMock(returncode=0)
+    def test_ensure_shared_starts_pm2_when_not_running(self, mock_run, tmp_path):
+        # First call: pm2 jlist returns empty (not running)
+        # Second call: pm2 start succeeds
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="[]"),  # jlist
+            MagicMock(returncode=0),  # start
+        ]
 
         pub = WebPublisher(str(tmp_path), port=19011)
 
-        # Patch socket connect to succeed immediately (port is ready)
-        with patch("roundtable.web_publisher.socket.socket") as mock_sock:
-            mock_sock.return_value.__enter__ = lambda s: s
-            mock_sock.return_value.__exit__ = MagicMock(return_value=False)
-            mock_sock.return_value.connect = MagicMock()
+        with patch.object(pub, "_wait_for_port"):
+            pub._ensure_shared_server_running()
 
-            pub.start("rt_pm2_cmd")
+        # Should have called pm2 start
+        assert mock_run.call_count == 2
+        start_cmd = mock_run.call_args_list[1][0][0]
+        assert "pm2" in start_cmd
+        assert "start" in start_cmd
+        assert "--data-dir" in start_cmd
 
-        cmd = mock_run.call_args[0][0]
-        assert cmd[0] == "pm2"
-        assert cmd[1] == "start"
-        assert "server.mjs" in cmd[2]
-        assert "--name" in cmd
-        assert "--interpreter" in cmd
-        assert "node" in cmd
+    @patch("roundtable.web_publisher.subprocess.run")
+    def test_ensure_shared_skips_when_already_running(self, mock_run, tmp_path):
+        # pm2 jlist returns the shared process as online
+        jlist_output = json.dumps([{"name": "roundtable-web", "pm2_env": {"status": "online"}}])
+        mock_run.return_value = MagicMock(returncode=0, stdout=jlist_output)
+
+        pub = WebPublisher(str(tmp_path), port=19012)
+
+        with patch.object(pub, "_wait_for_port"):
+            pub._ensure_shared_server_running()
+
+        # Should only have called pm2 jlist, not pm2 start
+        assert mock_run.call_count == 1
 
     @patch("roundtable.web_publisher.subprocess.run")
     def test_start_pm2_failure_raises(self, mock_run, tmp_path):
-        mock_run.return_value = MagicMock(returncode=1, stderr="PM2 error")
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="[]"),  # jlist: not running
+            MagicMock(returncode=1, stderr="PM2 error"),  # start: fails
+            MagicMock(returncode=0, stdout="[]"),  # jlist re-check: still not running
+        ]
 
-        pub = WebPublisher(str(tmp_path), port=19012)
+        pub = WebPublisher(str(tmp_path), port=19013)
         with pytest.raises(RuntimeError, match="PM2 start failed"):
-            pub.start("rt_pm2_fail")
-
-    def test_port_probe_permission_error_is_not_reported_as_exhausted(self, tmp_path):
-        pub = WebPublisher(str(tmp_path), port=19014)
-        exc = PermissionError(errno.EPERM, "Operation not permitted")
-
-        with patch("roundtable.web_publisher.socket.socket") as mock_sock:
-            mock_sock.return_value.__enter__ = lambda s: s
-            mock_sock.return_value.__exit__ = MagicMock(return_value=False)
-            mock_sock.return_value.bind.side_effect = exc
-
-            with pytest.raises(PermissionError, match="Cannot bind web viewer"):
-                pub._find_available_port(19014)
-
-    def test_port_probe_all_in_use_reports_in_use(self, tmp_path):
-        pub = WebPublisher(str(tmp_path), port=19020)
-        exc = OSError(errno.EADDRINUSE, "Address already in use")
-
-        with patch("roundtable.web_publisher.socket.socket") as mock_sock:
-            mock_sock.return_value.__enter__ = lambda s: s
-            mock_sock.return_value.__exit__ = MagicMock(return_value=False)
-            mock_sock.return_value.bind.side_effect = exc
-
-            with pytest.raises(RuntimeError, match="already in use"):
-                pub._find_available_port(19020)
+            pub._ensure_shared_server_running()
 
 
 # ---------------------------------------------------------------------------
@@ -499,7 +440,7 @@ class TestProperties:
 
     def test_url_after_start(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19013)
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             url = pub.start("rt_props")
         assert pub.url == url
         assert url.startswith("http://127.0.0.1:")
@@ -508,7 +449,7 @@ class TestProperties:
 
     def test_url_uses_custom_host_when_bind_host_is_specific(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19014, host="localhost")
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             url = pub.start("rt_props_host")
         assert url.startswith("http://localhost:")
 
@@ -522,7 +463,7 @@ class TestIntegration:
     def test_full_lifecycle_json_state(self, tmp_path):
         """Simulate a full discussion lifecycle and verify JSON state."""
         pub = WebPublisher(str(tmp_path), port=19020)
-        with patch.object(pub, "_start_pm2"):
+        with patch.object(pub, "_ensure_shared_server_running"):
             pub.start(
                 "rt_integration",
                 topic="Should we use SSE or WebSocket?",
@@ -576,19 +517,21 @@ class TestIntegration:
 class TestRunDemoWebIntegration:
     """Test run_demo(web=True) integration with WebPublisher."""
 
-    def test_run_demo_web_starts_publisher(self, tmp_path):
+    def test_run_demo_web_starts_publisher(self, tmp_path, monkeypatch):
         """run_demo(web=True) should create a WebPublisher and write JSON."""
         from roundtable.adapters.generic import Roundtable
+
+        # Redirect web dir to tmp_path so the test is isolated
+        web_base = tmp_path / "roundtable_web"
+        web_base.mkdir()
 
         db_path = str(tmp_path / "test.db")
         rt = Roundtable(db_path=db_path)
 
-        # Mock _start_pm2 to set _actual_port without launching anything
-        def fake_start_pm2(self_wp, port):
-            self_wp._actual_port = port
-            self_wp._pm2_process_name = f"roundtable-web-{self_wp._discussion_id}"
+        # Monkeypatch _get_web_dir on the core instance to use our tmp dir
+        monkeypatch.setattr(rt._core, "_get_web_dir", lambda disc_id: web_base / disc_id)
 
-        with patch.object(WebPublisher, "_start_pm2", fake_start_pm2):
+        with patch.object(WebPublisher, "_ensure_shared_server_running"):
             result = rt.run_demo(
                 max_rounds=2,
                 verbose=False,
@@ -601,7 +544,7 @@ class TestRunDemoWebIntegration:
         assert "/r/" in result["web_url"]
 
         # Check that the JSON file was written
-        disc_dir = Path("/tmp") / "roundtable_web" / result["discussion_id"]
+        disc_dir = web_base / result["discussion_id"]
         json_file = disc_dir / "discussion.json"
         assert json_file.exists()
 

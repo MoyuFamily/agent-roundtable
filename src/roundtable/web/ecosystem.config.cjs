@@ -2,9 +2,9 @@
  * PM2 ecosystem config for Roundtable Web Viewer.
  *
  * Usage:
- *   pm2 start ecosystem.config.cjs -- --port 8199 --discussion-dir /path/to/discussion
+ *   pm2 start ecosystem.config.cjs -- --port 8199 --data-dir /tmp/roundtable_web
  *
- * This is a template — WebPublisher.py generates per-discussion pm2 commands directly.
+ * One shared instance serves all discussions under --data-dir.
  */
 module.exports = {
   apps: [

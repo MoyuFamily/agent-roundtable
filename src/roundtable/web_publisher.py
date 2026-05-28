@@ -7,7 +7,6 @@ a JSON file that Express reads via shared lock + fs.watch.
 
 from __future__ import annotations
 
-import errno
 import fcntl
 import json
 import logging
@@ -15,6 +14,7 @@ import os
 import secrets
 import socket
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -26,6 +26,9 @@ from roundtable.web_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+SHARED_PM2_NAME = "roundtable-web"
+SHARED_DATA_DIR = Path(tempfile.gettempdir()) / "roundtable_web"
 
 # ---------------------------------------------------------------------------
 # Token generation
@@ -84,9 +87,13 @@ class WebPublisher:
         self._host = host
         self._url_host = "127.0.0.1" if host in {"", "0.0.0.0", "::"} else host
         self._password = password
+        self._password_hash: str | None = None
+        if password:
+            import bcrypt  # type: ignore[import-not-found]
+
+            self._password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
         self._token: str | None = None
         self._discussion_id: str | None = None
-        self._pm2_process_name: str | None = None
         self._revoked: bool = False
         self._speeches: list[dict[str, Any]] = []
         self._round_summaries: list[dict[str, Any]] = []
@@ -97,7 +104,7 @@ class WebPublisher:
         self._conclusion: str | None = None
         self._final_summary: dict[str, Any] | None = None
         self._status: str = "active"
-        self._actual_port: int | None = None
+        self._actual_port: int = port
         self._expires_at: float | None = None
 
     # ------------------------------------------------------------------
@@ -115,8 +122,8 @@ class WebPublisher:
         """Start the web viewer service and return the full URL.
 
         1. Generate token (nanoid 21) if not provided
-        2. Write initial discussion.json with file lock
-        3. Port probe → PM2 start Express
+        2. Write initial discussion.json (includes password_hash if set)
+        3. Ensure the shared Express PM2 process is running on the configured port
         4. Return URL: ``http://<host>:<port>/r/<token>``
         """
         self._discussion_id = discussion_id
@@ -125,14 +132,8 @@ class WebPublisher:
         self._participants = participants or []
         self._expires_at = expires_at
 
-        # Write initial discussion.json
         self._write_discussion_json()
-
-        # Find available port
-        self._actual_port = self._find_available_port(self._port)
-
-        # Start Express via PM2
-        self._start_pm2(self._actual_port)
+        self._ensure_shared_server_running()
 
         url = self.url
         if url is None:
@@ -330,28 +331,26 @@ class WebPublisher:
         logger.info("Token revoked for discussion %s", self._discussion_id)
 
     def stop(self) -> None:
-        """PM2 stops the Express process."""
-        if self._pm2_process_name:
+        """Remove this discussion from the shared web server.
+
+        Deletes the discussion subdirectory so the shared Express instance
+        drops the token from its registry. The shared PM2 process keeps running.
+        """
+        try:
+            for fname in (
+                "discussion.json",
+                "token_stream.jsonl",
+                "discussion.json.lock",
+                "discussion.json.tmp",
+            ):
+                (self._discussion_dir / fname).unlink(missing_ok=True)
             try:
-                result = subprocess.run(
-                    ["pm2", "delete", self._pm2_process_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                if result.returncode != 0:
-                    logger.warning(
-                        "PM2 delete failed for %s (exit %s): %s",
-                        self._pm2_process_name,
-                        result.returncode,
-                        result.stderr,
-                    )
-                else:
-                    logger.info("PM2 process %s stopped", self._pm2_process_name)
-            except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
-                logger.warning("Failed to stop PM2 process: %s", exc)
-            finally:
-                self._pm2_process_name = None
+                self._discussion_dir.rmdir()
+            except OSError:
+                pass
+            logger.info("Discussion dir removed for %s", self._discussion_id)
+        except Exception:
+            logger.exception("Failed to remove discussion dir for %s", self._discussion_id)
 
     @property
     def url(self) -> str | None:
@@ -374,76 +373,77 @@ class WebPublisher:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _find_available_port(self, preferred: int) -> int:
-        """Find an available port starting from *preferred*, +1 on conflict."""
-        for offset in range(10):
-            port = preferred + offset
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                try:
-                    s.bind(("", port))
-                    return port
-                except OSError as exc:
-                    if exc.errno == errno.EADDRINUSE:
-                        continue
-                    if exc.errno in (errno.EACCES, errno.EPERM):
-                        raise PermissionError(f"Cannot bind web viewer to port {port}: {exc.strerror or exc}") from exc
-                    raise RuntimeError(f"Cannot probe web viewer port {port}: {exc}") from exc
-        raise RuntimeError(
-            f"No available port in range {preferred}-{preferred + 9}: all probed ports are already in use"
-        )
+    def _ensure_shared_server_running(self) -> None:
+        """Start the shared PM2 process on demand. No-op if already online."""
+        if self._is_shared_running():
+            self._wait_for_port(timeout=3.0)
+            return
 
-    def _start_pm2(self, port: int) -> None:
-        """Start the Express server via PM2."""
         server_path = Path(__file__).parent / "web" / "server.mjs"
         if not server_path.exists():
             raise FileNotFoundError(f"Express server not found: {server_path}")
 
-        self._pm2_process_name = f"roundtable-web-{self._discussion_id}"
+        SHARED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
         cmd = [
             "pm2",
             "start",
             str(server_path),
             "--name",
-            self._pm2_process_name,
+            SHARED_PM2_NAME,
             "--interpreter",
             "node",
             "--",
             "--port",
-            str(port),
-            "--discussion-dir",
-            str(self._discussion_dir),
+            str(self._port),
+            "--data-dir",
+            str(SHARED_DATA_DIR),
         ]
 
-        # Hash password with bcrypt and pass to server
-        if self._password:
-            import bcrypt  # type: ignore[import-not-found]
-
-            pw_hash = bcrypt.hashpw(self._password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-            cmd.extend(["--password-hash", pw_hash])
-
-        logger.info("Starting PM2: %s", " ".join(cmd))
+        logger.info("Starting shared PM2: %s", " ".join(cmd))
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
         if result.returncode != 0:
+            if self._is_shared_running():
+                self._wait_for_port(timeout=10.0)
+                return
             raise RuntimeError(f"PM2 start failed (exit {result.returncode}): {result.stderr}")
 
-        # Wait for Express to be ready (probe the port)
-        for _ in range(20):  # up to 10 seconds
-            time.sleep(0.5)
+        self._wait_for_port(timeout=10.0)
+
+    def _is_shared_running(self) -> bool:
+        """Check whether the shared PM2 process is online."""
+        try:
+            result = subprocess.run(
+                ["pm2", "jlist"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                return False
+            procs = json.loads(result.stdout or "[]")
+            for p in procs:
+                if p.get("name") == SHARED_PM2_NAME:
+                    status = p.get("pm2_env", {}).get("status")
+                    return bool(status == "online")
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
+            return False
+        return False
+
+    def _wait_for_port(self, timeout: float = 10.0) -> None:
+        """Block until the shared server accepts TCP connections on self._port."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 try:
-                    s.settimeout(1)
-                    s.connect(("127.0.0.1", port))
-                    logger.info("Express ready on port %d", port)
+                    s.settimeout(0.5)
+                    s.connect(("127.0.0.1", self._port))
+                    logger.info("Shared web server ready on port %d", self._port)
                     return
-                except (OSError, ConnectionRefusedError):
-                    continue
-
-        logger.warning(
-            "Express may not be ready on port %d after 10s, proceeding anyway",
-            port,
-        )
+                except OSError:
+                    time.sleep(0.25)
+        logger.warning("Shared web server not reachable on port %d after %.1fs", self._port, timeout)
 
     def _write_discussion_json(self) -> None:
         """Write current state to discussion.json with atomic file lock."""
@@ -453,6 +453,7 @@ class WebPublisher:
             "topic": self._topic,
             "status": self._status,
             "token": self._token,
+            "password_hash": self._password_hash,
             "participants": self._participants,
             "speeches": self._speeches,
             "round_summaries": self._round_summaries,
@@ -671,6 +672,10 @@ class WebPublisher:
                     data["revoked_tokens"] = merged_revoked
                     if self._token in merged_revoked:
                         self._revoked = True
+
+                    # 7. Preserve password_hash from disk if memory doesn't have one
+                    if existing.get("password_hash") and not data.get("password_hash"):
+                        data["password_hash"] = existing["password_hash"]
 
                 with open(tmp, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)

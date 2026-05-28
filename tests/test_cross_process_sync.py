@@ -59,7 +59,7 @@ def test_cross_process_sync_flow(tmp_path, monkeypatch):
     # We patch WebPublisher to not run PM2 but write the actual discussion.json
     from roundtable.web_publisher import WebPublisher
 
-    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "_ensure_shared_server_running", lambda *args, **kwargs: None)
     monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
 
     res = core.create_discussion("Test topic", participants, web=True, max_rounds=2)
@@ -212,7 +212,7 @@ def test_sync_convergence_score_only(tmp_path, monkeypatch):
     # Patch WebPublisher to avoid PM2
     from roundtable.web_publisher import WebPublisher
 
-    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "_ensure_shared_server_running", lambda *args, **kwargs: None)
     monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
 
     participants = [
@@ -277,7 +277,7 @@ def test_cross_process_auto_conclude_replay_events(tmp_path, monkeypatch):
     # Patch WebPublisher to avoid PM2
     from roundtable.web_publisher import WebPublisher
 
-    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "_ensure_shared_server_running", lambda *args, **kwargs: None)
     monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
 
     participants = [
@@ -333,7 +333,7 @@ def test_reconclusion_updates_verdict(tmp_path, monkeypatch):
 
     from roundtable.web_publisher import WebPublisher
 
-    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "_ensure_shared_server_running", lambda *args, **kwargs: None)
     monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
 
     participants = [
@@ -372,7 +372,7 @@ def test_live_publisher_round_summary_has_convergence_score(tmp_path, monkeypatc
 
     from roundtable.web_publisher import WebPublisher
 
-    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "_ensure_shared_server_running", lambda *args, **kwargs: None)
     monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
 
     participants = [
@@ -436,7 +436,7 @@ def test_concurrent_speeches_are_all_preserved_in_json(tmp_path, monkeypatch):
     # Patch WebPublisher to avoid PM2
     from roundtable.web_publisher import WebPublisher
 
-    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "_ensure_shared_server_running", lambda *args, **kwargs: None)
     monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
 
     participants = [{"profile": f"user_{i}", "role": "Engineer", "display_name": f"User {i}"} for i in range(10)]
@@ -495,7 +495,7 @@ def test_live_publisher_does_not_overwrite_fallback_speech(tmp_path, monkeypatch
 
     from roundtable.web_publisher import WebPublisher
 
-    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "_ensure_shared_server_running", lambda *args, **kwargs: None)
     monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
 
     participants = [
@@ -543,7 +543,7 @@ def test_stale_live_publisher_does_not_revert_fallback_conclusion(tmp_path, monk
 
     from roundtable.web_publisher import WebPublisher
 
-    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "_ensure_shared_server_running", lambda *args, **kwargs: None)
     monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
 
     participants = [
@@ -594,7 +594,7 @@ def test_stale_live_publisher_does_not_overwrite_newer_round_summary(tmp_path, m
 
     from roundtable.web_publisher import WebPublisher
 
-    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "_ensure_shared_server_running", lambda *args, **kwargs: None)
     monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
 
     participants = [
@@ -653,7 +653,7 @@ def test_equal_timestamp_keeps_more_complete_round_summary(tmp_path, monkeypatch
 
     from roundtable.web_publisher import WebPublisher
 
-    monkeypatch.setattr(WebPublisher, "_start_pm2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "_ensure_shared_server_running", lambda *args, **kwargs: None)
     monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
 
     participants = [

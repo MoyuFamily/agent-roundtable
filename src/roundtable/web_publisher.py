@@ -7,6 +7,7 @@ a JSON file that Express reads via shared lock + fs.watch.
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -351,10 +352,8 @@ class WebPublisher:
                 "discussion.json.tmp",
             ):
                 (self._discussion_dir / fname).unlink(missing_ok=True)
-            try:
+            with contextlib.suppress(OSError):
                 self._discussion_dir.rmdir()
-            except OSError:
-                pass
             logger.info("Discussion dir removed for %s", self._discussion_id)
         except Exception:
             logger.exception("Failed to remove discussion dir for %s", self._discussion_id)

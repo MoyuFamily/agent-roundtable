@@ -804,7 +804,9 @@ class RoundtableCore:
         finally:
             conn.close()
 
-    list = list_discussions
+    def list(self, *, status: str | None = None, limit: int = 50) -> dict[str, Any]:
+        """Alias for list_discussions."""
+        return self.list_discussions(status=status, limit=limit)
 
     def advance(self, discussion_id: str) -> dict[str, Any]:
         """Explicitly advance to the next round.

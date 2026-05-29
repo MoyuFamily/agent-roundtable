@@ -694,8 +694,8 @@ def test_core_aliases(core):
     end_res = core.end(disc_id, conclusion="Done with aliases")
     assert end_res["ok"] is True
 
-    # test list alias
-    discs = core.list()
+    # test list_discussions
+    discs = core.list_discussions()
     assert discs["ok"] is True
     assert any(d["id"] == disc_id for d in discs["discussions"])
 

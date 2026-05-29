@@ -25,7 +25,7 @@ import {
 } from "node:fs";
 import * as readline from "node:readline";
 import { join, resolve, dirname, basename } from "node:path";
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // CLI args
@@ -165,13 +165,23 @@ function readDiscussionFor(entry) {
 // Token + password validation
 // ---------------------------------------------------------------------------
 
+function _safeStrEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const ab = Buffer.from(a, "utf-8");
+  const bb = Buffer.from(b, "utf-8");
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
 function isTokenValid(token) {
   const entry = entryForToken(token);
   if (!entry) return false;
   const data = readDiscussionFor(entry);
   if (!data) return false;
-  if (data.token !== token) return false;
-  if ((data.revoked_tokens || []).includes(token)) return false;
+  if (!_safeStrEqual(data.token, token)) return false;
+  for (const revoked of data.revoked_tokens || []) {
+    if (_safeStrEqual(revoked, token)) return false;
+  }
   if (data.expires_at && Date.now() / 1000 > data.expires_at) return false;
   return true;
 }
@@ -461,7 +471,7 @@ function buildMarkdown(data) {
   if (participants.length > 0) {
     md += `## Participants\n\n`;
     for (const p of participants) {
-      const name = p.name || p.display_name || p.profile || p.id || "";
+      const name = p.display_name || p.profile || p.name || p.id || "";
       const role = p.role || "";
       md += role ? `- **${name}** (${role})\n` : `- **${name}**\n`;
     }
@@ -630,7 +640,7 @@ router.get("/share/:token", (req, res, params) => {
     const agentColors = ["#58a6ff", "#3fb950", "#d29922", "#bc8cff", "#f85149", "#f0883e", "#a5d6ff", "#7ee787"];
 
     const ogTitle = `圆桌讨论: ${topic}`;
-    const participantNames = participants.map(p => p.display_name || p.profile || p.name || p.id).filter(Boolean).join("、");
+    const participantNames = participants.map(p => p.display_name || p.profile || p.id).filter(Boolean).join("、");
     const ogDesc = `多位 AI Agent 正在围绕「${topic}」展开圆桌讨论${participantNames ? `。参与者: ${participantNames}` : ""}`;
 
     const statusClass = status === "concluded" ? "completed" : "ongoing";
@@ -642,7 +652,7 @@ router.get("/share/:token", (req, res, params) => {
     const metaText = metaParts.join(" · ") || "多 Agent 圆桌讨论";
 
     const participantsHtml = participants.map((p, i) => {
-      const name = p.display_name || p.profile || p.name || p.id || `Agent ${i + 1}`;
+      const name = p.display_name || p.profile || p.id || `Agent ${i + 1}`;
       const color = agentColors[i % agentColors.length];
       return `<span class="participant-chip"><span class="dot" style="background:${color}"></span>${escapeHtmlAttr(name)}</span>`;
     }).join("");
@@ -724,7 +734,7 @@ router.get("/r/:token", async (req, res, params) => {
       });
       const disc = readDiscussionFor(entry);
       const ogTitle = disc?.topic ? `圆桌讨论: ${disc.topic}` : "Roundtable 圆桌讨论";
-      const participantNames = (disc?.participants || []).map(p => p.display_name || p.profile || p.name).filter(Boolean).join("、");
+      const participantNames = (disc?.participants || []).map(p => p.display_name || p.profile).filter(Boolean).join("、");
       const ogDesc = disc?.topic
         ? `多位 AI Agent 正在围绕「${disc.topic}」展开圆桌讨论。${participantNames ? `参与者: ${participantNames}` : ""}`
         : "多 Agent 圆桌讨论引擎 — 让多个 AI Agent 像开会一样讨论、追踪共识分歧并生成结构化会议记录。";
@@ -951,7 +961,7 @@ router.get("/api/:token/export/pdf", async (req, res, params) => {
 
     const pdfOk = await new Promise((resolveP, rejectP) => {
       let stderr = "";
-      child = spawn("npx", ["--yes", "md-to-pdf", basename(tmpMdPath)], {
+      child = spawn("npx", ["--no-install", "md-to-pdf", basename(tmpMdPath)], {
         cwd: dirname(tmpMdPath),
         env: { ...process.env },
         stdio: ["pipe", "pipe", "pipe"],

@@ -28,7 +28,7 @@ from roundtable.exceptions import (
     InvalidParticipantError,
 )
 from roundtable.models import ConvergenceRecord, Discussion, Participant, Speech
-from roundtable.notify import Notifier
+from roundtable.notify import Notifier, validate_notification_config
 from roundtable.template import get_template
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,7 @@ class RoundtableCore:
         self._send_fn = send_fn
         self._publishers: dict[str, Any] = {}  # discussion_id → WebPublisher
         self._stream_delay: float = 0.0  # 每个 token chunk 之间的延迟（秒）
+        self._chunk_size: int = 3  # 流式推送每次发送的字符数
 
     # ------------------------------------------------------------------
     # Public API
@@ -103,6 +104,11 @@ class RoundtableCore:
             raise ValueError("participants must be a non-empty array of objects")
         if len(participants) < 2:
             raise ValueError("At least 2 participants are required for a discussion")
+
+        if notifications is not None:
+            errors = validate_notification_config(notifications)
+            if errors:
+                raise ValueError(f"Invalid notifications config: {'; '.join(errors)}")
 
         try:
             max_rounds = int(max_rounds)
@@ -269,7 +275,7 @@ class RoundtableCore:
                     )
                     # 逐 token 推送（中文按 2-4 字符分块，模拟自然流式）
                     content = speech.content
-                    chunk_size = 3  # 每次推送 3 个字符
+                    chunk_size = max(1, self._chunk_size)
                     token_seq = 0
                     import time as _time
 
@@ -731,6 +737,9 @@ class RoundtableCore:
                         )
                         publisher.conclude(disc_after.conclusion or "")
                         web_retained = True
+                        # Disk-backed viewer keeps serving via shared PM2 server;
+                        # release the in-memory publisher to avoid leaking.
+                        self._publishers.pop(discussion_id, None)
                         logger.info("Web publisher retained for concluded discussion %s", discussion_id)
                     else:
                         self._publishers.pop(discussion_id, None)
@@ -794,6 +803,8 @@ class RoundtableCore:
         finally:
             conn.close()
 
+    list = list_discussions
+
     def advance(self, discussion_id: str) -> dict[str, Any]:
         """Explicitly advance to the next round.
 
@@ -847,29 +858,10 @@ class RoundtableCore:
         self,
         topic: str,
         participants: list[dict[str, Any]],
-        *,
-        context: str | None = None,
-        max_rounds: int = 5,
-        speech_order: str = "fixed",
-        created_by: str = "coordinator",
-        output_path: str | None = None,
-        notifications: dict[str, Any] | None = None,
-        web: bool = False,
-        web_port: int = 8199,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """Create a new roundtable discussion. Alias for create_discussion."""
-        return self.create_discussion(
-            topic,
-            participants,
-            context=context,
-            max_rounds=max_rounds,
-            speech_order=speech_order,
-            created_by=created_by,
-            output_path=output_path,
-            notifications=notifications,
-            web=web,
-            web_port=web_port,
-        )
+        return self.create_discussion(topic, participants, **kwargs)
 
     def end(
         self,
@@ -1353,7 +1345,3 @@ class RoundtableCore:
             final_score,
             conv_history,
         )
-
-
-# Dynamic alias to avoid shadowing built-in `list` type in the class body.
-RoundtableCore.list = RoundtableCore.list_discussions  # type: ignore[attr-defined]

@@ -62,7 +62,6 @@ class RoundtableDB:
                 self._path = Path(env)
             else:
                 self._path = Path.home() / ".roundtable" / "roundtable.db"
-        self._initialized = False
 
     @property
     def db_path(self) -> Path:
@@ -71,7 +70,9 @@ class RoundtableDB:
     def connect(self) -> sqlite3.Connection:
         """Open (and initialize if needed) the roundtable DB.
 
-        WAL mode + foreign keys on every connection.
+        WAL mode + foreign keys on every connection. Schema DDL is idempotent
+        (CREATE TABLE IF NOT EXISTS) so it's safe to run on every connect;
+        migrations are version-gated via PRAGMA user_version.
         """
         self._path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self._path), isolation_level=None, timeout=30)
@@ -79,10 +80,8 @@ class RoundtableDB:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA foreign_keys=ON")
-        if not self._initialized:
-            conn.executescript(SCHEMA_SQL)
-            self._migrate(conn)
-            self._initialized = True
+        conn.executescript(SCHEMA_SQL)
+        self._migrate(conn)
         return conn
 
     def _migrate(self, conn: sqlite3.Connection) -> None:

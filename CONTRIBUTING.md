@@ -85,6 +85,15 @@ python -m roundtable.demo --web
 
 可选 Node 依赖（server.mjs）：`bcryptjs`、`md-to-pdf`。已在 package.json 中声明，`npm install` 即可。
 
+### Web Viewer Schema 迁移
+
+`discussion.json` 从 schema_version 1 升级到 2 时有以下变更：
+
+- `token` 字段已移除，改为存储 `token_hash`（SHA-256 哈希）
+- `revoked_tokens` 字段已移除，改为 `revoked_token_hashes`
+
+**无需手动迁移**：server.mjs 和 web_publisher.py 会自动检测旧格式并在下次写入时升级。旧的 discussion.json 文件在被访问时会自动转换为新格式。
+
 ### Pull Request 要求
 
 - 确保所有测试通过

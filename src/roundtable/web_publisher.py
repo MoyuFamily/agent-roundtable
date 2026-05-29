@@ -95,7 +95,7 @@ class WebPublisher:
         self._password = password
         self._password_hash: str | None = None
         if password:
-            import bcrypt
+            import bcrypt  # type: ignore[import-not-found,unused-ignore]
 
             self._password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
         self._token: str | None = None

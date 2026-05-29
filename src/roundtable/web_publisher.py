@@ -673,10 +673,13 @@ class WebPublisher:
                                 merged_events.append(ev)
                         data["events"] = merged_events
 
-                    existing_revoked = existing.get("revoked_token_hashes", [])
+                    existing_revoked = list(existing.get("revoked_token_hashes", []))
+                    for old_token in existing.get("revoked_tokens", []):
+                        existing_revoked.append(_hash_token(old_token))
                     new_revoked = data.get("revoked_token_hashes", [])
                     merged_revoked = list(set(existing_revoked + new_revoked))
                     data["revoked_token_hashes"] = merged_revoked
+                    data.pop("revoked_tokens", None)
                     if self._token and _hash_token(self._token) in merged_revoked:
                         self._revoked = True
 

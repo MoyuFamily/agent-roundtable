@@ -40,7 +40,7 @@ class WebDiscussionSync:
                     os.fsync(f.fileno())
                 finally:
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        except (OSError, json.JSONDecodeError):
+        except Exception:
             logger.debug("Failed to append event to token_stream.jsonl at %s", target)
 
     def sync_state(self, web_dir: Path, discussion_id: str, conn: sqlite3.Connection) -> None:
@@ -191,7 +191,7 @@ class WebDiscussionSync:
                         logger.info("Synchronized web discussion.json for %s from database", discussion_id)
                 finally:
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-        except (OSError, json.JSONDecodeError):
+        except Exception:
             logger.exception("Failed to sync web discussion state for %s", discussion_id)
 
     def update_speech(
@@ -243,7 +243,7 @@ class WebDiscussionSync:
                     logger.info("Updated web discussion.json for %s (cross-process)", discussion_id)
                 finally:
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-        except (OSError, json.JSONDecodeError):
+        except Exception:
             logger.exception("Failed to update web discussion.json for %s", discussion_id)
 
     def conclude(self, web_dir: Path, discussion_id: str, conclusion: str) -> None:
@@ -291,5 +291,5 @@ class WebDiscussionSync:
                     logger.info("Concluded web discussion.json for %s (cross-process)", discussion_id)
                 finally:
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-        except (OSError, json.JSONDecodeError):
+        except Exception:
             logger.exception("Failed to conclude web discussion.json for %s", discussion_id)

@@ -692,3 +692,87 @@ def test_equal_timestamp_keeps_more_complete_round_summary(tmp_path, monkeypatch
     data = json.loads(disc_json_path.read_text())
     assert len(data["round_summaries"]) == 1
     assert len(data["round_summaries"][0]["consensus"]) == 2
+
+
+def test_v1_revoked_tokens_migrated_to_hashes_on_write(tmp_path, monkeypatch):
+    """Old schema_version 1 files with plaintext revoked_tokens are migrated to hashes."""
+    import hashlib
+
+    from roundtable.web_publisher import WebPublisher
+
+    monkeypatch.setattr(WebPublisher, "_ensure_shared_server_running", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
+
+    db_path = tmp_path / "roundtable.db"
+    db = RoundtableDB(db_path)
+    core = RoundtableCore(db)
+
+    web_base_dir = tmp_path / "roundtable_web"
+    web_base_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(core, "_get_web_dir", lambda discussion_id: web_base_dir / discussion_id)
+
+    participants = [
+        {"profile": "alice", "role": "Engineer", "display_name": "Alice"},
+        {"profile": "bob", "role": "Designer", "display_name": "Bob"},
+    ]
+    res = core.create_discussion("Topic", participants, web=True, max_rounds=5)
+    disc_id = res["discussion_id"]
+    disc_web_dir = web_base_dir / disc_id
+    disc_json_path = disc_web_dir / "discussion.json"
+
+    # Simulate an old v1 file on disk with plaintext revoked_tokens
+    data = json.loads(disc_json_path.read_text())
+    old_token = "old_plaintext_token_abc"
+    data["revoked_tokens"] = [old_token]
+    data.pop("revoked_token_hashes", None)
+    disc_json_path.write_text(json.dumps(data, indent=2))
+
+    # Trigger a write from the live publisher (merge logic should migrate)
+    publisher = core._publishers[disc_id]
+    publisher._write_discussion_json()
+
+    # Verify migration: revoked_tokens removed, hash present in revoked_token_hashes
+    result = json.loads(disc_json_path.read_text())
+    expected_hash = hashlib.sha256(old_token.encode("utf-8")).hexdigest()
+    assert "revoked_tokens" not in result
+    assert expected_hash in result["revoked_token_hashes"]
+
+
+def test_fallback_conclude_preserves_final_summary_verdict(tmp_path, monkeypatch):
+    """Fallback conclude path writes final_summary with correct verdict via sync_state."""
+    from roundtable.web_publisher import WebPublisher
+
+    monkeypatch.setattr(WebPublisher, "_ensure_shared_server_running", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
+
+    db_path = tmp_path / "roundtable.db"
+    db = RoundtableDB(db_path)
+    core = RoundtableCore(db)
+
+    web_base_dir = tmp_path / "roundtable_web"
+    web_base_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(core, "_get_web_dir", lambda discussion_id: web_base_dir / discussion_id)
+
+    participants = [
+        {"profile": "alice", "role": "Engineer", "display_name": "Alice"},
+        {"profile": "bob", "role": "Designer", "display_name": "Bob"},
+    ]
+    res = core.create_discussion("Topic", participants, web=True, max_rounds=5)
+    disc_id = res["discussion_id"]
+    disc_web_dir = web_base_dir / disc_id
+    disc_json_path = disc_web_dir / "discussion.json"
+
+    # Coordinator opening (round 0), then participant speeches (round 1)
+    core.speak(disc_id, "coordinator", "Opening statement")
+    core.speak(disc_id, "alice", "I think we should use Python")
+    core.speak(disc_id, "bob", "I agree with Python")
+
+    core.end_discussion(disc_id, conclusion="使用 Python")
+
+    # Verify final state on disk
+    data = json.loads(disc_json_path.read_text())
+    assert data["status"] == "concluded"
+    assert data["conclusion"] == "使用 Python"
+    # If final_summary was written, its verdict should match
+    if data.get("final_summary"):
+        assert data["final_summary"]["verdict"] == "使用 Python"

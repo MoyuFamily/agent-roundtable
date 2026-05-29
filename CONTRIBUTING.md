@@ -57,9 +57,33 @@ pip install -e ".[dev]"
 # 运行测试
 pytest
 
+# 运行单个测试文件 / 特定测试
+pytest tests/test_core.py
+pytest tests/test_core.py::TestCreateDiscussion -v
+
 # 运行 lint
 ruff check .
+ruff format --check .
+
+# 类型检查
+mypy src/
 ```
+
+### Web Viewer 本地开发
+
+Web viewer 需要 Node.js >= 18。
+
+```bash
+# 安装 Node 依赖
+npm install
+
+# 运行带 web viewer 的 demo
+python -m roundtable.demo --web
+```
+
+可选 Python 依赖（web 功能）：`nanoid`、`bcrypt`。通过 `pip install -e ".[web]"` 安装。
+
+可选 Node 依赖（server.mjs）：`bcryptjs`、`md-to-pdf`。已在 package.json 中声明，`npm install` 即可。
 
 ### Pull Request 要求
 

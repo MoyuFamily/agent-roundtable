@@ -143,7 +143,7 @@ class RoundtableDB:
                     (disc_id, profile, p.get("role"), p.get("perspective"), p.get("display_name"), now),
                 )
             conn.execute("COMMIT")
-        except Exception:
+        except Exception:  # rollback any failure (sqlite or pre-execute) and re-raise
             conn.execute("ROLLBACK")
             raise
 
@@ -349,7 +349,7 @@ class RoundtableDB:
                         break
 
             conn.execute("COMMIT")
-        except Exception:
+        except Exception:  # rollback any failure (sqlite or pre-execute) and re-raise
             conn.execute("ROLLBACK")
             raise
 
@@ -533,7 +533,7 @@ class RoundtableDB:
                 )
                 discussion_complete = True
             conn.execute("COMMIT")
-        except Exception:
+        except Exception:  # rollback any failure (sqlite or pre-execute) and re-raise
             conn.execute("ROLLBACK")
             raise
 

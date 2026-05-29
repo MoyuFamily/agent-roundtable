@@ -9,6 +9,7 @@ Tests cover:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import socket
 import subprocess
@@ -55,7 +56,7 @@ def discussion_dir(tmp_path):
     disc_subdir = tmp_path / "test_disc"
     disc_subdir.mkdir()
     disc = {
-        "token": "test_token_abc123",
+        "token_hash": hashlib.sha256(b"test_token_abc123").hexdigest(),
         "topic": "Test Discussion Topic",
         "status": "completed",
         "schema_version": 2,
@@ -104,7 +105,7 @@ def discussion_dir(tmp_path):
         },
         "conclusion": "The team agrees to prioritize performance optimization.",
         "consensus_score": 0.75,
-        "revoked_tokens": [],
+        "revoked_token_hashes": [],
         "stream": {"seq": 3, "events": []},
         "updated_at": int(time.time()),
     }
@@ -160,7 +161,7 @@ def pw_server(tmp_path):
     disc_subdir = tmp_path / "pw_disc"
     disc_subdir.mkdir()
     disc = {
-        "token": "pw_token_456",
+        "token_hash": hashlib.sha256(b"pw_token_456").hexdigest(),
         "topic": "Secret Discussion",
         "status": "completed",
         "schema_version": 2,
@@ -181,7 +182,7 @@ def pw_server(tmp_path):
         "round_summaries": [],
         "final_summary": None,
         "conclusion": None,
-        "revoked_tokens": [],
+        "revoked_token_hashes": [],
         "stream": {"seq": 1, "events": []},
         "updated_at": int(time.time()),
     }

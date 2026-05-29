@@ -130,7 +130,7 @@ class WebhookSender:
             logger.warning("Webhook HTTP error %s for %s: %s", e.code, url, e.reason)
         except urllib.error.URLError as e:
             logger.warning("Webhook URL error for %s: %s", url, e.reason)
-        except Exception as e:
+        except (TypeError, ValueError, OSError) as e:
             logger.warning("Webhook send failed for %s: %s", url, e)
         return False
 

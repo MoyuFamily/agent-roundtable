@@ -25,7 +25,7 @@ import {
 } from "node:fs";
 import * as readline from "node:readline";
 import { join, resolve, dirname, basename } from "node:path";
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // CLI args
@@ -62,13 +62,13 @@ const SERVER_SECRET = randomBytes(32);
  *   tokenStreamPath: string,
  *   passwordHash: string | null,
  *   expiresAt: number | null,
- *   revokedTokens: Set<string>,
- *   token: string,
+ *   revokedTokenHashes: Set<string>,
+ *   tokenHash: string,
  * }} DiscussionEntry
  */
 
 /** @type {Map<string, DiscussionEntry>} */
-const byToken = new Map();
+const byTokenHash = new Map();
 /** @type {Map<string, DiscussionEntry>} */
 const byDiscussionId = new Map();
 /** @type {Map<string, import("fs").FSWatcher>} */
@@ -87,11 +87,13 @@ function safeReadJSON(path) {
 function registerDiscussion(dir, discussionId) {
   const discPath = join(dir, "discussion.json");
   const data = safeReadJSON(discPath);
-  if (!data || !data.token) return null;
+  if (!data) return null;
+  const tokenHash = data.token_hash || (data.token ? _hashToken(data.token) : null);
+  if (!tokenHash) return null;
 
   const previous = byDiscussionId.get(discussionId);
-  if (previous && previous.token !== data.token) {
-    byToken.delete(previous.token);
+  if (previous && previous.tokenHash !== tokenHash) {
+    byTokenHash.delete(previous.tokenHash);
   }
 
   const entry = {
@@ -101,10 +103,10 @@ function registerDiscussion(dir, discussionId) {
     tokenStreamPath: join(dir, "token_stream.jsonl"),
     passwordHash: data.password_hash || null,
     expiresAt: data.expires_at ?? null,
-    revokedTokens: new Set(data.revoked_tokens || []),
-    token: data.token,
+    revokedTokenHashes: new Set(data.revoked_token_hashes || []),
+    tokenHash,
   };
-  byToken.set(data.token, entry);
+  byTokenHash.set(tokenHash, entry);
   byDiscussionId.set(discussionId, entry);
 
   startSubdirWatcher(entry);
@@ -113,32 +115,34 @@ function registerDiscussion(dir, discussionId) {
 
 function refreshEntry(entry) {
   const data = safeReadJSON(entry.discussionPath);
-  if (!data || !data.token) return null;
-  if (data.token !== entry.token) {
-    byToken.delete(entry.token);
-    entry.token = data.token;
-    byToken.set(data.token, entry);
+  if (!data) return null;
+  const tokenHash = data.token_hash || (data.token ? _hashToken(data.token) : null);
+  if (!tokenHash) return null;
+  if (tokenHash !== entry.tokenHash) {
+    byTokenHash.delete(entry.tokenHash);
+    entry.tokenHash = tokenHash;
+    byTokenHash.set(tokenHash, entry);
   }
   entry.passwordHash = data.password_hash || null;
   entry.expiresAt = data.expires_at ?? null;
-  entry.revokedTokens = new Set(data.revoked_tokens || []);
+  entry.revokedTokenHashes = new Set(data.revoked_token_hashes || []);
   return data;
 }
 
 function unregisterDiscussion(discussionId) {
   const entry = byDiscussionId.get(discussionId);
   if (!entry) return;
-  byToken.delete(entry.token);
+  byTokenHash.delete(entry.tokenHash);
   byDiscussionId.delete(discussionId);
   const w = subdirWatchers.get(discussionId);
   if (w) {
     try { w.close(); } catch { /* ignore */ }
     subdirWatchers.delete(discussionId);
   }
-  sseClients.delete(entry.token);
-  sseDeltaBuffers.delete(entry.token);
-  sseLastSeqByToken.delete(entry.token);
-  pollWaiters.delete(entry.token);
+  sseClients.delete(discussionId);
+  sseDeltaBuffers.delete(discussionId);
+  sseLastSeqByToken.delete(discussionId);
+  pollWaiters.delete(discussionId);
 }
 
 function discoverDiscussions() {
@@ -150,7 +154,7 @@ function discoverDiscussions() {
 }
 
 function entryForToken(token) {
-  return byToken.get(token) || null;
+  return byTokenHash.get(_hashToken(token)) || null;
 }
 
 function readDiscussionFor(entry) {
@@ -165,6 +169,11 @@ function readDiscussionFor(entry) {
 // Token + password validation
 // ---------------------------------------------------------------------------
 
+function _hashToken(token) {
+  if (typeof token !== "string") return "";
+  return createHash("sha256").update(token, "utf-8").digest("hex");
+}
+
 function _safeStrEqual(a, b) {
   if (typeof a !== "string" || typeof b !== "string") return false;
   const ab = Buffer.from(a, "utf-8");
@@ -178,9 +187,11 @@ function isTokenValid(token) {
   if (!entry) return false;
   const data = readDiscussionFor(entry);
   if (!data) return false;
-  if (!_safeStrEqual(data.token, token)) return false;
-  for (const revoked of data.revoked_tokens || []) {
-    if (_safeStrEqual(revoked, token)) return false;
+  const incomingHash = _hashToken(token);
+  const storedHash = data.token_hash || (data.token ? _hashToken(data.token) : "");
+  if (!_safeStrEqual(storedHash, incomingHash)) return false;
+  for (const revokedHash of data.revoked_token_hashes || []) {
+    if (_safeStrEqual(revokedHash, incomingHash)) return false;
   }
   if (data.expires_at && Date.now() / 1000 > data.expires_at) return false;
   return true;
@@ -219,9 +230,9 @@ function _parseCookies(cookieHeader) {
 function isAuthenticated(req, entry) {
   if (!entry.passwordHash) return true;
   const cookies = _parseCookies(req.headers.cookie);
-  const sig = cookies[`rt_pw_${entry.token}`];
+  const sig = cookies[`rt_pw_${entry.tokenHash}`];
   if (!sig) return false;
-  return sig === _signSession(entry.token);
+  return sig === _signSession(entry.tokenHash);
 }
 
 // ---------------------------------------------------------------------------
@@ -372,6 +383,8 @@ function sendPasswordPage(res) {
 function safeDiscussion(data) {
   const safe = { ...data };
   delete safe.token;
+  delete safe.token_hash;
+  delete safe.revoked_token_hashes;
   delete safe.password_hash;
   return safe;
 }
@@ -793,15 +806,15 @@ router.get("/api/:token/events", async (req, res, params) => {
   const data = readDiscussionFor(entry);
   if (data) {
     const currentSeq = Number(data?.stream?.seq ?? 0);
-    if (Number.isFinite(currentSeq)) sseLastSeqByToken.set(params.token, currentSeq);
+    if (Number.isFinite(currentSeq)) sseLastSeqByToken.set(entry.discussionId, currentSeq);
     res.write(`event: init\ndata: ${JSON.stringify(safeDiscussion(data))}\n\n`);
     if (typeof res.flushHeaders === "function") res.flushHeaders();
   }
 
-  if (!sseClients.has(params.token)) {
-    sseClients.set(params.token, new Set());
+  if (!sseClients.has(entry.discussionId)) {
+    sseClients.set(entry.discussionId, new Set());
   }
-  sseClients.get(params.token).add(res);
+  sseClients.get(entry.discussionId).add(res);
 
   const keepAlive = setInterval(() => {
     try {
@@ -813,7 +826,7 @@ router.get("/api/:token/events", async (req, res, params) => {
 
   req.on("close", () => {
     clearInterval(keepAlive);
-    const clients = sseClients.get(params.token);
+    const clients = sseClients.get(entry.discussionId);
     if (clients) clients.delete(res);
   });
 });
@@ -834,8 +847,8 @@ router.get("/api/:token/poll", async (req, res, params) => {
     return sendJSON(res, safeDiscussion(data));
   }
 
-  if (!pollWaiters.has(params.token)) {
-    pollWaiters.set(params.token, new Set());
+  if (!pollWaiters.has(entry.discussionId)) {
+    pollWaiters.set(entry.discussionId, new Set());
   }
 
   const timer = setTimeout(() => {
@@ -845,11 +858,11 @@ router.get("/api/:token/poll", async (req, res, params) => {
     } else {
       sendJSON(res, { updated_at: since });
     }
-    pollWaiters.get(params.token)?.delete(waiter);
+    pollWaiters.get(entry.discussionId)?.delete(waiter);
   }, 25000);
 
   const waiter = { res, since, timer };
-  pollWaiters.get(params.token).add(waiter);
+  pollWaiters.get(entry.discussionId).add(waiter);
 });
 
 router.post("/api/:token/share", (req, res, params) => {
@@ -864,9 +877,10 @@ router.post("/api/:token/revoke", (req, res, params) => {
   const data = readDiscussionFor(entry);
   if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
 
-  if (!data.revoked_tokens) data.revoked_tokens = [];
-  if (!data.revoked_tokens.includes(params.token)) {
-    data.revoked_tokens.push(params.token);
+  const incomingHash = _hashToken(params.token);
+  if (!data.revoked_token_hashes) data.revoked_token_hashes = [];
+  if (!data.revoked_token_hashes.includes(incomingHash)) {
+    data.revoked_token_hashes.push(incomingHash);
   }
   data.updated_at = Math.floor(Date.now() / 1000);
 
@@ -874,8 +888,8 @@ router.post("/api/:token/revoke", (req, res, params) => {
   writeFileSync(tmpPath, JSON.stringify(data, null, 2));
   renameSync(tmpPath, entry.discussionPath);
 
-  entry.revokedTokens.add(params.token);
-  broadcastToSSE(params.token, "revoked", { revoked: true });
+  entry.revokedTokenHashes.add(incomingHash);
+  broadcastToSSE(entry.discussionId, "revoked", { revoked: true });
 
   sendJSON(res, { ok: true, revoked: true });
 });
@@ -896,10 +910,10 @@ router.post("/api/:token/validate-password", async (req, res, params) => {
 
     const match = await bcrypt.compare(password, entry.passwordHash);
     if (match) {
-      const sig = _signSession(entry.token);
+      const sig = _signSession(entry.tokenHash);
       res.setHeader(
         "Set-Cookie",
-        `rt_pw_${entry.token}=${sig}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}`
+        `rt_pw_${entry.tokenHash}=${sig}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}`
       );
       return sendJSON(res, { ok: true });
     }
@@ -1226,13 +1240,13 @@ function startSubdirWatcher(entry) {
 
       const safe = safeDiscussion(data);
       lastUpdatedTimestamp = data.updated_at || Date.now();
-      const previousSeq = sseLastSeqByToken.get(entry.token) ?? 0;
+      const previousSeq = sseLastSeqByToken.get(entry.discussionId) ?? 0;
       const deltaEvents = streamEventsSince(data, previousSeq);
       const latestSeq = Number(data?.stream?.seq ?? previousSeq);
-      if (Number.isFinite(latestSeq)) sseLastSeqByToken.set(entry.token, Math.max(previousSeq, latestSeq));
-      for (const eventData of deltaEvents) queueSSEDelta(entry.token, eventData);
-      broadcastToSSE(entry.token, "update", safe);
-      notifyPollWaiters(entry.token);
+      if (Number.isFinite(latestSeq)) sseLastSeqByToken.set(entry.discussionId, Math.max(previousSeq, latestSeq));
+      for (const eventData of deltaEvents) queueSSEDelta(entry.discussionId, eventData);
+      broadcastToSSE(entry.discussionId, "update", safe);
+      notifyPollWaiters(entry.discussionId);
     }, 50);
   });
   subdirWatchers.set(entry.discussionId, w);

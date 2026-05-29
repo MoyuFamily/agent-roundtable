@@ -176,14 +176,14 @@ class TestEndDiscussionWithPublisher:
         return result["discussion_id"], mock_pub
 
     def test_conclude_calls_publisher_conclude_and_retains_viewer(self, core):
-        """Normal conclude should keep the web viewer available for review."""
+        """Normal conclude should flush state to disk then release the publisher."""
         disc_id, mock_pub = self._create_web_discussion(core)
 
         result = core.end_discussion(disc_id)
 
         mock_pub.conclude.assert_called_once()
         mock_pub.stop.assert_not_called()
-        assert disc_id in core._publishers
+        assert disc_id not in core._publishers
         assert result["web_retained"] is True
 
     def test_force_cancel_calls_publisher_stop_only(self, core):

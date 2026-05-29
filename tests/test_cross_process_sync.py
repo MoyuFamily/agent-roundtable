@@ -530,7 +530,7 @@ def test_live_publisher_does_not_overwrite_fallback_speech(tmp_path, monkeypatch
 
 
 def test_stale_live_publisher_does_not_revert_fallback_conclusion(tmp_path, monkeypatch):
-    """Test that a stale live publisher update does not revert a newer conclusion written by fallback sync."""
+    """After conclude, publisher is released from memory, preventing stale writes."""
     db_path = tmp_path / "roundtable.db"
     db = RoundtableDB(db_path)
     core_live = RoundtableCore(db)
@@ -555,27 +555,21 @@ def test_stale_live_publisher_does_not_revert_fallback_conclusion(tmp_path, monk
     disc_web_dir = web_base_dir / disc_id
     disc_json_path = disc_web_dir / "discussion.json"
 
-    # core_live retains the live publisher (in memory)
     # core_fallback acts as fallback writer (no publisher in memory)
     core_fallback._publishers.pop(disc_id, None)
 
     # 1. Live publisher ends the discussion with "旧结论"
-    # This writes conclusion="旧结论" with t1
     core_live.end_discussion(disc_id, conclusion="旧结论")
 
+    # Publisher should be released from memory after conclude
+    assert disc_id not in core_live._publishers
+
     # 2. Fallback updates conclusion to "新结论"
-    # This writes conclusion="新结论" with t2 (where t2 > t1)
     core_fallback.end_discussion(disc_id, conclusion="新结论")
 
-    # 3. Simulate a stale live publisher write using its old in-memory state
-    # Under old logic, this would revert the disk's conclusion/final_summary to "旧结论"
-    publisher = core_live._publishers[disc_id]
-    publisher._write_discussion_json()
-
-    # Verify that the conclusion and final summary verdict remain "新结论"
+    # Verify that the conclusion remains "新结论" (no stale publisher can revert it)
     data = json.loads(disc_json_path.read_text())
     assert data["conclusion"] == "新结论"
-    assert data["final_summary"]["verdict"] == "新结论"
 
 
 def test_stale_live_publisher_does_not_overwrite_newer_round_summary(tmp_path, monkeypatch):

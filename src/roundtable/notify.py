@@ -83,7 +83,7 @@ class Notifier:
             if not message:
                 return
             self._dispatch(message, event=event, discussion_id=discussion_id, topic=topic, **kwargs)
-        except Exception as e:
+        except Exception as e:  # notification boundary; must never raise into discussion flow
             logger.warning("Notification dispatch failed for event=%s: %s", event, e)
 
     def _dispatch(self, message: str, **kwargs: Any) -> None:
@@ -97,7 +97,7 @@ class Notifier:
             try:
                 if self._send_fn:
                     self._send_fn(platform, chat_id, message)
-            except Exception as e:
+            except Exception as e:  # send_fn is user-supplied; any SDK can raise anything
                 logger.warning(
                     "Failed to send notification to %s:%s: %s",
                     platform,
@@ -217,7 +217,7 @@ class Notifier:
                     sender.send_slack(url, text=text or "", blocks=blocks)
                 else:
                     logger.warning("Unknown webhook platform: %s", platform)
-            except Exception as e:
+            except (OSError, ValueError) as e:
                 logger.warning("Webhook dispatch failed for %s: %s", platform, e)
 
 

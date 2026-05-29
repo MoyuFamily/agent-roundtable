@@ -7,8 +7,8 @@ File I/O uses real tmp_path for integration confidence.
 
 from __future__ import annotations
 
+import hashlib
 import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -82,7 +82,8 @@ class TestFileIO:
         data = pub._read_discussion_json()
         assert data is not None
         assert data["discussion_id"] == "rt_test01"
-        assert data["token"] == "testtoken123"
+        assert "token" not in data
+        assert data["token_hash"] == hashlib.sha256(b"testtoken123").hexdigest()
         assert data["topic"] == "Test Topic"
         assert data["status"] == "active"
         assert data["speeches"] == []
@@ -114,18 +115,18 @@ class TestFileIO:
         assert (tmp_path / "discussion.json").exists()
 
     def test_write_discussion_json_raw_preserves_extra_fields(self, tmp_path):
-        """Raw write allows extra fields like revoked_tokens."""
+        """Raw write allows extra fields like revoked_token_hashes."""
         pub = WebPublisher(str(tmp_path))
         custom_data = {
             "discussion_id": "rt_custom",
             "extra_field": "hello",
-            "revoked_tokens": ["abc"],
+            "revoked_token_hashes": ["abc"],
         }
         pub._write_discussion_json_raw(custom_data)
 
         data = pub._read_discussion_json()
         assert data["extra_field"] == "hello"
-        assert data["revoked_tokens"] == ["abc"]
+        assert data["revoked_token_hashes"] == ["abc"]
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +337,9 @@ class TestWebPublisherLifecycle:
         pub.revoke()
 
         data = pub._read_discussion_json()
-        assert token in data["revoked_tokens"]
+        assert hashlib.sha256(token.encode()).hexdigest() in data["revoked_token_hashes"]
+        assert "revoked_tokens" not in data
+        assert "token" not in data
 
     def test_revoke_sets_internal_flag(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19009)
@@ -511,7 +514,7 @@ class TestIntegration:
         # Revoke
         pub.revoke()
         data = pub._read_discussion_json()
-        assert pub.token in data["revoked_tokens"]
+        assert hashlib.sha256(pub.token.encode()).hexdigest() in data["revoked_token_hashes"]
 
 
 class TestRunDemoWebIntegration:

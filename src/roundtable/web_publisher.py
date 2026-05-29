@@ -8,6 +8,7 @@ a JSON file that Express reads via shared lock + fs.watch.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import logging
 import os
@@ -44,6 +45,10 @@ except ImportError:
 
     def _generate_token(size: int = 21) -> str:
         return secrets.token_urlsafe(size)
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -322,10 +327,12 @@ class WebPublisher:
         self._revoked = True
         data = self._read_discussion_json()
         if data:
-            revoked = data.get("revoked_tokens", [])
-            if self._token and self._token not in revoked:
-                revoked.append(self._token)
-            data["revoked_tokens"] = revoked
+            revoked = data.get("revoked_token_hashes", [])
+            if self._token:
+                token_hash = _hash_token(self._token)
+                if token_hash not in revoked:
+                    revoked.append(token_hash)
+            data["revoked_token_hashes"] = revoked
             data["updated_at"] = time.time()
             self._write_discussion_json_raw(data)
         logger.info("Token revoked for discussion %s", self._discussion_id)
@@ -447,12 +454,13 @@ class WebPublisher:
 
     def _write_discussion_json(self) -> None:
         """Write current state to discussion.json with atomic file lock."""
+        token_hash = _hash_token(self._token) if self._token else None
         data = {
             "schema_version": 2,
             "discussion_id": self._discussion_id,
             "topic": self._topic,
             "status": self._status,
-            "token": self._token,
+            "token_hash": token_hash,
             "password_hash": self._password_hash,
             "participants": self._participants,
             "speeches": self._speeches,
@@ -464,7 +472,7 @@ class WebPublisher:
             "latest_event": self._stream_events[-1] if self._stream_events else None,
             "conclusion": self._conclusion,
             "final_summary": self._final_summary,
-            "revoked_tokens": [self._token] if self._revoked else [],
+            "revoked_token_hashes": [token_hash] if self._revoked and token_hash else [],
             "expires_at": self._expires_at,
             "updated_at": time.time(),
         }
@@ -665,12 +673,11 @@ class WebPublisher:
                                 merged_events.append(ev)
                         data["events"] = merged_events
 
-                    # 6. Merge revoked_tokens
-                    existing_revoked = existing.get("revoked_tokens", [])
-                    new_revoked = data.get("revoked_tokens", [])
+                    existing_revoked = existing.get("revoked_token_hashes", [])
+                    new_revoked = data.get("revoked_token_hashes", [])
                     merged_revoked = list(set(existing_revoked + new_revoked))
-                    data["revoked_tokens"] = merged_revoked
-                    if self._token in merged_revoked:
+                    data["revoked_token_hashes"] = merged_revoked
+                    if self._token and _hash_token(self._token) in merged_revoked:
                         self._revoked = True
 
                     # 7. Preserve password_hash from disk if memory doesn't have one

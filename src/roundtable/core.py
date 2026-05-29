@@ -6,11 +6,8 @@ imports. All handlers return plain dicts (JSON-serializable).
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import sqlite3
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
@@ -29,7 +26,9 @@ from roundtable.exceptions import (
 )
 from roundtable.models import ConvergenceRecord, Discussion, Participant, Speech
 from roundtable.notify import Notifier, validate_notification_config
+from roundtable.output import OutputBuilder
 from roundtable.template import get_template
+from roundtable.web_sync import WebDiscussionSync
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +50,8 @@ class RoundtableCore:
         self._publishers: dict[str, Any] = {}  # discussion_id → WebPublisher
         self._stream_delay: float = 0.0  # 每个 token chunk 之间的延迟（秒）
         self._chunk_size: int = 3  # 流式推送每次发送的字符数
+        self._web_sync = WebDiscussionSync(self.db)
+        self._output = OutputBuilder(self.db)
 
     # ------------------------------------------------------------------
     # Public API
@@ -288,7 +289,7 @@ class RoundtableCore:
 
                     # 保留 v1 兼容：也推送完整 speech 事件
                     publisher.on_speech(speech_data)
-                except Exception:
+                except (OSError, RuntimeError, ValueError):
                     logger.exception(f"Web publisher streaming failed for {discussion_id}")
             else:
                 # Publisher not in memory (cross-process) — update discussion.json directly
@@ -348,7 +349,7 @@ class RoundtableCore:
                             consensus=[{"content": p} for p in consensus_pts],
                             disagreement=[{"content": p} for p in disagreement_pts],
                         )
-                    except Exception:
+                    except (OSError, RuntimeError, ValueError):
                         logger.exception("Web publisher on_round_summary failed for %s", discussion_id)
 
             # Discussion auto-concluded notification
@@ -375,7 +376,7 @@ class RoundtableCore:
                                 verdict=disc_after.conclusion or "",
                             )
                             publisher.conclude(disc_after.conclusion or "")
-                        except Exception:
+                        except (OSError, RuntimeError, ValueError):
                             logger.exception("Web publisher conclude failed for auto-concluded %s", discussion_id)
             # Sync web discussion findings and conclusion from the database
             self._sync_web_discussion_state(discussion_id, conn)
@@ -679,7 +680,7 @@ class RoundtableCore:
                             )
                             publisher.conclude(conclusion)
                             web_retained = True
-                        except Exception:
+                        except (OSError, RuntimeError, ValueError):
                             logger.exception("Web publisher conclude update failed for %s", discussion_id)
                     else:
                         self._conclude_web_discussion(discussion_id, conclusion)
@@ -745,7 +746,7 @@ class RoundtableCore:
                         self._publishers.pop(discussion_id, None)
                         publisher.stop()
                         logger.info("Web publisher stopped for %s", discussion_id)
-                except Exception:
+                except (OSError, RuntimeError, ValueError):
                     logger.exception(f"Web publisher cleanup failed for {discussion_id}")
             elif action == "concluded" and disc_after:
                 # Cross-process: update discussion.json directly
@@ -934,189 +935,19 @@ class RoundtableCore:
         )
 
     # ------------------------------------------------------------------
-    # Helpers
+    # Helpers — delegate to extracted modules (web_sync, output)
     # ------------------------------------------------------------------
 
     def _get_web_dir(self, discussion_id: str) -> Path:
-        """Get the directory where web viewer files are stored."""
         from roundtable.web_publisher import SHARED_DATA_DIR
 
         return SHARED_DATA_DIR / discussion_id
 
     def _append_token_stream_jsonl_fallback(self, web_dir: Path, event: dict[str, Any]) -> None:
-        """Safely append an event to token_stream.jsonl under exclusive lock."""
-        import fcntl as _fcntl
-
-        target = web_dir / "token_stream.jsonl"
-        try:
-            with open(target, "a") as f:
-                _fcntl.flock(f.fileno(), _fcntl.LOCK_EX)
-                try:
-                    f.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
-                    f.write("\n")
-                    f.flush()
-                    os.fsync(f.fileno())
-                finally:
-                    _fcntl.flock(f.fileno(), _fcntl.LOCK_UN)
-        except Exception:
-            logger.debug("Failed to append event to token_stream.jsonl at %s", target)
+        self._web_sync.append_token_stream(web_dir, event)
 
     def _sync_web_discussion_state(self, discussion_id: str, conn: sqlite3.Connection) -> None:
-        """Synchronize discussion.json and token_stream.jsonl with findings and convergence scores from DB."""
-        import fcntl as _fcntl
-
-        web_dir = self._get_web_dir(discussion_id)
-        json_path = web_dir / "discussion.json"
-        if not json_path.exists():
-            return
-
-        lock_path = json_path.with_suffix(".json.lock")
-        try:
-            with open(lock_path, "a") as lock_file:
-                _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_EX)
-                try:
-                    with open(json_path) as f:
-                        data = json.load(f)
-
-                    changed = False
-                    now = time.time()
-
-                    disc = self.db.get_discussion(conn, discussion_id)
-                    if not disc:
-                        return
-
-                    old_status = data.get("status")
-                    if old_status != disc.status:
-                        data["status"] = disc.status
-                        changed = True
-
-                    if disc.status == "concluded" and data.get("conclusion") != disc.conclusion:
-                        data["conclusion"] = disc.conclusion
-                        changed = True
-
-                    # Sync round summaries
-                    findings = self.db.get_findings(conn, discussion_id)
-                    conv_history = self.db.get_convergence_history(conn, discussion_id)
-                    conv_map = {c.round: c.score for c in conv_history}
-
-                    findings_by_round: dict[int, list[Any]] = {}
-                    for finding in findings:
-                        findings_by_round.setdefault(finding.round, []).append(finding)
-
-                    existing_summaries = data.setdefault("round_summaries", [])
-                    existing_rounds_map = {s.get("round"): s for s in existing_summaries if "round" in s}
-
-                    max_round_to_sync = max(findings_by_round.keys()) if findings_by_round else 0
-                    for r in range(1, max_round_to_sync + 1):
-                        round_findings = findings_by_round.get(r, [])
-                        consensus_pts = [
-                            {"content": finding.content} for finding in round_findings if finding.type == "consensus"
-                        ]
-                        disagreement_pts = [
-                            {"content": finding.content} for finding in round_findings if finding.type == "disagreement"
-                        ]
-
-                        if not round_findings and r not in existing_rounds_map:
-                            continue
-
-                        score = conv_map.get(r)
-                        existing = existing_rounds_map.get(r)
-                        needs_update = False
-                        if not existing:
-                            needs_update = True
-                        else:
-                            ex_consensus = existing.get("consensus", [])
-                            ex_disagreement = existing.get("disagreement", [])
-                            ex_score = existing.get("convergence_score")
-                            if (
-                                ex_consensus != consensus_pts
-                                or ex_disagreement != disagreement_pts
-                                or ex_score != score
-                            ):
-                                needs_update = True
-
-                        if needs_update:
-                            summary_event = {
-                                "type": "round_summary",
-                                "round": r,
-                                "consensus": consensus_pts,
-                                "disagreement": disagreement_pts,
-                                "timestamp": now,
-                            }
-                            if score is not None:
-                                summary_event["convergence_score"] = score
-
-                            if existing:
-                                existing.update(summary_event)
-                            else:
-                                existing_summaries.append(summary_event)
-
-                            data.setdefault("events", []).append(summary_event)
-                            changed = True
-                            self._append_token_stream_jsonl_fallback(web_dir, summary_event)
-
-                    existing_summaries.sort(key=lambda s: s.get("round", 0))
-
-                    # Sync final summary if concluded
-                    if disc.status == "concluded":
-                        final_summary = data.get("final_summary")
-                        consensus_all = [
-                            {"content": finding.content} for finding in findings if finding.type == "consensus"
-                        ]
-                        disagreement_all = [
-                            {"content": finding.content} for finding in findings if finding.type == "disagreement"
-                        ]
-
-                        needs_final_summary = False
-                        if not final_summary:
-                            needs_final_summary = True
-                        else:
-                            ex_consensus = final_summary.get("consensus", [])
-                            ex_disagreement = final_summary.get("disagreement", [])
-                            if (
-                                len(ex_consensus) != len(consensus_all)
-                                or len(ex_disagreement) != len(disagreement_all)
-                                or final_summary.get("verdict") != (disc.conclusion or "")
-                            ):
-                                needs_final_summary = True
-
-                        if needs_final_summary:
-                            final_summary_event = {
-                                "type": "final_summary",
-                                "consensus": consensus_all,
-                                "disagreement": disagreement_all,
-                                "verdict": disc.conclusion or "",
-                                "timestamp": now,
-                            }
-                            data["final_summary"] = final_summary_event
-                            data.setdefault("events", []).append(final_summary_event)
-                            changed = True
-                            self._append_token_stream_jsonl_fallback(web_dir, final_summary_event)
-
-                        if old_status != "concluded":
-                            status_event = {
-                                "type": "status_delta",
-                                "status": "concluded",
-                                "conclusion": disc.conclusion or "",
-                                "timestamp": now,
-                            }
-                            data.setdefault("events", []).append(status_event)
-                            changed = True
-                            self._append_token_stream_jsonl_fallback(web_dir, status_event)
-
-                    if changed:
-                        data["updated_at"] = now
-                        tmp = json_path.with_suffix(".json.tmp")
-                        with open(tmp, "w") as f:
-                            json.dump(data, f, ensure_ascii=False, indent=2)
-                            f.flush()
-                            os.fsync(f.fileno())
-                        os.rename(str(tmp), str(json_path))
-                        logger.info("Synchronized web discussion.json for %s from database", discussion_id)
-                finally:
-                    _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_UN)
-        except Exception:
-            logger.exception("Failed to sync web discussion state for %s", discussion_id)
+        self._web_sync.sync_state(self._get_web_dir(discussion_id), discussion_id, conn)
 
     def _update_web_discussion_json(
         self,
@@ -1125,159 +956,19 @@ class RoundtableCore:
         topic: str,
         participants: list[Any],
     ) -> None:
-        """Update discussion.json directly when publisher is not in memory (cross-process)."""
-        import fcntl as _fcntl
-
-        web_dir = self._get_web_dir(discussion_id)
-        json_path = web_dir / "discussion.json"
-        if not json_path.exists():
-            return
-
-        lock_path = json_path.with_suffix(".json.lock")
-        try:
-            with open(lock_path, "a") as lock_file:
-                _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_EX)
-                try:
-                    with open(json_path) as f:
-                        data = json.load(f)
-
-                    # Append speech
-                    data.setdefault("speeches", []).append(speech_data)
-                    # Also append replay event for cross-process replay
-                    now = time.time()
-                    data.setdefault("events", []).append(
-                        {
-                            "type": "speech_delta",
-                            "speech": speech_data,
-                            "timestamp": now,
-                        }
-                    )
-                    data["updated_at"] = now
-
-                    # Write to token_stream.jsonl for replay
-                    self._append_token_stream_jsonl_fallback(
-                        web_dir,
-                        {
-                            "type": "speech_delta",
-                            "speech": speech_data,
-                            "timestamp": now,
-                        },
-                    )
-
-                    tmp = json_path.with_suffix(".json.tmp")
-                    with open(tmp, "w") as f:
-                        json.dump(data, f, ensure_ascii=False, indent=2)
-                        f.flush()
-                        os.fsync(f.fileno())
-                    os.rename(str(tmp), str(json_path))
-                    logger.info("Updated web discussion.json for %s (cross-process)", discussion_id)
-                finally:
-                    _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_UN)
-        except Exception:
-            logger.exception("Failed to update web discussion.json for %s", discussion_id)
+        self._web_sync.update_speech(self._get_web_dir(discussion_id), discussion_id, speech_data, topic, participants)
 
     def _conclude_web_discussion(self, discussion_id: str, conclusion: str) -> None:
-        """Update discussion.json with conclusion when publisher is not in memory (cross-process)."""
-        import fcntl as _fcntl
-
-        web_dir = self._get_web_dir(discussion_id)
-        json_path = web_dir / "discussion.json"
-        if not json_path.exists():
-            return
-
-        lock_path = json_path.with_suffix(".json.lock")
-        try:
-            with open(lock_path, "a") as lock_file:
-                _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_EX)
-                try:
-                    with open(json_path) as f:
-                        data = json.load(f)
-
-                    data["conclusion"] = conclusion
-                    data["status"] = "concluded"
-                    # Also append concluded event for cross-process replay
-                    now = time.time()
-                    data.setdefault("events", []).append(
-                        {
-                            "type": "status_delta",
-                            "status": "concluded",
-                            "conclusion": conclusion,
-                            "timestamp": now,
-                        }
-                    )
-                    data["updated_at"] = now
-
-                    # Write to token_stream.jsonl for replay
-                    self._append_token_stream_jsonl_fallback(
-                        web_dir,
-                        {
-                            "type": "status_delta",
-                            "status": "concluded",
-                            "conclusion": conclusion,
-                            "timestamp": now,
-                        },
-                    )
-
-                    tmp = json_path.with_suffix(".json.tmp")
-                    with open(tmp, "w") as f:
-                        json.dump(data, f, ensure_ascii=False, indent=2)
-                        f.flush()
-                        os.fsync(f.fileno())
-                    os.rename(str(tmp), str(json_path))
-                    logger.info("Concluded web discussion.json for %s (cross-process)", discussion_id)
-                finally:
-                    _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_UN)
-        except Exception:
-            logger.exception("Failed to conclude web discussion.json for %s", discussion_id)
+        self._web_sync.conclude(self._get_web_dir(discussion_id), discussion_id, conclusion)
 
     def _make_notifier(self, config: dict[str, Any] | None) -> Notifier:
-        """Create a Notifier from a discussion's notification config."""
         return Notifier(config, send_fn=self._send_fn)
 
     def _write_markdown_output(self, output_path: str, content: str) -> dict[str, Any]:
-        """Write generated Markdown to the configured discussion output path."""
-        try:
-            path = Path(output_path).expanduser()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content.rstrip() + "\n", encoding="utf-8")
-            return {"output_written": True, "output_path": str(path)}
-        except Exception as exc:
-            logger.exception("Failed to write roundtable output_path: %s", output_path)
-            return {"output_written": False, "output_path": output_path, "output_error": str(exc)}
+        return self._output.write_markdown(output_path, content)
 
     def _build_summary_markdown(self, conn: sqlite3.Connection, disc: Discussion) -> str:
-        """Build the same structured Markdown used by summarize()."""
-        participants = self.db.get_participants(conn, disc.id)
-        speeches = self.db.get_speeches(conn, disc.id)
-        findings = self.db.get_findings(conn, disc.id)
-        conv_history = self.db.get_convergence_history(conn, disc.id)
-
-        p_map = {
-            p.participant: {
-                "role": p.role,
-                "display_name": p.display_name,
-                "perspective": p.perspective,
-            }
-            for p in participants
-        }
-        consensus_pts = [f.content for f in findings if f.type == "consensus"]
-        disagreement_pts = [f.content for f in findings if f.type == "disagreement"]
-        new_points = [f.content for f in findings if f.type == "new_point"]
-        final_score = disc.convergence_score
-        if not final_score and conv_history:
-            final_score = conv_history[-1].score
-
-        return self._build_structured_summary(
-            disc,
-            participants,
-            speeches,
-            p_map,
-            consensus_pts,
-            disagreement_pts,
-            new_points,
-            final_score,
-            conv_history,
-        )
+        return self._output.build_summary_markdown(conn, disc)
 
     def _build_output_markdown(
         self,
@@ -1286,27 +977,10 @@ class RoundtableCore:
         *,
         conclusion_override: str | None = None,
     ) -> str:
-        """Build the Markdown written to output_path."""
-        conclusion = conclusion_override if conclusion_override is not None else disc.conclusion
-        summary = self._build_summary_markdown(conn, disc)
-        if not conclusion:
-            return summary
-        return f"{summary}\n\n## 最终结论\n\n{conclusion.strip()}"
+        return self._output.build_output_markdown(conn, disc, conclusion_override=conclusion_override)
 
     def _notify_concluded(self, conn: sqlite3.Connection, disc: Discussion, notifier: Notifier) -> None:
-        """Fire the concluded notification with summary data."""
-        findings = self.db.get_findings(conn, disc.id)
-        consensus = [f.content for f in findings if f.type == "consensus"]
-        disagreements = [f.content for f in findings if f.type == "disagreement"]
-        notifier.notify(
-            "concluded",
-            discussion_id=disc.id,
-            topic=disc.topic,
-            conclusion=disc.conclusion or "",
-            convergence=disc.convergence_score,
-            consensus_points=consensus,
-            disagreement_points=disagreements,
-        )
+        self._output.notify_concluded(conn, disc, notifier)
 
     def set_send_fn(self, send_fn: Callable[..., None] | None) -> None:
         """Set or replace the notification send callback."""
@@ -1314,10 +988,7 @@ class RoundtableCore:
 
     @staticmethod
     def _format_history(speeches: list[Speech], participants_map: dict[str, Any]) -> str:
-        """Format speech history into a human-readable string."""
-        from roundtable.formatter import format_history
-
-        return format_history(speeches, participants_map)
+        return OutputBuilder.format_history(speeches, participants_map)
 
     @staticmethod
     def _build_structured_summary(
@@ -1331,10 +1002,7 @@ class RoundtableCore:
         final_score: float | None,
         conv_history: list[ConvergenceRecord],
     ) -> str:
-        """Build a compact structured summary for LLM consumption."""
-        from roundtable.formatter import build_structured_summary
-
-        return build_structured_summary(
+        return OutputBuilder.build_structured_summary(
             disc,
             participants,
             speeches,

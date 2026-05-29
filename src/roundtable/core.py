@@ -804,8 +804,6 @@ class RoundtableCore:
         finally:
             conn.close()
 
-    list = list_discussions
-
     def advance(self, discussion_id: str) -> dict[str, Any]:
         """Explicitly advance to the next round.
 

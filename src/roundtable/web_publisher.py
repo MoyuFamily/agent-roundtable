@@ -7,6 +7,7 @@ a JSON file that Express reads via shared lock + fs.watch.
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -94,7 +95,7 @@ class WebPublisher:
         self._password = password
         self._password_hash: str | None = None
         if password:
-            import bcrypt  # type: ignore[import-not-found]
+            import bcrypt  # type: ignore[import-not-found,unused-ignore]
 
             self._password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
         self._token: str | None = None
@@ -351,10 +352,8 @@ class WebPublisher:
                 "discussion.json.tmp",
             ):
                 (self._discussion_dir / fname).unlink(missing_ok=True)
-            try:
+            with contextlib.suppress(OSError):
                 self._discussion_dir.rmdir()
-            except OSError:
-                pass
             logger.info("Discussion dir removed for %s", self._discussion_id)
         except Exception:
             logger.exception("Failed to remove discussion dir for %s", self._discussion_id)
@@ -673,10 +672,13 @@ class WebPublisher:
                                 merged_events.append(ev)
                         data["events"] = merged_events
 
-                    existing_revoked = existing.get("revoked_token_hashes", [])
+                    existing_revoked = list(existing.get("revoked_token_hashes", []))
+                    for old_token in existing.get("revoked_tokens", []):
+                        existing_revoked.append(_hash_token(old_token))
                     new_revoked = data.get("revoked_token_hashes", [])
                     merged_revoked = list(set(existing_revoked + new_revoked))
                     data["revoked_token_hashes"] = merged_revoked
+                    data.pop("revoked_tokens", None)
                     if self._token and _hash_token(self._token) in merged_revoked:
                         self._revoked = True
 

@@ -78,6 +78,17 @@ pip install -e .
 
 > 说明：本项目的 PyPI 包名是 `agent-roundtable`。PyPI 上的 `roundtable` / `roundtable-ai` 不是本项目，请勿使用 `pip install roundtable` 或 `pip install roundtable-ai` 安装本项目。
 
+### 跨平台 MCP 模式
+
+让 Claude Code、Cursor、Windsurf、Codex、WorkBuddy 等不同平台的 agent 加入同一个圆桌：
+
+```bash
+pip install "agent-roundtable[mcp]"
+python -m roundtable.skills.mcp-roundtable.install --platform=auto
+```
+
+任意 agent 可以做协调者并通过 invitation 把其他 agent 拉进来。Codex / WorkBuddy 没有原生 MCP，使用 `roundtable.mcp.bridges.codex.CodexBridge` 或 `roundtable.mcp.bridges.GenericBridge` 启动 HTTP 桥即可。详见 [docs/architecture.md](docs/architecture.md)。
+
 ### 基本用法
 
 例如：让后端架构师、运维工程师、产品经理三个 Agent 讨论数据库选型，Roundtable 负责管理轮次、记录观点、追踪收敛并生成结论。

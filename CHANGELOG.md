@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.1.0] - 2026-05-31
+
+### Added
+
+- **Multi-platform agent collaboration via MCP** — any MCP-capable agent (Claude Code / Cursor / Windsurf) can coordinate or participate in the same roundtable, sharing state through SQLite. Adds 15 MCP tools (`roundtable_register_agent`, `roundtable_create`, `roundtable_invite`, `roundtable_inbox`, `roundtable_speak`, …), 5 resource URIs, and 3 prompt templates.
+- **Agent registry, inbox, and invitation lifecycle** — schema v2 adds `agents`, `agent_inbox`, `invitations` tables with online/offline detection, async invitation responses, and per-agent message queues.
+- **Resource subscribe / push notifications** — clients can `subscribe` to `roundtable://discussions/{id}` and receive `notifications/resources/updated` when speeches land, rounds complete, or discussions end (no polling).
+- **CodexBridge** — local HTTP server (port 8201) that lets OpenAI Codex CLI participate via function-call translation.
+- **GenericBridge** — platform-agnostic HTTP bridge (port 8202 by default) for WorkBuddy and any other HTTP-capable agent. Endpoints: `GET /health` `/agent` `/inbox` `/status/{id}`, `POST /tool` `/speak`, optional `webhook_url` for push.
+- **Skill installer** — `python -m roundtable.skills.mcp-roundtable.install --platform=auto` auto-detects Claude Code / Cursor / Windsurf and writes the right MCP config.
+- **Architecture document** — `docs/architecture.md` covers the MCP layer, bridges, v2 schema, and four deployment forms (stdio / HTTP-SSE / in-process / HTTP-bridge).
+
+### Changed
+
+- `RoundtableCore` accepts an `on_event` callback for resource-update notifications; existing single-process callers see no behavior change (default `None`).
+- Release pipeline gates publishing on a `test` job that runs `pytest` first; CHANGELOG version regex escapes dots; macOS/Linux `sed -i` differences handled by a wrapper.
+
+### Fixed
+
+- `release.sh --dry-run` no longer mutates files (was calling `bump-version.js` twice, once without `--dry-run`).
+- `preflight-check.sh` now verifies version consistency across `package.json`, `pyproject.toml`, `SKILL.md`, and `src/skills/SKILL.md`.
+
 ## [2.0.0] - 2026-05-27
 
 ### Added

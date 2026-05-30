@@ -1,11 +1,13 @@
 #!/bin/bash
-# sync_skill.sh - 同步 SKILL.md 文件
+# sync_skill.sh - 单向同步 src/skills/SKILL.md → 根目录 SKILL.md
 # 用法: ./scripts/sync_skill.sh [direction]
 # direction:
 #   src2root (默认) - 从 src/skills/SKILL.md 同步到根目录
-#   root2src - 从根目录同步到 src/skills/SKILL.md
-#   diff - 显示两个文件的差异
-#   check - 检查文件一致性
+#   diff             - 显示两个文件的差异
+#   check            - 检查文件一致性 (CI 用)
+#
+# 注意：源文件是 src/skills/SKILL.md。根目录 SKILL.md 是自动生成的，
+# 不要直接编辑。如果需要反向同步（不推荐），请手动 cp 后再 sed 调整路径。
 
 set -e
 
@@ -50,17 +52,9 @@ case "$DIRECTION" in
         ;;
     
     root2src)
-        echo "📤 从根目录同步到 src/skills/SKILL.md..."
-        
-        # 复制文件并调整路径 (反向)
-        # 将 src/skills/references/ 替换回 references/
-        sed 's|src/skills/references/|references/|g' "$ROOT_SKILL" > "$SRC_SKILL"
-        
-        echo "✅ 同步完成 (路径已调整)"
-        echo ""
-        echo "文件大小对比:"
-        echo "  src/skills/SKILL.md: $(wc -c < "$SRC_SKILL") bytes"
-        echo "  SKILL.md: $(wc -c < "$ROOT_SKILL") bytes"
+        echo "❌ root2src 已废弃 — 源文件是 src/skills/SKILL.md，请直接编辑它"
+        echo "   反向同步会导致 src 文件失去单一真理之源的语义"
+        exit 1
         ;;
     
     diff)
@@ -106,11 +100,10 @@ case "$DIRECTION" in
     *)
         echo "❌ 未知方向: $DIRECTION"
         echo ""
-        echo "用法: $0 [src2root|root2src|diff|check]"
+        echo "用法: $0 [src2root|diff|check]"
         echo ""
         echo "参数说明:"
         echo "  src2root - 从 src/skills/SKILL.md 同步到根目录 (默认)"
-        echo "  root2src - 从根目录同步到 src/skills/SKILL.md"
         echo "  diff     - 显示两个文件的差异"
         echo "  check    - 检查文件一致性 (用于 CI)"
         exit 1

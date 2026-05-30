@@ -8,7 +8,6 @@
 #   - Build sdist + wheel
 #   - Publish to PyPI
 #   - Publish to ClawHub
-#   - Sync SKILL.md to Hermes Skill Hub
 #   - Create GitHub Release
 
 set -euo pipefail
@@ -158,7 +157,6 @@ echo ""
 echo -e "  GitHub Actions will now automatically:"
 echo -e "    • Build & publish to ${CYAN}PyPI${NC}"
 echo -e "    • Publish to ${CYAN}ClawHub${NC}"
-echo -e "    • Sync to ${CYAN}Hermes Skill Hub${NC}"
 echo -e "    • Create ${CYAN}GitHub Release${NC}"
 echo ""
 echo -e "  Track progress: ${CYAN}gh run list --workflow=release.yml${NC}"

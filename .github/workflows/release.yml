@@ -108,39 +108,6 @@ jobs:
             --slug agent-roundtable \
             --version ${{ steps.version.outputs.VERSION }}
 
-  # ─── Sync to Hermes Skill Hub ───────────────────────────────────────
-  publish-hermes-skill-hub:
-    name: Sync to Hermes Skill Hub
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Sync SKILL.md to pointer repo
-        env:
-          # PAT with `repo` scope on MoyuFamily/hermes-skill-agent-roundtable.
-          # The default GITHUB_TOKEN is scoped to this repo only and cannot
-          # push to the pointer repo.
-          GITHUB_TOKEN: ${{ secrets.HERMES_SKILL_HUB_TOKEN }}
-        run: |
-          SKILL_REPO="MoyuFamily/hermes-skill-agent-roundtable"
-          TMPDIR=$(mktemp -d)
-
-          # Clone or create pointer repo
-          gh repo clone "$SKILL_REPO" "$TMPDIR" 2>/dev/null || {
-            gh repo create "$SKILL_REPO" --public --description "Hermes Skill Hub pointer: agent-roundtable"
-            gh repo clone "$SKILL_REPO" "$TMPDIR"
-          }
-
-          # Copy and commit
-          cp SKILL.md "$TMPDIR/SKILL.md"
-          cd "$TMPDIR"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add SKILL.md
-          git commit -m "chore: update SKILL.md to ${{ github.ref_name }}" || echo "No changes"
-          git push origin main
-
   # ─── GitHub Release ─────────────────────────────────────────────────
   github-release:
     name: Create GitHub Release

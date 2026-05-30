@@ -44,14 +44,28 @@ class RoundtableCore:
         send_fn: Optional callback(platform, chat_id, message) for notifications.
     """
 
-    def __init__(self, db: RoundtableDB | None = None, send_fn: Any = None):
+    def __init__(
+        self,
+        db: RoundtableDB | None = None,
+        send_fn: Any = None,
+        on_event: Callable[[str, dict[str, Any]], None] | None = None,
+    ):
         self.db = db or RoundtableDB()
         self._send_fn = send_fn
+        self._on_event = on_event
         self._publishers: dict[str, Any] = {}  # discussion_id → WebPublisher
         self._stream_delay: float = 0.0  # 每个 token chunk 之间的延迟（秒）
         self._chunk_size: int = 3  # 流式推送每次发送的字符数
         self._web_sync = WebDiscussionSync(self.db)
         self._output = OutputBuilder(self.db)
+
+    def _emit(self, event_type: str, **payload: Any) -> None:
+        """Emit an event to the optional on_event callback."""
+        if self._on_event:
+            try:
+                self._on_event(event_type, payload)
+            except Exception:
+                logger.exception("on_event callback failed for %s", event_type)
 
     # ------------------------------------------------------------------
     # Public API
@@ -381,7 +395,7 @@ class RoundtableCore:
             # Sync web discussion findings and conclusion from the database
             self._sync_web_discussion_state(discussion_id, conn)
 
-            return {
+            result_dict = {
                 "ok": True,
                 "speech_id": speech.id,
                 "round": speech.round,
@@ -391,6 +405,18 @@ class RoundtableCore:
                 "discussion_complete": discussion_complete,
                 "convergence_score": convergence_score,
             }
+            self._emit(
+                "speech_added",
+                discussion_id=discussion_id,
+                speech_id=speech.id,
+                round=speech.round,
+                participant=speech.participant,
+            )
+            if round_complete:
+                self._emit("round_complete", discussion_id=discussion_id, round=speech.round)
+            if discussion_complete:
+                self._emit("discussion_concluded", discussion_id=discussion_id)
+            return result_dict
         finally:
             conn.close()
 
@@ -763,6 +789,7 @@ class RoundtableCore:
                 "web_retained": web_retained,
             }
             result.update(output_result)
+            self._emit("discussion_ended", discussion_id=discussion_id, action=action)
             return result
         finally:
             conn.close()

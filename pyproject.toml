@@ -49,6 +49,10 @@ hermes = []  # Hermes adapter auto-discovers if hermes-agent is installed
 web = [
     "nanoid>=2.0",  # Token generation (falls back to secrets.token_urlsafe)
 ]
+mcp = [
+    "mcp>=1.0",
+    "httpx>=0.27",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",

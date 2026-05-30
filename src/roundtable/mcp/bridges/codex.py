@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import logging
 import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
 from roundtable.core import RoundtableCore

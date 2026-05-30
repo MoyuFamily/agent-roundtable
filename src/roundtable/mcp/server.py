@@ -16,7 +16,6 @@ from mcp.server import Server
 from mcp.server.lowlevel import NotificationOptions
 from mcp.server.session import ServerSession
 from mcp.types import (
-    EmptyResult,
     GetPromptResult,
     Prompt,
     PromptArgument,

@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from roundtable.mcp.server import SubscriptionManager  # noqa: E402
+from roundtable.mcp.server import SubscriptionManager
 
 
 def test_subscription_manager_basic():

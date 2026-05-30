@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import logging
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any
 
 from roundtable.core import RoundtableCore
 from roundtable.db import RoundtableDB

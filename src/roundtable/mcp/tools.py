@@ -23,7 +23,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "platform": {"type": "string", "description": "Platform: claude-code|cursor|codex|windsurf|workbuddy"},
                 "display_name": {"type": "string", "description": "Human-readable name"},
                 "persona": {"type": "object", "description": "Agent persona: {role, avatar, title, description}"},
-                "capabilities": {"type": "array", "items": {"type": "string"}, "description": "Capabilities: speak, listen, coordinate"},
+                "capabilities": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Capabilities: speak, listen, coordinate",
+                },
                 "transport": {"type": "string", "enum": ["stdio", "http"], "default": "stdio"},
                 "endpoint": {"type": "string", "description": "Webhook URL for http transport agents"},
             },
@@ -46,7 +50,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "properties": {
                 "topic": {"type": "string", "description": "Discussion topic"},
                 "context": {"type": "string", "description": "Additional context"},
-                "participants": {"type": "array", "items": {"type": "object"}, "description": "Initial participants [{profile, role, perspective, display_name}]"},
+                "participants": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Initial participants [{profile, role, perspective, display_name}]",
+                },
                 "max_rounds": {"type": "integer", "default": 3},
                 "speech_order": {"type": "string", "default": "fixed"},
                 "invite_agents": {"type": "array", "items": {"type": "string"}, "description": "Agent IDs to invite"},

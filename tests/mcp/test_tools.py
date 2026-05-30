@@ -58,7 +58,6 @@ def test_create_discussion_and_invite(setup):
         "invite_agents": ["participant-1"],
     })
     assert result.get("discussion_id")
-    disc_id = result["discussion_id"]
 
     inbox = handle_tool_call(core, db, "roundtable_inbox", {"agent_id": "participant-1"})
     assert len(inbox["messages"]) == 1

@@ -2,7 +2,6 @@
 
 import argparse
 import asyncio
-import sys
 
 
 def main() -> None:

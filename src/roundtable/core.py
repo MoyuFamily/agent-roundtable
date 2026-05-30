@@ -44,7 +44,12 @@ class RoundtableCore:
         send_fn: Optional callback(platform, chat_id, message) for notifications.
     """
 
-    def __init__(self, db: RoundtableDB | None = None, send_fn: Any = None, on_event: Callable[[str, dict[str, Any]], None] | None = None):
+    def __init__(
+        self,
+        db: RoundtableDB | None = None,
+        send_fn: Any = None,
+        on_event: Callable[[str, dict[str, Any]], None] | None = None,
+    ):
         self.db = db or RoundtableDB()
         self._send_fn = send_fn
         self._on_event = on_event
@@ -400,7 +405,13 @@ class RoundtableCore:
                 "discussion_complete": discussion_complete,
                 "convergence_score": convergence_score,
             }
-            self._emit("speech_added", discussion_id=discussion_id, speech_id=speech.id, round=speech.round, participant=speech.participant)
+            self._emit(
+                "speech_added",
+                discussion_id=discussion_id,
+                speech_id=speech.id,
+                round=speech.round,
+                participant=speech.participant,
+            )
             if round_complete:
                 self._emit("round_complete", discussion_id=discussion_id, round=speech.round)
             if discussion_complete:

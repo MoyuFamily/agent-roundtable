@@ -51,12 +51,14 @@ pass "Branch check passed"
 # 4. Python tests (this is a Python package — pytest is authoritative)
 echo ""
 echo "▶ Running Python tests..."
-if command -v pytest >/dev/null 2>&1; then
-  PYTEST_BIN=pytest
-elif [ -x ".venv/bin/pytest" ]; then
-  PYTEST_BIN=".venv/bin/pytest"
-elif [ -x ".venv/bin/python" ]; then
+# Prefer `python -m pytest` so we never depend on a console-script shebang
+# that may be stale (e.g. when the venv was moved or the repo renamed).
+if [ -x ".venv/bin/python" ]; then
   PYTEST_BIN=".venv/bin/python -m pytest"
+elif command -v python3 >/dev/null 2>&1 && python3 -c "import pytest" 2>/dev/null; then
+  PYTEST_BIN="python3 -m pytest"
+elif command -v pytest >/dev/null 2>&1; then
+  PYTEST_BIN=pytest
 else
   fail "pytest not found. Install with: pip install -e '.[dev]'"
 fi

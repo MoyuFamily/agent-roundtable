@@ -770,6 +770,29 @@
       color: var(--rt-text-muted);
       margin-bottom: var(--rt-space-3);
     }
+    .share-embed-section {
+      margin-top: var(--rt-space-3);
+      padding-top: var(--rt-space-3);
+      border-top: 1px solid var(--rt-border);
+    }
+    .share-embed-label {
+      font-size: var(--rt-font-size-xs);
+      font-weight: 600;
+      color: var(--rt-text-secondary);
+      margin-bottom: var(--rt-space-2);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .share-embed-label::before {
+      content: "</>";
+      font-family: var(--rt-font-mono, ui-monospace, monospace);
+      font-size: 11px;
+      padding: 2px 6px;
+      background: var(--rt-bg-body);
+      border-radius: 4px;
+      color: var(--rt-brand);
+    }
     .revoke-link-btn {
       display: flex;
       align-items: center;

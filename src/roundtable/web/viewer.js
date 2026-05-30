@@ -811,7 +811,9 @@
 
     // ═══════════════════════════════════════
     // Share Interaction Logic
+    // — Skipped entirely in embed mode (embed.html has no share UI).
     // ═══════════════════════════════════════
+    if (!CONFIG.embed) {
 
     // DOM refs — Share
     const $shareContainer = document.getElementById('shareContainer');
@@ -937,6 +939,14 @@
       // Update UI
       $shareLinkInput.value = shareLink;
       $shareSheetLinkInput.value = shareLink;
+
+      // Build iframe embed snippet pointing at /embed/:token
+      const embedUrl = `${location.origin}/embed/${CONFIG.token}`;
+      const embedSnippet = `<iframe src="${embedUrl}" width="100%" height="600" frameborder="0" style="border:1px solid #334155;border-radius:12px" sandbox="allow-scripts allow-same-origin allow-popups"></iframe>`;
+      const $embedInput = document.getElementById('embedSnippetInput');
+      const $sheetEmbedInput = document.getElementById('sheetEmbedSnippetInput');
+      if ($embedInput) $embedInput.value = embedSnippet;
+      if ($sheetEmbedInput) $sheetEmbedInput.value = embedSnippet;
     }
 
     // ---- Copy to Clipboard ----
@@ -993,6 +1003,38 @@
         $shareSheetLinkInput.select();
       }
     });
+
+    // ---- Copy embed snippet (desktop popover) ----
+    const $copyEmbedBtn = document.getElementById('copyEmbedBtn');
+    const $embedSnippetInput = document.getElementById('embedSnippetInput');
+    if ($copyEmbedBtn && $embedSnippetInput) {
+      $copyEmbedBtn.addEventListener('click', async () => {
+        const snippet = $embedSnippetInput.value;
+        if (!snippet) return;
+        try {
+          await copyToClipboard(snippet);
+          showCopySuccess($copyEmbedBtn, t('copyEmbed'));
+        } catch {
+          $embedSnippetInput.select();
+        }
+      });
+    }
+
+    // ---- Copy embed snippet (mobile sheet) ----
+    const $sheetCopyEmbedBtn = document.getElementById('sheetCopyEmbedBtn');
+    const $sheetEmbedSnippetInput = document.getElementById('sheetEmbedSnippetInput');
+    if ($sheetCopyEmbedBtn && $sheetEmbedSnippetInput) {
+      $sheetCopyEmbedBtn.addEventListener('click', async () => {
+        const snippet = $sheetEmbedSnippetInput.value;
+        if (!snippet) return;
+        try {
+          await copyToClipboard(snippet);
+          showCopySuccess($sheetCopyEmbedBtn, t('copyEmbed'));
+        } catch {
+          $sheetEmbedSnippetInput.select();
+        }
+      });
+    }
 
     // ---- Revoke Confirmation Modal ----
     let revokeModalOpen = false;
@@ -1063,6 +1105,8 @@
         closeSheet();
       }, 3000);
     }
+
+    } // end if (!CONFIG.embed) — share/revoke logic block
 
     // ---- Sprint 3: 触摸交互优化 ----
     (function initTouchInteractions() {

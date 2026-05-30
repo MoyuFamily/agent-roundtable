@@ -56,6 +56,14 @@
                 <button class="copy-btn" id="copyBtn" data-i18n="copy">复制</button>
               </div>
               <div class="share-hint" data-i18n="shareHint">任何人通过此链接可查看讨论</div>
+              <div class="share-embed-section" id="shareEmbedSection">
+                <div class="share-embed-label" data-i18n="embedSnippetLabel">嵌入到网页（iframe）</div>
+                <div class="share-link-row">
+                  <input class="share-link-input" id="embedSnippetInput" readonly>
+                  <button class="copy-btn" id="copyEmbedBtn" data-i18n="copyEmbed">复制</button>
+                </div>
+                <div class="share-hint" data-i18n="embedHint">复制此代码到博客或文档以嵌入实时讨论</div>
+              </div>
               <button class="revoke-link-btn" id="revokeLinkBtn" data-i18n="shareRevoke">⚠️ 撤销链接</button>
             </div>
             <div class="share-revoked-state hidden" id="shareRevokedState">
@@ -152,6 +160,11 @@
       <input class="share-link-input" id="shareSheetLinkInput" readonly style="width:100%;margin-bottom:12px">
       <button class="copy-btn" id="sheetCopyBtn" style="width:100%;padding:12px;font-size:var(--rt-font-size-base);margin-bottom:12px" data-i18n="copyLink">复制链接</button>
       <div class="share-hint" data-i18n="shareHint">任何人通过此链接可查看讨论</div>
+      <div class="share-embed-section" id="sheetEmbedSection">
+        <div class="share-embed-label" data-i18n="embedSnippetLabel">嵌入到网页（iframe）</div>
+        <input class="share-link-input" id="sheetEmbedSnippetInput" readonly style="width:100%;margin-bottom:8px">
+        <button class="copy-btn" id="sheetCopyEmbedBtn" style="width:100%;padding:10px;font-size:13px" data-i18n="copyEmbed">复制嵌入代码</button>
+      </div>
       <button class="revoke-link-btn" id="sheetRevokeLinkBtn" style="justify-content:center;padding-top:16px" data-i18n="shareRevoke">⚠️ 撤销链接</button>
     </div>
     <div class="share-revoked-state hidden" id="sheetRevokedState">

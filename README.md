@@ -187,6 +187,24 @@ src/roundtable/
     └── generic.py    # 通用 Python API（错误安全）
 ```
 
+### 🖼️ 嵌入分享（iframe Embed）
+
+将圆桌讨论嵌入到任意网页、博客或文档中：
+
+```html
+<iframe
+  src="https://roundtable.izmw.me/embed/<token>"
+  width="100%" height="600" frameborder="0"
+  style="border:1px solid #334155;border-radius:12px"
+  sandbox="allow-scripts allow-same-origin allow-popups">
+</iframe>
+```
+
+- `/embed/:token` 提供精简视图：无顶部导航、无分享/导出按钮、无回放控件
+- 支持实时 SSE 推送，嵌入页面可实时看到新发言
+- 密码保护的讨论会显示"在新标签页打开"提示
+- 分享弹窗中可一键复制嵌入代码
+
 ## 🛣️ 后续计划
 
 - 发布 `agent-roundtable` 到 PyPI

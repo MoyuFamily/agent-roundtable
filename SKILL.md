@@ -323,6 +323,31 @@ watch(dir, (eventType, changedFilename) => {
 
 *Note: Tool calls executed natively on the platform handle environment and browser integration automatically.*
 
+### Iframe Embed Mode
+
+The web viewer supports an embed mode optimized for iframe contexts:
+
+```
+GET /embed/<token>
+```
+
+- Renders a compact view: no header chrome, no share/export/revoke buttons, no replay controls
+- Reuses the same token validation, password gate, and expiration checks as `/r/:token`
+- Password-protected discussions show a "open in new tab" prompt instead of inline password form
+- Sends `Content-Security-Policy: frame-ancestors *` to allow cross-origin embedding
+- Real-time SSE streaming works identically to the full viewer
+
+Recommended iframe attributes:
+```html
+<iframe src="https://roundtable.izmw.me/embed/<token>"
+  width="100%" height="600" frameborder="0"
+  style="border:1px solid #334155;border-radius:12px"
+  sandbox="allow-scripts allow-same-origin allow-popups">
+</iframe>
+```
+
+The share popover in the full viewer includes a "复制嵌入代码" button that generates this snippet automatically.
+
 ## Convergence Detection
 
 Each round is evaluated for convergence:

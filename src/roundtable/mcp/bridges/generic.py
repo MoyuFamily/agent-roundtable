@@ -130,13 +130,13 @@ class GenericBridge(AgentBridge):
             logger.debug("Webhook delivery failed: %s", e)
 
 
-def _make_handler(bridge: GenericBridge):
+def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
     db = bridge._db
     core = bridge._core
     agent_id = bridge.agent_id
 
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
+        def do_GET(self) -> None:
             path = urlparse(self.path).path
 
             if path == "/health":
@@ -172,7 +172,7 @@ def _make_handler(bridge: GenericBridge):
             else:
                 self._respond(404, {"error": "not found", "path": path})
 
-        def do_POST(self):
+        def do_POST(self) -> None:
             path = urlparse(self.path).path
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -208,7 +208,7 @@ def _make_handler(bridge: GenericBridge):
             else:
                 self._respond(404, {"error": "not found", "path": path})
 
-        def _respond(self, status: int, data: dict):
+        def _respond(self, status: int, data: dict[str, Any]) -> None:
             payload = json.dumps(data, ensure_ascii=False, default=str).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
@@ -216,7 +216,7 @@ def _make_handler(bridge: GenericBridge):
             self.end_headers()
             self.wfile.write(payload)
 
-        def log_message(self, format, *args):
+        def log_message(self, format: str, *args: Any) -> None:
             logger.debug(format, *args)
 
     return Handler

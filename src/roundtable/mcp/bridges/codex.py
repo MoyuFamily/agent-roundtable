@@ -79,11 +79,11 @@ class CodexBridge(AgentBridge):
         raise NotImplementedError("Codex generates speech via its own CLI process")
 
 
-def _make_handler(core: RoundtableCore, db: RoundtableDB, agent_id: str):
+def _make_handler(core: RoundtableCore, db: RoundtableDB, agent_id: str) -> type[BaseHTTPRequestHandler]:
     """Create an HTTP request handler class with access to core/db."""
 
     class CodexBridgeHandler(BaseHTTPRequestHandler):
-        def do_POST(self):
+        def do_POST(self) -> None:
             content_length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(content_length)) if content_length else {}
 
@@ -104,13 +104,13 @@ def _make_handler(core: RoundtableCore, db: RoundtableDB, agent_id: str):
             else:
                 self._respond(404, {"error": "not found"})
 
-        def _respond(self, status: int, data: dict):
+        def _respond(self, status: int, data: dict[str, Any]) -> None:
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(data).encode())
 
-        def log_message(self, format, *args):
+        def log_message(self, format: str, *args: Any) -> None:
             logger.debug(format, *args)
 
     return CodexBridgeHandler

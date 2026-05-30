@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any
 
 from roundtable.core import RoundtableCore
 from roundtable.db import RoundtableDB
@@ -37,9 +38,9 @@ class RoundtableHTTPServer:
             self._server.shutdown()
 
 
-def _make_handler(core: RoundtableCore, db: RoundtableDB):
+def _make_handler(core: RoundtableCore, db: RoundtableDB) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
-        def do_POST(self):
+        def do_POST(self) -> None:
             content_length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(content_length)) if content_length else {}
 
@@ -51,19 +52,19 @@ def _make_handler(core: RoundtableCore, db: RoundtableDB):
             else:
                 self._respond(404, {"error": "not found"})
 
-        def do_GET(self):
+        def do_GET(self) -> None:
             if self.path == "/api/health":
                 self._respond(200, {"status": "ok", "server": "roundtable-mcp"})
             else:
                 self._respond(404, {"error": "not found"})
 
-        def _respond(self, status: int, data: dict):
+        def _respond(self, status: int, data: dict[str, Any]) -> None:
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
 
-        def log_message(self, format, *args):
+        def log_message(self, format: str, *args: Any) -> None:
             logger.debug(format, *args)
 
     return Handler

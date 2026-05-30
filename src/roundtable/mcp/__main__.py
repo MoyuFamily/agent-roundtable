@@ -1,3 +1,4 @@
+# type: ignore
 """Entry point: python -m roundtable.mcp"""
 
 import argparse

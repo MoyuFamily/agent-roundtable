@@ -213,7 +213,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 
 def get_mcp_tools() -> list[Any]:
     """Convert TOOL_SCHEMAS to mcp.types.Tool objects (requires mcp SDK)."""
-    from mcp.types import Tool
+    from mcp.types import Tool  # type: ignore[import-not-found]
     return [Tool(**schema) for schema in TOOL_SCHEMAS]
 
 

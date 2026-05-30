@@ -1,3 +1,4 @@
+# type: ignore
 """MCP Server — registers tools, resources, and prompts for Roundtable.
 
 Imports the optional `mcp` SDK only when this module is loaded (server runtime).

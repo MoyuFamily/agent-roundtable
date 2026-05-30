@@ -1,7 +1,7 @@
 ---
 name: agent-roundtable
 description: "Multi-agent roundtable discussion — topic-driven multi-round debate with convergence detection and conclusion generation"
-version: 2.0.0
+version: 2.1.0
 platforms: [linux, macos, windows]
 metadata:
   hermes:
@@ -34,6 +34,67 @@ around a topic. Each participant is a **real sub-agent** spawned via
 conversation context, model call, and toolset.
 
 **Core value**: Turn "one agent working alone" into "a team having a meeting."
+
+Two complementary modes:
+
+- **Single-process mode** (this document) — one coordinator agent spawns sub-agents via `delegate_task`. Best when one platform owns the whole discussion.
+- **MCP Multi-Platform mode** (see below) — coordinator and participants live in *different* CLIs / IDEs (Claude Code, Cursor, Windsurf, Codex, WorkBuddy, …) and join the same roundtable through a shared MCP server.
+
+## MCP Multi-Platform Mode
+
+Bring agents from **different platforms** into one roundtable. Any MCP-capable agent can act as coordinator; participants join via invitations and speak when their turn arrives. State is shared through a SQLite database, so the same discussion is visible to every connected agent in real time.
+
+**Install**
+
+```bash
+python -m roundtable.skills.mcp-roundtable.install --platform=auto
+```
+
+This auto-detects Claude Code / Cursor / Windsurf and writes the MCP config. Or add it manually:
+
+```json
+{
+  "mcpServers": {
+    "roundtable": {
+      "command": "python",
+      "args": ["-m", "roundtable.mcp"]
+    }
+  }
+}
+```
+
+For Codex or WorkBuddy (no native MCP), run a bridge alongside:
+
+```python
+# Codex
+from roundtable.mcp.bridges.codex import CodexBridge
+CodexBridge(agent_id="codex-local").start()
+
+# WorkBuddy / any HTTP-capable platform
+from roundtable.mcp.bridges import GenericBridge
+GenericBridge(agent_id="workbuddy-1", platform="workbuddy", port=8202).start()
+```
+
+**Coordinator flow**
+
+1. `roundtable_register_agent(agent_id, platform, display_name)` — announce yourself
+2. `roundtable_list_agents(online_only=true)` — see who's around
+3. `roundtable_create(topic, participants, invite_agents)` — open the discussion and invite others
+4. `roundtable_speak(discussion_id, "coordinator", "...")` — opening statement
+5. `roundtable_status(discussion_id)` / `roundtable_summarize(discussion_id)` — monitor and synthesize
+6. `roundtable_end(discussion_id, conclusion="...")` — close it out
+
+**Participant flow**
+
+1. `roundtable_register_agent(agent_id, platform)` — announce yourself
+2. Poll `roundtable_inbox(agent_id)` (or subscribe to `roundtable://discussions`) — wait for invitations and turn notices
+3. `roundtable_accept_invite(discussion_id, agent_id)` — join the discussion
+4. `roundtable_wait_for_turn(discussion_id, agent_id)` — block until it's your turn
+5. `roundtable_speak(discussion_id, your_profile, content)` — contribute
+
+**Live updates** — subscribe to `roundtable://discussions/{id}` to receive `notifications/resources/updated` events whenever a speech is added, a round completes, or the discussion ends. No polling required.
+
+See `docs/architecture.md` for the full tool list (15 tools), resource URIs, prompt templates, and deployment forms.
 
 ## When to Use
 

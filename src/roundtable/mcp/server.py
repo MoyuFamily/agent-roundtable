@@ -81,9 +81,7 @@ def create_server(db_path: str | None = None) -> Server:
         if loop is None:
             return
         for session in sessions:
-            asyncio.run_coroutine_threadsafe(
-                _safe_notify(session, uri), loop
-            )
+            asyncio.run_coroutine_threadsafe(_safe_notify(session, uri), loop)
 
     core = RoundtableCore(db=db, on_event=_on_event)
 
@@ -143,9 +141,7 @@ def create_server(db_path: str | None = None) -> Server:
         result = handle_prompt_call(core, db, name, arguments or {})
         return GetPromptResult(
             description=result["description"],
-            messages=[
-                PromptMessage(role="user", content=TextContent(type="text", text=result["text"]))
-            ],
+            messages=[PromptMessage(role="user", content=TextContent(type="text", text=result["text"]))],
         )
 
     server._roundtable_subs = subs
@@ -156,6 +152,7 @@ def create_server(db_path: str | None = None) -> Server:
 async def _safe_notify(session: ServerSession, uri: str) -> None:
     try:
         from pydantic import AnyUrl
+
         await session.send_resource_updated(AnyUrl(uri))
     except Exception as e:
         logger.debug("Failed to notify session for %s: %s", uri, e)

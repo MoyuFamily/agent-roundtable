@@ -680,18 +680,20 @@ class RoundtableDB:
         results = []
         now = int(time.time())
         for r in rows:
-            results.append({
-                "agent_id": r["agent_id"],
-                "platform": r["platform"],
-                "display_name": r["display_name"],
-                "persona": json.loads(r["persona"]) if r["persona"] else None,
-                "capabilities": json.loads(r["capabilities"]) if r["capabilities"] else None,
-                "transport": r["transport"],
-                "endpoint": r["endpoint"],
-                "last_seen": r["last_seen"],
-                "online": (now - r["last_seen"]) < timeout_seconds,
-                "metadata": json.loads(r["metadata"]) if r["metadata"] else None,
-            })
+            results.append(
+                {
+                    "agent_id": r["agent_id"],
+                    "platform": r["platform"],
+                    "display_name": r["display_name"],
+                    "persona": json.loads(r["persona"]) if r["persona"] else None,
+                    "capabilities": json.loads(r["capabilities"]) if r["capabilities"] else None,
+                    "transport": r["transport"],
+                    "endpoint": r["endpoint"],
+                    "last_seen": r["last_seen"],
+                    "online": (now - r["last_seen"]) < timeout_seconds,
+                    "metadata": json.loads(r["metadata"]) if r["metadata"] else None,
+                }
+            )
         return results
 
     def get_agent(self, conn: sqlite3.Connection, agent_id: str) -> dict[str, Any] | None:

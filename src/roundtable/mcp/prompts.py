@@ -99,7 +99,7 @@ def _participant_turn(core: RoundtableCore, arguments: dict[str, str]) -> dict[s
     text = f"""You are participating in a roundtable discussion.
 
 ## Your Role: {role}
-## Your Perspective: {perspective or 'General'}
+## Your Perspective: {perspective or "General"}
 
 ## Discussion History (recent)
 {history_text}

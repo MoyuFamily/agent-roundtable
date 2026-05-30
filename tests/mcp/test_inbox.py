@@ -107,6 +107,7 @@ def test_invitation_double_respond(db):
 
 def test_list_agents_online_filter(db):
     import time
+
     conn = db.connect()
     try:
         db.upsert_agent(conn, "online-agent", "claude-code")

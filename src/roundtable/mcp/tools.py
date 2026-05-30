@@ -214,6 +214,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 def get_mcp_tools() -> list[Any]:
     """Convert TOOL_SCHEMAS to mcp.types.Tool objects (requires mcp SDK)."""
     from mcp.types import Tool  # type: ignore[import-not-found]
+
     return [Tool(**schema) for schema in TOOL_SCHEMAS]
 
 
@@ -253,7 +254,8 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
 
         elif name == "roundtable_invite":
             return _invite_agent(
-                db, conn,
+                db,
+                conn,
                 discussion_id=arguments["discussion_id"],
                 agent_id=arguments["agent_id"],
                 invited_by=arguments["invited_by"],
@@ -337,11 +339,17 @@ def _invite_agent(
     perspective: str | None = None,
 ) -> dict[str, Any]:
     result = db.create_invitation(
-        conn, discussion_id, agent_id, invited_by,
-        role=role, perspective=perspective,
+        conn,
+        discussion_id,
+        agent_id,
+        invited_by,
+        role=role,
+        perspective=perspective,
     )
     db.push_inbox(
-        conn, agent_id, "invitation",
+        conn,
+        agent_id,
+        "invitation",
         payload={
             "discussion_id": discussion_id,
             "invited_by": invited_by,

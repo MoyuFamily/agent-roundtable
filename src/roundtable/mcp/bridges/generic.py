@@ -96,7 +96,9 @@ class GenericBridge(AgentBridge):
         self._thread.start()
         logger.info(
             "GenericBridge[%s] started on http://%s:%d",
-            self._platform, self._host, self._port,
+            self._platform,
+            self._host,
+            self._port,
         )
 
     def stop(self) -> None:
@@ -140,11 +142,14 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
             path = urlparse(self.path).path
 
             if path == "/health":
-                self._respond(200, {
-                    "status": "ok",
-                    "agent_id": agent_id,
-                    "platform": bridge.platform,
-                })
+                self._respond(
+                    200,
+                    {
+                        "status": "ok",
+                        "agent_id": agent_id,
+                        "platform": bridge.platform,
+                    },
+                )
 
             elif path == "/agent":
                 conn = db.connect()
@@ -166,7 +171,7 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
                     conn.close()
 
             elif path.startswith("/status/"):
-                disc_id = path[len("/status/"):]
+                disc_id = path[len("/status/") :]
                 self._respond(200, core.status(disc_id))
 
             else:

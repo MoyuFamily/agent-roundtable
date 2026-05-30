@@ -103,57 +103,77 @@ def test_inbox_starts_empty(bridge):
 
 def test_tool_dispatch_register_and_list(bridge):
     # Register a second agent via the tool endpoint.
-    _post(bridge.port, "/tool", {
-        "name": "roundtable_register_agent",
-        "arguments": {
-            "agent_id": "peer",
-            "platform": "claude-code",
+    _post(
+        bridge.port,
+        "/tool",
+        {
+            "name": "roundtable_register_agent",
+            "arguments": {
+                "agent_id": "peer",
+                "platform": "claude-code",
+            },
         },
-    })
+    )
 
-    listed = _post(bridge.port, "/tool", {
-        "name": "roundtable_list_agents",
-        "arguments": {},
-    })
+    listed = _post(
+        bridge.port,
+        "/tool",
+        {
+            "name": "roundtable_list_agents",
+            "arguments": {},
+        },
+    )
     ids = {a["agent_id"] for a in listed["agents"]}
     assert "wb-agent-1" in ids
     assert "peer" in ids
 
 
 def test_speak_shorthand(bridge):
-    create = _post(bridge.port, "/tool", {
-        "name": "roundtable_create",
-        "arguments": {
-            "topic": "GenericBridge integration",
-            "participants": [
-                {"profile": "wb-agent-1", "role": "Engineer"},
-                {"profile": "peer", "role": "Coordinator"},
-            ],
-            "created_by": "wb-agent-1",
+    create = _post(
+        bridge.port,
+        "/tool",
+        {
+            "name": "roundtable_create",
+            "arguments": {
+                "topic": "GenericBridge integration",
+                "participants": [
+                    {"profile": "wb-agent-1", "role": "Engineer"},
+                    {"profile": "peer", "role": "Coordinator"},
+                ],
+                "created_by": "wb-agent-1",
+            },
         },
-    })
+    )
     disc_id = create["discussion_id"]
 
-    result = _post(bridge.port, "/speak", {
-        "discussion_id": disc_id,
-        "participant": "coordinator",
-        "content": "Opening the discussion.",
-    })
+    result = _post(
+        bridge.port,
+        "/speak",
+        {
+            "discussion_id": disc_id,
+            "participant": "coordinator",
+            "content": "Opening the discussion.",
+        },
+    )
     assert result.get("ok")
 
 
 def test_status_endpoint(bridge):
-    create = _post(bridge.port, "/tool", {
-        "name": "roundtable_create",
-        "arguments": {
-            "topic": "Status test",
-            "participants": [
-                {"profile": "wb-agent-1", "role": "Engineer"},
-                {"profile": "peer", "role": "Coordinator"},
-            ],
-            "created_by": "wb-agent-1",
+    create = _post(
+        bridge.port,
+        "/tool",
+        {
+            "name": "roundtable_create",
+            "arguments": {
+                "topic": "Status test",
+                "participants": [
+                    {"profile": "wb-agent-1", "role": "Engineer"},
+                    {"profile": "peer", "role": "Coordinator"},
+                ],
+                "created_by": "wb-agent-1",
+            },
         },
-    })
+    )
     disc_id = create["discussion_id"]
 
     status = _get(bridge.port, f"/status/{disc_id}")
@@ -163,7 +183,8 @@ def test_status_endpoint(bridge):
 def test_unknown_path_returns_404(bridge):
     try:
         urllib.request.urlopen(
-            f"http://127.0.0.1:{bridge.port}/does-not-exist", timeout=2,
+            f"http://127.0.0.1:{bridge.port}/does-not-exist",
+            timeout=2,
         )
         raise AssertionError("expected 404")
     except urllib.error.HTTPError as e:

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "roundtable": {
+      "command": "python",
+      "args": ["-m", "roundtable.mcp"],
+      "env": {}
+    }
+  }
+}

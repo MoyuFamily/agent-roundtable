@@ -612,3 +612,251 @@ class RoundtableDB:
             output_path=row["output_path"],
             notifications=notif,
         )
+
+    # ------------------------------------------------------------------
+    # Agents (MCP multi-agent support)
+    # ------------------------------------------------------------------
+
+    def upsert_agent(
+        self,
+        conn: sqlite3.Connection,
+        agent_id: str,
+        platform: str,
+        *,
+        display_name: str | None = None,
+        persona: dict[str, Any] | None = None,
+        capabilities: list[str] | None = None,
+        transport: str = "stdio",
+        endpoint: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        now = int(time.time())
+        conn.execute(
+            """INSERT INTO agents (agent_id, platform, display_name, persona,
+                   capabilities, transport, endpoint, last_seen, metadata)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(agent_id) DO UPDATE SET
+                   platform=excluded.platform,
+                   display_name=COALESCE(excluded.display_name, agents.display_name),
+                   persona=COALESCE(excluded.persona, agents.persona),
+                   capabilities=COALESCE(excluded.capabilities, agents.capabilities),
+                   transport=excluded.transport,
+                   endpoint=COALESCE(excluded.endpoint, agents.endpoint),
+                   last_seen=excluded.last_seen,
+                   metadata=COALESCE(excluded.metadata, agents.metadata)""",
+            (
+                agent_id,
+                platform,
+                display_name,
+                json.dumps(persona) if persona else None,
+                json.dumps(capabilities) if capabilities else None,
+                transport,
+                endpoint,
+                now,
+                json.dumps(metadata) if metadata else None,
+            ),
+        )
+        return {"agent_id": agent_id, "last_seen": now}
+
+    def touch_agent(self, conn: sqlite3.Connection, agent_id: str) -> None:
+        now = int(time.time())
+        conn.execute("UPDATE agents SET last_seen = ? WHERE agent_id = ?", (now, agent_id))
+
+    def list_agents(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        online_only: bool = False,
+        timeout_seconds: int = 90,
+    ) -> list[dict[str, Any]]:
+        if online_only:
+            cutoff = int(time.time()) - timeout_seconds
+            rows = conn.execute(
+                "SELECT * FROM agents WHERE last_seen > ? ORDER BY last_seen DESC",
+                (cutoff,),
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM agents ORDER BY last_seen DESC").fetchall()
+        results = []
+        now = int(time.time())
+        for r in rows:
+            results.append({
+                "agent_id": r["agent_id"],
+                "platform": r["platform"],
+                "display_name": r["display_name"],
+                "persona": json.loads(r["persona"]) if r["persona"] else None,
+                "capabilities": json.loads(r["capabilities"]) if r["capabilities"] else None,
+                "transport": r["transport"],
+                "endpoint": r["endpoint"],
+                "last_seen": r["last_seen"],
+                "online": (now - r["last_seen"]) < timeout_seconds,
+                "metadata": json.loads(r["metadata"]) if r["metadata"] else None,
+            })
+        return results
+
+    def get_agent(self, conn: sqlite3.Connection, agent_id: str) -> dict[str, Any] | None:
+        row = conn.execute("SELECT * FROM agents WHERE agent_id = ?", (agent_id,)).fetchone()
+        if not row:
+            return None
+        now = int(time.time())
+        return {
+            "agent_id": row["agent_id"],
+            "platform": row["platform"],
+            "display_name": row["display_name"],
+            "persona": json.loads(row["persona"]) if row["persona"] else None,
+            "capabilities": json.loads(row["capabilities"]) if row["capabilities"] else None,
+            "transport": row["transport"],
+            "endpoint": row["endpoint"],
+            "last_seen": row["last_seen"],
+            "online": (now - row["last_seen"]) < 90,
+            "metadata": json.loads(row["metadata"]) if row["metadata"] else None,
+        }
+
+    # ------------------------------------------------------------------
+    # Agent Inbox
+    # ------------------------------------------------------------------
+
+    def push_inbox(
+        self,
+        conn: sqlite3.Connection,
+        agent_id: str,
+        msg_type: str,
+        payload: dict[str, Any],
+        *,
+        discussion_id: str | None = None,
+    ) -> int:
+        now = int(time.time())
+        cur = conn.execute(
+            """INSERT INTO agent_inbox (agent_id, type, discussion_id, payload, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (agent_id, msg_type, discussion_id, json.dumps(payload), now),
+        )
+        return cur.lastrowid or 0
+
+    def read_inbox(
+        self,
+        conn: sqlite3.Connection,
+        agent_id: str,
+        *,
+        unread_only: bool = True,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        if unread_only:
+            rows = conn.execute(
+                """SELECT * FROM agent_inbox
+                   WHERE agent_id = ? AND read_at IS NULL
+                   ORDER BY created_at ASC LIMIT ?""",
+                (agent_id, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT * FROM agent_inbox
+                   WHERE agent_id = ?
+                   ORDER BY created_at DESC LIMIT ?""",
+                (agent_id, limit),
+            ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "agent_id": r["agent_id"],
+                "type": r["type"],
+                "discussion_id": r["discussion_id"],
+                "payload": json.loads(r["payload"]),
+                "created_at": r["created_at"],
+                "read_at": r["read_at"],
+            }
+            for r in rows
+        ]
+
+    def mark_inbox_read(self, conn: sqlite3.Connection, message_ids: list[int]) -> int:
+        if not message_ids:
+            return 0
+        placeholders = ",".join("?" for _ in message_ids)
+        now = int(time.time())
+        cur = conn.execute(
+            f"UPDATE agent_inbox SET read_at = ? WHERE id IN ({placeholders}) AND read_at IS NULL",
+            [now, *message_ids],
+        )
+        return cur.rowcount
+
+    # ------------------------------------------------------------------
+    # Invitations
+    # ------------------------------------------------------------------
+
+    def create_invitation(
+        self,
+        conn: sqlite3.Connection,
+        discussion_id: str,
+        agent_id: str,
+        invited_by: str,
+        *,
+        role: str | None = None,
+        perspective: str | None = None,
+    ) -> dict[str, Any]:
+        now = int(time.time())
+        conn.execute(
+            """INSERT OR IGNORE INTO invitations
+               (discussion_id, agent_id, role, perspective, status, invited_by, invited_at)
+               VALUES (?, ?, ?, ?, 'pending', ?, ?)""",
+            (discussion_id, agent_id, role, perspective, invited_by, now),
+        )
+        return {
+            "discussion_id": discussion_id,
+            "agent_id": agent_id,
+            "status": "pending",
+            "invited_at": now,
+        }
+
+    def respond_invitation(
+        self,
+        conn: sqlite3.Connection,
+        discussion_id: str,
+        agent_id: str,
+        accept: bool,
+    ) -> dict[str, Any]:
+        now = int(time.time())
+        new_status = "accepted" if accept else "declined"
+        cur = conn.execute(
+            """UPDATE invitations SET status = ?, responded_at = ?
+               WHERE discussion_id = ? AND agent_id = ? AND status = 'pending'""",
+            (new_status, now, discussion_id, agent_id),
+        )
+        if cur.rowcount == 0:
+            return {"error": "No pending invitation found"}
+        return {"discussion_id": discussion_id, "agent_id": agent_id, "status": new_status}
+
+    def get_invitations(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        agent_id: str | None = None,
+        discussion_id: str | None = None,
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM invitations WHERE 1=1"
+        params: list[Any] = []
+        if agent_id:
+            query += " AND agent_id = ?"
+            params.append(agent_id)
+        if discussion_id:
+            query += " AND discussion_id = ?"
+            params.append(discussion_id)
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY invited_at DESC"
+        rows = conn.execute(query, params).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "discussion_id": r["discussion_id"],
+                "agent_id": r["agent_id"],
+                "role": r["role"],
+                "perspective": r["perspective"],
+                "status": r["status"],
+                "invited_by": r["invited_by"],
+                "invited_at": r["invited_at"],
+                "responded_at": r["responded_at"],
+            }
+            for r in rows
+        ]

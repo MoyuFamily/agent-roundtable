@@ -100,8 +100,54 @@ def _migrate_v0_to_v1(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE discussions ADD COLUMN notifications TEXT")
 
 
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+    """Add MCP multi-agent tables: agents, agent_inbox, invitations."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS agents (
+            agent_id TEXT PRIMARY KEY,
+            platform TEXT NOT NULL,
+            display_name TEXT,
+            persona TEXT,
+            capabilities TEXT,
+            transport TEXT DEFAULT 'stdio',
+            endpoint TEXT,
+            last_seen INTEGER NOT NULL,
+            metadata TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_inbox (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            discussion_id TEXT,
+            payload TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            read_at INTEGER,
+            FOREIGN KEY (agent_id) REFERENCES agents(agent_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_inbox_unread
+            ON agent_inbox(agent_id, read_at);
+
+        CREATE TABLE IF NOT EXISTS invitations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            discussion_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            role TEXT,
+            perspective TEXT,
+            status TEXT DEFAULT 'pending',
+            invited_by TEXT NOT NULL,
+            invited_at INTEGER NOT NULL,
+            responded_at INTEGER,
+            UNIQUE(discussion_id, agent_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_invitations_agent
+            ON invitations(agent_id, status);
+    """)
+
+
 _MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migrate_v0_to_v1,
+    _migrate_v1_to_v2,
 ]
 
 CURRENT_SCHEMA_VERSION = len(_MIGRATIONS)

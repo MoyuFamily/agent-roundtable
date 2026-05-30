@@ -63,6 +63,12 @@
       shareRevoked: '链接已撤销',
       shareMobile: '分享讨论',
 
+      // Embed
+      embedSnippetLabel: '嵌入到网页（iframe）',
+      embedHint: '复制此代码到博客或文档以嵌入实时讨论',
+      copyEmbed: '复制',
+      embedOpenFull: '在新页面查看 ↗',
+
       // Revoke modal
       revokeTitle: '确认撤销链接？',
       revokeDesc: '撤销后，所有通过此链接的访问将在 5 秒内失效，且不可恢复。',
@@ -162,6 +168,12 @@
       shareRevoke: '⚠️ Revoke Link',
       shareRevoked: 'Link Revoked',
       shareMobile: 'Share Discussion',
+
+      // Embed
+      embedSnippetLabel: 'Embed in webpage (iframe)',
+      embedHint: 'Paste this code into your blog or docs to embed the live discussion',
+      copyEmbed: 'Copy',
+      embedOpenFull: 'Open in new tab ↗',
 
       // Revoke modal
       revokeTitle: 'Revoke Link?',

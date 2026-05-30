@@ -725,6 +725,63 @@ router.get("/share/:token", (req, res, params) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Shared HTML viewer renderer (used by /r/:token and /embed/:token)
+// ---------------------------------------------------------------------------
+function renderViewer(req, res, entry, token, opts) {
+  const { templateName, embed } = opts;
+  const templatePath = join(WEB_DIR, templateName);
+  try {
+    if (!existsSync(templatePath)) {
+      return sendHTML(res, `<h1>Roundtable Web Viewer</h1><p>${templateName} not found</p>`);
+    }
+    const html = readFileSync(templatePath, "utf-8");
+    const config = JSON.stringify({
+      token,
+      port,
+      host: "0.0.0.0",
+      hasPassword: !!entry.passwordHash,
+      embed: !!embed,
+    });
+    const disc = readDiscussionFor(entry);
+    const ogTitle = disc?.topic ? `圆桌讨论: ${disc.topic}` : "Roundtable 圆桌讨论";
+    const participantNames = (disc?.participants || []).map(p => p.display_name || p.profile).filter(Boolean).join("、");
+    const ogDesc = disc?.topic
+      ? `多位 AI Agent 正在围绕「${disc.topic}」展开圆桌讨论。${participantNames ? `参与者: ${participantNames}` : ""}`
+      : "多 Agent 圆桌讨论引擎 — 让多个 AI Agent 像开会一样讨论、追踪共识分歧并生成结构化会议记录。";
+    const ogTags = [
+      `<meta property="og:title" content="${escapeHtmlAttr(ogTitle)}">`,
+      `<meta property="og:description" content="${escapeHtmlAttr(ogDesc)}">`,
+      `<meta property="og:type" content="article">`,
+      `<meta property="og:site_name" content="Roundtable">`,
+      `<meta name="twitter:card" content="summary">`,
+      `<meta name="twitter:title" content="${escapeHtmlAttr(ogTitle)}">`,
+      `<meta name="twitter:description" content="${escapeHtmlAttr(ogDesc)}">`,
+    ].join("\n    ");
+
+    const injected = html.replace(
+      "</head>",
+      `${ogTags}\n    <script>window.__RT_CONFIG__ = ${config};</script></head>`
+    );
+
+    // Embed responses must explicitly allow framing across origins.
+    // We intentionally do NOT set X-Frame-Options (which is single-origin only)
+    // and instead use a permissive frame-ancestors CSP.
+    const headers = {
+      "Content-Type": "text/html; charset=utf-8",
+      "Access-Control-Allow-Origin": "*",
+    };
+    if (embed) {
+      headers["Content-Security-Policy"] = "frame-ancestors *";
+      headers["X-Roundtable-Embed"] = "1";
+    }
+    res.writeHead(200, headers);
+    res.end(injected);
+  } catch (err) {
+    sendHTML(res, `<h1>Error</h1><pre>${err.message}</pre>`);
+  }
+}
+
 router.get("/r/:token", async (req, res, params) => {
   const entry = entryForToken(params.token);
   if (entry && entry.expiresAt && Date.now() / 1000 > entry.expiresAt) return sendExpired(res);
@@ -735,43 +792,58 @@ router.get("/r/:token", async (req, res, params) => {
     if (!isAuthenticated(req, entry)) return sendPasswordPage(res);
   }
 
-  const indexPath = join(WEB_DIR, "index.html");
-  try {
-    if (existsSync(indexPath)) {
-      const html = readFileSync(indexPath, "utf-8");
-      const config = JSON.stringify({
-        token: params.token,
-        port,
-        host: "0.0.0.0",
-        hasPassword: !!entry.passwordHash,
-      });
-      const disc = readDiscussionFor(entry);
-      const ogTitle = disc?.topic ? `圆桌讨论: ${disc.topic}` : "Roundtable 圆桌讨论";
-      const participantNames = (disc?.participants || []).map(p => p.display_name || p.profile).filter(Boolean).join("、");
-      const ogDesc = disc?.topic
-        ? `多位 AI Agent 正在围绕「${disc.topic}」展开圆桌讨论。${participantNames ? `参与者: ${participantNames}` : ""}`
-        : "多 Agent 圆桌讨论引擎 — 让多个 AI Agent 像开会一样讨论、追踪共识分歧并生成结构化会议记录。";
-      const ogTags = [
-        `<meta property="og:title" content="${escapeHtmlAttr(ogTitle)}">`,
-        `<meta property="og:description" content="${escapeHtmlAttr(ogDesc)}">`,
-        `<meta property="og:type" content="article">`,
-        `<meta property="og:site_name" content="Roundtable">`,
-        `<meta name="twitter:card" content="summary">`,
-        `<meta name="twitter:title" content="${escapeHtmlAttr(ogTitle)}">`,
-        `<meta name="twitter:description" content="${escapeHtmlAttr(ogDesc)}">`,
-      ].join("\n    ");
+  renderViewer(req, res, entry, params.token, { templateName: "index.html", embed: false });
+});
 
-      const injected = html.replace(
-        "</head>",
-        `${ogTags}\n    <script>window.__RT_CONFIG__ = ${config};</script></head>`
-      );
-      sendHTML(res, injected);
-    } else {
-      sendHTML(res, "<h1>Roundtable Web Viewer</h1><p>index.html not found</p>");
+router.get("/embed/:token", async (req, res, params) => {
+  const entry = entryForToken(params.token);
+  if (entry && entry.expiresAt && Date.now() / 1000 > entry.expiresAt) return sendExpired(res);
+  if (!entry || !isTokenValid(params.token)) return send403(res);
+
+  // Password-protected discussions cannot be embedded — embedding contexts have
+  // no good way to surface a password prompt and it leaks UX onto the host page.
+  // Surface a clean "open in new tab" hint instead.
+  if (entry.passwordHash) {
+    await loadBcrypt();
+    if (!isAuthenticated(req, entry)) {
+      const url = `/r/${encodeURIComponent(params.token)}`;
+      const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>需要在新标签页打开</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{min-height:100vh;display:flex;align-items:center;justify-content:center;
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+      background:#0f172a;color:#e2e8f0;padding:1rem}
+    .card{max-width:420px;padding:2rem;text-align:center;
+      background:#1e293b;border-radius:14px;border:1px solid #334155}
+    h1{font-size:1.1rem;font-weight:600;margin-bottom:.5rem;color:#f1f5f9}
+    p{color:#94a3b8;line-height:1.6;font-size:.9rem;margin-bottom:1.25rem}
+    a{display:inline-block;padding:10px 20px;border-radius:10px;
+      background:linear-gradient(135deg,#3b82f6,#6366f1);color:#fff;
+      text-decoration:none;font-weight:600;font-size:.9rem}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🔒 此讨论受密码保护</h1>
+    <p>受密码保护的讨论无法在嵌入视图中查看，请在新标签页中打开后输入密码。</p>
+    <a href="${escapeHtmlAttr(url)}" target="_blank" rel="noopener">在新标签页打开</a>
+  </div>
+</body>
+</html>`;
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Security-Policy": "frame-ancestors *",
+      });
+      return res.end(html);
     }
-  } catch (err) {
-    sendHTML(res, `<h1>Error</h1><pre>${err.message}</pre>`);
   }
+
+  renderViewer(req, res, entry, params.token, { templateName: "embed.html", embed: true });
 });
 
 router.get("/api/:token/data", async (req, res, params) => {

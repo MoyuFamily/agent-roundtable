@@ -48,47 +48,96 @@ if [ -n "$REMOTE" ] && [ "$LOCAL" != "$REMOTE" ]; then
 fi
 pass "Branch check passed"
 
-# 4. Tests
+# 4. Python tests (this is a Python package — pytest is authoritative)
 echo ""
-echo "▶ Running tests..."
+echo "▶ Running Python tests..."
+if command -v pytest >/dev/null 2>&1; then
+  PYTEST_BIN=pytest
+elif [ -x ".venv/bin/pytest" ]; then
+  PYTEST_BIN=".venv/bin/pytest"
+elif [ -x ".venv/bin/python" ]; then
+  PYTEST_BIN=".venv/bin/python -m pytest"
+else
+  fail "pytest not found. Install with: pip install -e '.[dev]'"
+fi
+
+if $PYTEST_BIN tests/ --ignore=tests/test_web_viewer.py -q; then
+  pass "Python tests passed"
+else
+  fail "Python tests failed"
+fi
+
+# 5. npm tests (if present)
+echo ""
+echo "▶ Running npm tests..."
 if [ -f "package.json" ]; then
   SCRIPTS=$(node -e "const p=require('./package.json'); console.log(Object.keys(p.scripts||{}).join(','))")
   if echo "$SCRIPTS" | grep -q "test"; then
-    npm test 2>&1 && pass "Tests passed" || fail "Tests failed"
+    npm test 2>&1 && pass "npm tests passed" || fail "npm tests failed"
   else
-    warn "No test script found — skipping"
+    warn "No npm test script found — skipping"
   fi
 else
   warn "No package.json found — skipping npm tests"
 fi
 
-# 5. Lint
+# 6. Lint
 echo ""
 echo "▶ Running lint..."
 if [ -f "package.json" ]; then
-  if echo "$SCRIPTS" | grep -q "lint"; then
+  if echo "${SCRIPTS:-}" | grep -q "lint"; then
     npm run lint 2>&1 && pass "Lint passed" || fail "Lint failed"
   else
     warn "No lint script found — skipping"
   fi
 fi
 
-# 6. Build
+# 7. Build
 echo ""
 echo "▶ Running build..."
 if [ -f "package.json" ]; then
-  if echo "$SCRIPTS" | grep -q "build"; then
+  if echo "${SCRIPTS:-}" | grep -q "build"; then
     npm run build 2>&1 && pass "Build passed" || fail "Build failed"
   else
     warn "No build script found — skipping"
   fi
 fi
 
-# 7. Version consistency
+# 8. Version consistency across package.json, pyproject.toml, SKILL.md, src/skills/SKILL.md
 echo ""
 echo "▶ Checking version consistency..."
+
 PKG_VERSION=$(node -e "console.log(require('./package.json').version)")
-info "package.json version: $PKG_VERSION"
+info "package.json version:        $PKG_VERSION"
+
+PYPROJECT_VERSION=""
+if [ -f "pyproject.toml" ]; then
+  PYPROJECT_VERSION=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/^version = "(.+)"/\1/')
+  info "pyproject.toml version:      $PYPROJECT_VERSION"
+fi
+
+SKILL_VERSION=""
+if [ -f "SKILL.md" ]; then
+  SKILL_VERSION=$(grep -E '^version: ' SKILL.md | head -1 | sed -E 's/^version: //')
+  info "SKILL.md version:            $SKILL_VERSION"
+fi
+
+SRC_SKILL_VERSION=""
+if [ -f "src/skills/SKILL.md" ]; then
+  SRC_SKILL_VERSION=$(grep -E '^version: ' src/skills/SKILL.md | head -1 | sed -E 's/^version: //')
+  info "src/skills/SKILL.md version: $SRC_SKILL_VERSION"
+fi
+
+# All non-empty versions must match package.json
+MISMATCH=0
+for v in "$PYPROJECT_VERSION" "$SKILL_VERSION" "$SRC_SKILL_VERSION"; do
+  if [ -n "$v" ] && [ "$v" != "$PKG_VERSION" ]; then
+    MISMATCH=1
+  fi
+done
+if [ $MISMATCH -eq 1 ]; then
+  fail "Version mismatch — all of package.json, pyproject.toml, SKILL.md, src/skills/SKILL.md must agree."
+fi
 pass "Version check passed"
 
 echo ""

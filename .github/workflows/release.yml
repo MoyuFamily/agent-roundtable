@@ -10,9 +10,30 @@ permissions:
   id-token: write
 
 jobs:
+  # ─── Run Tests (gate before any publishing) ─────────────────────────
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package with dev extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run pytest
+        run: python -m pytest tests/ --ignore=tests/test_web_viewer.py -q
+
   # ─── Build Python Package ───────────────────────────────────────────
   build:
     name: Build distribution
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +74,8 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # Try Trusted Publishing first, fallback to API token
+          # Using API token. To switch to Trusted Publishing, remove the
+          # `password:` line below and configure it in PyPI project settings.
           password: ${{ secrets.PYPI_API_TOKEN }}
 
   # ─── Publish to ClawHub ─────────────────────────────────────────────
@@ -90,13 +112,17 @@ jobs:
   # ─── Sync to Hermes Skill Hub ───────────────────────────────────────
   publish-hermes-skill-hub:
     name: Sync to Hermes Skill Hub
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Sync SKILL.md to pointer repo
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with `repo` scope on MoyuFamily/hermes-skill-agent-roundtable.
+          # The default GITHUB_TOKEN is scoped to this repo only and cannot
+          # push to the pointer repo.
+          GITHUB_TOKEN: ${{ secrets.HERMES_SKILL_HUB_TOKEN }}
         run: |
           SKILL_REPO="MoyuFamily/hermes-skill-agent-roundtable"
           TMPDIR=$(mktemp -d)
@@ -137,7 +163,9 @@ jobs:
         run: |
           # Extract changelog section for this version
           VERSION="${GITHUB_REF_NAME#v}"
-          NOTES=$(awk "/^## \\[$VERSION/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md)
+          # Escape regex metacharacters in version (dots) for safe matching
+          ESC_VERSION=$(echo "$VERSION" | sed 's/\./\\./g')
+          NOTES=$(awk "/^## \\[$ESC_VERSION/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md)
           if [ -z "$NOTES" ]; then
             NOTES="Release ${{ github.ref_name }}"
           fi

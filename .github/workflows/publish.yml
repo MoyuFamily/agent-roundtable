@@ -1,16 +1,9 @@
-name: Publish Python Package
+name: Manual TestPyPI Dry-Run
+# Use this workflow to dry-run a release to TestPyPI before tagging.
+# The real PyPI release happens automatically via release.yml on `v*` tags.
 
 on:
   workflow_dispatch:
-    inputs:
-      repository:
-        description: "Target package index"
-        required: true
-        default: "testpypi"
-        type: choice
-        options:
-          - testpypi
-          - pypi
 
 permissions:
   contents: read
@@ -46,7 +39,6 @@ jobs:
   publish-testpypi:
     name: Publish to TestPyPI
     needs: build
-    if: github.event.inputs.repository == 'testpypi'
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
@@ -64,24 +56,3 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           # Fallback if Trusted Publishing is not configured:
           # password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-
-  publish-pypi:
-    name: Publish to PyPI
-    needs: build
-    if: github.event.inputs.repository == 'pypi'
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-    steps:
-      - name: Download dist artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: python-dist
-          path: dist
-
-      - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          # Fallback if Trusted Publishing is not configured:
-          # password: ${{ secrets.PYPI_API_TOKEN }}

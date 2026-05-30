@@ -68,22 +68,39 @@ if [ -n "$BUMP_TYPE" ]; then
   BUMP_ARGS="--type=$BUMP_TYPE"
 fi
 
+# Cross-platform sed -i wrapper (macOS BSD sed needs '' after -i; GNU sed doesn't)
+sed_inplace() {
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' "$@"
+  else
+    sed -i "$@"
+  fi
+}
+
 if $DRY_RUN; then
+  # Dry-run path: only show preview, never mutate files
   node "$SCRIPT_DIR/bump-version.js" --dry-run $BUMP_ARGS
-  NEW_VERSION=$(node "$SCRIPT_DIR/bump-version.js" $BUMP_ARGS 2>/dev/null | tail -1)
+  NEW_VERSION=$(node "$SCRIPT_DIR/bump-version.js" --dry-run $BUMP_ARGS | grep "New version:" | sed 's/.*v//')
 else
   NEW_VERSION=$(node "$SCRIPT_DIR/bump-version.js" $BUMP_ARGS)
   ok "Version bumped to v$NEW_VERSION (package.json updated)"
 fi
 
-# Sync version to pyproject.toml and SKILL.md
-if [ -f "pyproject.toml" ]; then
-  sed -i '' "s/^version = .*/version = \"$NEW_VERSION\"/" pyproject.toml
-  ok "Synced version $NEW_VERSION to pyproject.toml"
-fi
-if [ -f "SKILL.md" ]; then
-  sed -i '' "s/^version: .*/version: $NEW_VERSION/" SKILL.md
-  ok "Synced version $NEW_VERSION to SKILL.md"
+if $DRY_RUN; then
+  echo "  Would sync version $NEW_VERSION to pyproject.toml, SKILL.md, src/skills/SKILL.md"
+else
+  if [ -f "pyproject.toml" ]; then
+    sed_inplace "s/^version = .*/version = \"$NEW_VERSION\"/" pyproject.toml
+    ok "Synced version $NEW_VERSION to pyproject.toml"
+  fi
+  if [ -f "SKILL.md" ]; then
+    sed_inplace "s/^version: .*/version: $NEW_VERSION/" SKILL.md
+    ok "Synced version $NEW_VERSION to SKILL.md"
+  fi
+  if [ -f "src/skills/SKILL.md" ]; then
+    sed_inplace "s/^version: .*/version: $NEW_VERSION/" src/skills/SKILL.md
+    ok "Synced version $NEW_VERSION to src/skills/SKILL.md"
+  fi
 fi
 
 # ---------------------------------------------------------------------------

@@ -74,8 +74,7 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # Using API token. To switch to Trusted Publishing, remove the
-          # `password:` line below and configure it in PyPI project settings.
+          # Try Trusted Publishing first, fallback to API token
           password: ${{ secrets.PYPI_API_TOKEN }}
 
   # ─── Publish to ClawHub ─────────────────────────────────────────────

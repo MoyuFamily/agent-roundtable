@@ -21,6 +21,16 @@ from typing import Any
 from roundtable.core import RoundtableCore
 from roundtable.exceptions import RoundtableError
 
+try:
+    from tools.registry import registry  # type: ignore[import-not-found]
+except ImportError:
+
+    class _NoOpRegistry:
+        def register(self, **kwargs) -> None:
+            pass
+
+    registry = _NoOpRegistry()  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 
@@ -456,24 +466,94 @@ def register_roundtable_tools(registry: Any, *, check_fn: Any = None) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _auto_register() -> None:
-    """Try to auto-register with Hermes if available."""
+def _check_roundtable_enabled() -> bool:
     try:
-        from tools.registry import registry
+        from hermes_cli.config import load_config
 
-        def _check_roundtable_enabled() -> bool:
-            try:
-                from hermes_cli.config import load_config
-
-                cfg = load_config()
-                return "roundtable" in cfg.get("toolsets", [])
-            except Exception:
-                return False
-
-        register_roundtable_tools(registry, check_fn=_check_roundtable_enabled)
-    except ImportError:
-        # Not running inside Hermes — that's fine, the library works standalone
-        pass
+        cfg = load_config()
+        return "roundtable" in cfg.get("toolsets", [])
+    except Exception:
+        return False
 
 
-_auto_register()
+# Top-level direct registrations for Hermes' AST tool discovery.
+registry.register(
+    name="roundtable_init",
+    toolset="roundtable",
+    schema=ROUNDTABLE_INIT_SCHEMA,
+    handler=_handle_init,
+    check_fn=_check_roundtable_enabled,
+    emoji="🎯",
+)
+
+registry.register(
+    name="roundtable_speak",
+    toolset="roundtable",
+    schema=ROUNDTABLE_SPEAK_SCHEMA,
+    handler=_handle_speak,
+    check_fn=_check_roundtable_enabled,
+    emoji="💬",
+)
+
+registry.register(
+    name="roundtable_read",
+    toolset="roundtable",
+    schema=ROUNDTABLE_READ_SCHEMA,
+    handler=_handle_read,
+    check_fn=_check_roundtable_enabled,
+    emoji="📖",
+)
+
+registry.register(
+    name="roundtable_status",
+    toolset="roundtable",
+    schema=ROUNDTABLE_STATUS_SCHEMA,
+    handler=_handle_status,
+    check_fn=_check_roundtable_enabled,
+    emoji="📊",
+)
+
+registry.register(
+    name="roundtable_summarize",
+    toolset="roundtable",
+    schema=ROUNDTABLE_SUMMARIZE_SCHEMA,
+    handler=_handle_summarize,
+    check_fn=_check_roundtable_enabled,
+    emoji="📝",
+)
+
+registry.register(
+    name="roundtable_end",
+    toolset="roundtable",
+    schema=ROUNDTABLE_END_SCHEMA,
+    handler=_handle_end,
+    check_fn=_check_roundtable_enabled,
+    emoji="🏁",
+)
+
+registry.register(
+    name="roundtable_list",
+    toolset="roundtable",
+    schema=ROUNDTABLE_LIST_SCHEMA,
+    handler=_handle_list,
+    check_fn=_check_roundtable_enabled,
+    emoji="📋",
+)
+
+registry.register(
+    name="roundtable_advance",
+    toolset="roundtable",
+    schema=ROUNDTABLE_ADVANCE_SCHEMA,
+    handler=_handle_advance,
+    check_fn=_check_roundtable_enabled,
+    emoji="⏭️",
+)
+
+registry.register(
+    name="roundtable_notify",
+    toolset="roundtable",
+    schema=ROUNDTABLE_NOTIFY_SCHEMA,
+    handler=_handle_notify,
+    check_fn=_check_roundtable_enabled,
+    emoji="🔔",
+)

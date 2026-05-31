@@ -82,7 +82,7 @@ class RoundtableCore:
         created_by: str = "coordinator",
         output_path: str | None = None,
         notifications: dict[str, Any] | None = None,
-        web: bool = False,
+        web: bool = True,
         web_port: int = 8199,
         expires_at: float | None = None,
         template: str | None = None,
@@ -941,7 +941,7 @@ class RoundtableCore:
         participants: list[dict[str, Any]] | None = None,
         max_rounds: int = 3,
         verbose: bool = True,
-        web: bool = False,
+        web: bool = True,
         web_port: int = 8199,
         stream_delay: float = 0.0,
     ) -> dict[str, Any]:

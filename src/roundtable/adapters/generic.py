@@ -63,7 +63,7 @@ class Roundtable:
         participants: builtins.list[dict[str, Any]],
         *,
         notifications: dict[str, Any] | None = None,
-        web: bool = False,
+        web: bool = True,
         web_port: int = 8199,
         **kwargs: Any,
     ) -> dict[str, Any]:
@@ -161,7 +161,7 @@ class Roundtable:
         participants: builtins.list[dict[str, Any]] | None = None,
         max_rounds: int = 3,
         verbose: bool = True,
-        web: bool = False,
+        web: bool = True,
         web_port: int = 8199,
     ) -> dict[str, Any]:
         """Run a complete demo discussion with pre-scripted content.
@@ -214,7 +214,7 @@ class Roundtable:
         participants: builtins.list[dict[str, Any]],
         *,
         notifications: dict[str, Any] | None = None,
-        web: bool = False,
+        web: bool = True,
         web_port: int = 8199,
         **kwargs: Any,
     ) -> dict[str, Any]:

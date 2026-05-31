@@ -238,7 +238,7 @@ ROUNDTABLE_INIT_SCHEMA = {
             "web": {
                 "type": "boolean",
                 "description": "Start a web viewer for live discussion viewing",
-                "default": False,
+                "default": True,
             },
             "web_port": {
                 "type": "integer",

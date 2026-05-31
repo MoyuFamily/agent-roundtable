@@ -63,10 +63,11 @@ class TestCreateDiscussionWeb:
         assert call_kwargs[0][0] == disc_id  # first positional arg
 
     def test_web_false_no_publisher(self, core):
-        """create_discussion with web=False (default) should not create publisher."""
+        """create_discussion with web=False should not create publisher."""
         result = core.create_discussion(
             "Test topic",
             _make_participants(),
+            web=False,
         )
         assert result["ok"] is True
         assert result["web_url"] is None
@@ -141,7 +142,7 @@ class TestSpeakWithPublisher:
 
     def test_speak_without_publisher_no_error(self, core):
         """speak() should work fine when there's no publisher (web=False)."""
-        result = core.create_discussion("Topic", _make_participants())
+        result = core.create_discussion("Topic", _make_participants(), web=False)
         disc_id = result["discussion_id"]
         core.speak(disc_id, "coordinator", "Opening")
 
@@ -198,7 +199,7 @@ class TestEndDiscussionWithPublisher:
 
     def test_end_without_publisher_no_error(self, core):
         """end_discussion should work fine when there's no publisher."""
-        result = core.create_discussion("Topic", _make_participants())
+        result = core.create_discussion("Topic", _make_participants(), web=False)
         disc_id = result["discussion_id"]
 
         end_result = core.end_discussion(disc_id)
@@ -230,7 +231,44 @@ class TestSchemaWebFields:
         props = ROUNDTABLE_INIT_SCHEMA["parameters"]["properties"]
         assert "web" in props
         assert props["web"]["type"] == "boolean"
-        assert props["web"]["default"] is False
+        assert props["web"]["default"] is True
         assert "web_port" in props
         assert props["web_port"]["type"] == "integer"
         assert props["web_port"]["default"] == 8199
+
+    def test_web_defaults_to_true(self):
+        """Verify that the un-patched RoundtableCore methods default web parameter to True."""
+        import inspect
+        from roundtable.core import RoundtableCore
+        from roundtable.adapters.generic import Roundtable
+
+        # Retrieve the original methods before they were monkeypatched in conftest.py
+        # Since conftest.py used monkeypatch.setattr, we can check their underlying module functions,
+        # or we can check the original signatures by retrieving them from the original module dictionary
+        # or inspecting them. Actually, since conftest.py monkeypatched them on the class objects,
+        # we can still inspect the unpatched functions if we look at the wrapper itself,
+        # or inspect the signature of RoundtableCore.create_discussion.
+        # Wait, if conftest.py monkeypatched RoundtableCore.create_discussion on the class,
+        # RoundtableCore.create_discussion will point to the patched function.
+        # But we can access the original function via the cell variable or by inspecting the signature
+        # of the original function saved in the patched function's closure/context if we want,
+        # or simply from the module's defined class. Wait, in Python, if we patch `RoundtableCore.create_discussion` on the class,
+        # we can find the original function via inspect, or we can just skip monkeypatching for a special test class,
+        # or we can inspect the default value of the underlying function in the original source code or import a fresh copy if we reload the module.
+        # Actually, let's just inspect the defaults in inspect.signature of the original functions or reload them.
+        import importlib
+        import sys
+        # Save patched references
+        original_modules = sys.modules.copy()
+        # Reload roundtable.core in a clean way
+        try:
+            if "roundtable.core" in sys.modules:
+                del sys.modules["roundtable.core"]
+            import roundtable.core
+            sig = inspect.signature(roundtable.core.RoundtableCore.create_discussion)
+            assert sig.parameters["web"].default is True
+            sig_demo = inspect.signature(roundtable.core.RoundtableCore.run_demo)
+            assert sig_demo.parameters["web"].default is True
+        finally:
+            # Restore
+            sys.modules.update(original_modules)

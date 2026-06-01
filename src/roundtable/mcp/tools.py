@@ -214,9 +214,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 
 def get_mcp_tools() -> list[Any]:
     """Convert TOOL_SCHEMAS to mcp.types.Tool objects (requires mcp SDK)."""
-    Tool = import_module("mcp.types").Tool
+    tool_cls = import_module("mcp.types").Tool
 
-    return [Tool(**schema) for schema in TOOL_SCHEMAS]
+    return [tool_cls(**schema) for schema in TOOL_SCHEMAS]
 
 
 def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, arguments: dict[str, Any]) -> dict[str, Any]:

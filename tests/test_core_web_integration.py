@@ -239,25 +239,9 @@ class TestSchemaWebFields:
     def test_web_defaults_to_true(self):
         """Verify that the un-patched RoundtableCore methods default web parameter to True."""
         import inspect
-        from roundtable.core import RoundtableCore
-        from roundtable.adapters.generic import Roundtable
-
-        # Retrieve the original methods before they were monkeypatched in conftest.py
-        # Since conftest.py used monkeypatch.setattr, we can check their underlying module functions,
-        # or we can check the original signatures by retrieving them from the original module dictionary
-        # or inspecting them. Actually, since conftest.py monkeypatched them on the class objects,
-        # we can still inspect the unpatched functions if we look at the wrapper itself,
-        # or inspect the signature of RoundtableCore.create_discussion.
-        # Wait, if conftest.py monkeypatched RoundtableCore.create_discussion on the class,
-        # RoundtableCore.create_discussion will point to the patched function.
-        # But we can access the original function via the cell variable or by inspecting the signature
-        # of the original function saved in the patched function's closure/context if we want,
-        # or simply from the module's defined class. Wait, in Python, if we patch `RoundtableCore.create_discussion` on the class,
-        # we can find the original function via inspect, or we can just skip monkeypatching for a special test class,
-        # or we can inspect the default value of the underlying function in the original source code or import a fresh copy if we reload the module.
-        # Actually, let's just inspect the defaults in inspect.signature of the original functions or reload them.
-        import importlib
         import sys
+
+        # Reload the module so this test sees the class definitions before conftest monkeypatches them.
         # Save patched references
         original_modules = sys.modules.copy()
         # Reload roundtable.core in a clean way

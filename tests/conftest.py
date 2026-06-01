@@ -1,4 +1,5 @@
 """Pytest conftest — ensures src/ is on sys.path."""
+# ruff: noqa: E402
 
 import sys
 from pathlib import Path
@@ -8,8 +9,10 @@ if str(src) not in sys.path:
     sys.path.insert(0, str(src))
 
 import pytest
-from roundtable.core import RoundtableCore
+
 from roundtable.adapters.generic import Roundtable
+from roundtable.core import RoundtableCore
+
 
 @pytest.fixture(autouse=True)
 def disable_web_viewer_by_default_in_tests(monkeypatch):
@@ -48,4 +51,3 @@ def disable_web_viewer_by_default_in_tests(monkeypatch):
             kwargs["web"] = False
         return orig_gen_demo(*args, **kwargs)
     monkeypatch.setattr(Roundtable, "run_demo", patched_gen_demo)
-

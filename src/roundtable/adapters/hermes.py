@@ -22,14 +22,14 @@ from roundtable.core import RoundtableCore
 from roundtable.exceptions import RoundtableError
 
 try:
-    from tools.registry import registry  # type: ignore[import-not-found]
+    from tools.registry import registry
 except ImportError:
 
     class _NoOpRegistry:
-        def register(self, **kwargs) -> None:
+        def register(self, **kwargs: Any) -> None:
             pass
 
-    registry = _NoOpRegistry()  # type: ignore[assignment]
+    registry = _NoOpRegistry()
 
 logger = logging.getLogger(__name__)
 

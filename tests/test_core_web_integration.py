@@ -249,6 +249,7 @@ class TestSchemaWebFields:
             if "roundtable.core" in sys.modules:
                 del sys.modules["roundtable.core"]
             import roundtable.core
+
             sig = inspect.signature(roundtable.core.RoundtableCore.create_discussion)
             assert sig.parameters["web"].default is True
             sig_demo = inspect.signature(roundtable.core.RoundtableCore.run_demo)

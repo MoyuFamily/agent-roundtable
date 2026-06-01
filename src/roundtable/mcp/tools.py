@@ -7,6 +7,7 @@ optional `mcp` SDK. The server module wraps them into `mcp.types.Tool`.
 from __future__ import annotations
 
 import time
+from importlib import import_module
 from typing import Any
 
 from roundtable.core import RoundtableCore
@@ -213,7 +214,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 
 def get_mcp_tools() -> list[Any]:
     """Convert TOOL_SCHEMAS to mcp.types.Tool objects (requires mcp SDK)."""
-    from mcp.types import Tool
+    Tool = import_module("mcp.types").Tool
 
     return [Tool(**schema) for schema in TOOL_SCHEMAS]
 

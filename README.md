@@ -87,7 +87,13 @@ pip install "agent-roundtable[mcp]"
 python -m roundtable.skills.mcp-roundtable.install --platform=auto
 ```
 
-任意 agent 可以做协调者并通过 invitation 把其他 agent 拉进来。Codex / WorkBuddy 没有原生 MCP，使用 `roundtable.mcp.bridges.codex.CodexBridge` 或 `roundtable.mcp.bridges.GenericBridge` 启动 HTTP 桥即可。详见 [docs/architecture.md](docs/architecture.md)。
+任意 agent 可以做协调者并通过 invitation 把其他 agent 拉进来。Codex / WorkBuddy 没有原生 MCP，推荐直接用内置 Codex 入口启动 HTTP 桥：
+
+```bash
+python -m roundtable.codex
+```
+
+也可以在 Python 里手动启动 `roundtable.mcp.bridges.codex.CodexBridge` 或 `roundtable.mcp.bridges.GenericBridge`。详见 [docs/architecture.md](docs/architecture.md)。
 
 ### 基本用法
 

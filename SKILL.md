@@ -63,7 +63,13 @@ This auto-detects Claude Code / Cursor / Windsurf and writes the MCP config. Or 
 }
 ```
 
-For Codex or WorkBuddy (no native MCP), run a bridge alongside:
+For Codex or WorkBuddy (no native MCP), the easiest path is the built-in Codex entry point:
+
+```bash
+python -m roundtable.codex
+```
+
+If you want to embed it in Python directly, run a bridge alongside:
 
 ```python
 # Codex

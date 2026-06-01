@@ -352,7 +352,7 @@ discussions ──┬─► participants
 | **stdio MCP**            | `python -m roundtable.mcp`                | 单机多 agent，本地编辑器       |
 | **HTTP/SSE MCP**         | `python -m roundtable.mcp --http --port`  | 跨主机、远程 agent             |
 | **In-process (Hermes)**  | `from roundtable.adapters.hermes import…` | 嵌入到 Hermes 主程序           |
-| **HTTP Bridge (Codex)**  | `CodexBridge().start()` (port 8201)       | OpenAI Codex CLI 等非 MCP 平台 |
+| **HTTP Bridge (Codex)**  | `python -m roundtable.codex` (port 8201)  | OpenAI Codex CLI 等非 MCP 平台 |
 
 ## 测试覆盖率 (v0.1.0a1)
 

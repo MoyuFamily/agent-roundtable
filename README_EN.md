@@ -67,6 +67,17 @@ pip install -e .
 
 > Note: The existing `roundtable` / `roundtable-ai` packages on PyPI are not this project. Do not install this project with `pip install roundtable`.
 
+### Codex Bridge
+
+Codex does not expose native MCP tools in every environment. Start the built-in HTTP bridge first, then let Codex call Roundtable through the local endpoints:
+
+```bash
+pip install "agent-roundtable[mcp]"
+python -m roundtable.codex
+```
+
+The bridge registers a local Codex agent and exposes `/health`, `/agent`, `/inbox`, `/tool`, `/speak`, and `/status/<discussion_id>` on `http://127.0.0.1:8201`.
+
 ### Basic Usage
 
 Example: let a backend architect, ops engineer, and product manager discuss database selection. Roundtable manages rounds, records viewpoints, tracks convergence, and generates a conclusion.

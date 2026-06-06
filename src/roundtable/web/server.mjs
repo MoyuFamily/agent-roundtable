@@ -227,12 +227,16 @@ function _parseCookies(cookieHeader) {
   return cookies;
 }
 
-function isAuthenticated(req, entry) {
+function isAuthenticated(req, entry, token = "") {
   if (!entry.passwordHash) return true;
   const cookies = _parseCookies(req.headers.cookie);
+  const expected = _signSession(entry.tokenHash);
   const sig = cookies[`rt_pw_${entry.tokenHash}`];
-  if (!sig) return false;
-  return sig === _signSession(entry.tokenHash);
+  if (sig === expected) return true;
+
+  // Backward compatibility for clients/tests that stored rt_pw_<raw token>.
+  const legacySig = token ? cookies[`rt_pw_${token}`] : null;
+  return legacySig === expected;
 }
 
 // ---------------------------------------------------------------------------
@@ -789,7 +793,7 @@ router.get("/r/:token", async (req, res, params) => {
 
   if (entry.passwordHash) {
     await loadBcrypt();
-    if (!isAuthenticated(req, entry)) return sendPasswordPage(res);
+    if (!isAuthenticated(req, entry, params.token)) return sendPasswordPage(res);
   }
 
   renderViewer(req, res, entry, params.token, { templateName: "index.html", embed: false });
@@ -805,7 +809,7 @@ router.get("/embed/:token", async (req, res, params) => {
   // Surface a clean "open in new tab" hint instead.
   if (entry.passwordHash) {
     await loadBcrypt();
-    if (!isAuthenticated(req, entry)) {
+    if (!isAuthenticated(req, entry, params.token)) {
       const url = `/r/${encodeURIComponent(params.token)}`;
       const html = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -851,7 +855,7 @@ router.get("/api/:token/data", async (req, res, params) => {
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
     await loadBcrypt();
-    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
+    if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
   const data = readDiscussionFor(entry);
@@ -864,7 +868,7 @@ router.get("/api/:token/events", async (req, res, params) => {
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
     await loadBcrypt();
-    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
+    if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
   res.writeHead(200, {
@@ -908,7 +912,7 @@ router.get("/api/:token/poll", async (req, res, params) => {
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
     await loadBcrypt();
-    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
+    if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -983,10 +987,11 @@ router.post("/api/:token/validate-password", async (req, res, params) => {
     const match = await bcrypt.compare(password, entry.passwordHash);
     if (match) {
       const sig = _signSession(entry.tokenHash);
-      res.setHeader(
-        "Set-Cookie",
-        `rt_pw_${entry.tokenHash}=${sig}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}`
-      );
+      const cookieAttrs = `Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}`;
+      res.setHeader("Set-Cookie", [
+        `rt_pw_${entry.tokenHash}=${sig}; ${cookieAttrs}`,
+        `rt_pw_${params.token}=${sig}; ${cookieAttrs}`,
+      ]);
       return sendJSON(res, { ok: true });
     }
     return sendJSON(res, { ok: false, error: "Incorrect password" }, 401);
@@ -1000,7 +1005,7 @@ router.get("/api/:token/export/markdown", async (req, res, params) => {
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
     await loadBcrypt();
-    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
+    if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
   const data = readDiscussionFor(entry);
@@ -1021,7 +1026,7 @@ router.get("/api/:token/export/pdf", async (req, res, params) => {
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
     await loadBcrypt();
-    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
+    if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
   const data = readDiscussionFor(entry);

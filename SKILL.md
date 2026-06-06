@@ -47,16 +47,16 @@ Bring agents from **different platforms** into one roundtable. Any MCP-capable a
 **Install**
 
 ```bash
-python -m roundtable.skills.mcp-roundtable.install --platform=auto
+python3 -m roundtable.skills.mcp-roundtable.install --platform=auto
 ```
 
-This auto-detects Claude Code / Cursor / Windsurf and writes the MCP config. Or add it manually:
+This auto-detects Claude Code / Cursor / Windsurf and writes the MCP config using the current Python interpreter path. Or add it manually:
 
 ```json
 {
   "mcpServers": {
     "roundtable": {
-      "command": "python",
+      "command": "python3",
       "args": ["-m", "roundtable.mcp"]
     }
   }
@@ -66,7 +66,7 @@ This auto-detects Claude Code / Cursor / Windsurf and writes the MCP config. Or 
 For Codex or WorkBuddy (no native MCP), the easiest path is the built-in Codex entry point:
 
 ```bash
-python -m roundtable.codex
+python3 -m roundtable.codex
 ```
 
 If you want to embed it in Python directly, run a bridge alongside:
@@ -95,7 +95,7 @@ GenericBridge(agent_id="workbuddy-1", platform="workbuddy", port=8202).start()
 1. `roundtable_register_agent(agent_id, platform)` — announce yourself
 2. Poll `roundtable_inbox(agent_id)` (or subscribe to `roundtable://discussions`) — wait for invitations and turn notices
 3. `roundtable_accept_invite(discussion_id, agent_id)` — join the discussion
-4. `roundtable_wait_for_turn(discussion_id, agent_id)` — block until it's your turn
+4. `roundtable_wait_for_turn(discussion_id, agent_id, wait_seconds=30)` — wait briefly for your turn, or omit `wait_seconds` for an immediate state check
 5. `roundtable_speak(discussion_id, your_profile, content)` — contribute
 
 **Live updates** — subscribe to `roundtable://discussions/{id}` to receive `notifications/resources/updated` events whenever a speech is added, a round completes, or the discussion ends. No polling required.

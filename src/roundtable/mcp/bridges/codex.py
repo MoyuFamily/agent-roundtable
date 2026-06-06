@@ -138,12 +138,17 @@ def _make_handler(core: RoundtableCore, db: RoundtableDB, agent_id: str) -> type
                 return
 
             if path == "/invite":
-                conn = db.connect()
-                try:
-                    db.respond_invitation(conn, body["discussion_id"], agent_id, accept=True)
-                    self._respond(200, {"accepted": True})
-                finally:
-                    conn.close()
+                discussion_id = body.get("discussion_id")
+                if not discussion_id:
+                    self._respond(400, {"error": "discussion_id required"})
+                    return
+                result = handle_tool_call(
+                    core,
+                    db,
+                    "roundtable_accept_invite",
+                    {"discussion_id": discussion_id, "agent_id": agent_id},
+                )
+                self._respond(200, {"accepted": "error" not in result, "result": result})
 
             elif path == "/tool":
                 tool_name = body.get("name", "")
@@ -153,6 +158,9 @@ def _make_handler(core: RoundtableCore, db: RoundtableDB, agent_id: str) -> type
                     return
                 result = handle_tool_call(core, db, tool_name, arguments)
                 self._respond(200, result)
+
+            elif path == "/turn":
+                self._respond(200, {"received": True, "payload": body})
 
             elif path == "/speak":
                 disc_id = body.get("discussion_id")

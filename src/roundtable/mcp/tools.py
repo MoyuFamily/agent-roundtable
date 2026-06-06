@@ -6,7 +6,10 @@ optional `mcp` SDK. The server module wraps them into `mcp.types.Tool`.
 
 from __future__ import annotations
 
+import json
 import time
+import urllib.error
+import urllib.request
 from importlib import import_module
 from typing import Any
 
@@ -58,6 +61,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 },
                 "max_rounds": {"type": "integer", "default": 3},
                 "speech_order": {"type": "string", "default": "fixed"},
+                "web": {"type": "boolean", "default": False, "description": "Start the Web Viewer for this discussion"},
                 "invite_agents": {"type": "array", "items": {"type": "string"}, "description": "Agent IDs to invite"},
                 "created_by": {"type": "string", "description": "Creator agent ID"},
             },
@@ -188,12 +192,22 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "roundtable_wait_for_turn",
-        "description": "Check if it's your turn to speak. Returns immediately with current state.",
+        "description": "Check if it's your turn to speak, optionally polling briefly until the turn arrives.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "discussion_id": {"type": "string"},
                 "agent_id": {"type": "string", "description": "Your participant profile name"},
+                "wait_seconds": {
+                    "type": "number",
+                    "default": 0,
+                    "description": "Optional max seconds to poll until your turn before returning",
+                },
+                "poll_interval": {
+                    "type": "number",
+                    "default": 1,
+                    "description": "Polling interval in seconds when wait_seconds > 0",
+                },
             },
             "required": ["discussion_id", "agent_id"],
         },
@@ -246,11 +260,23 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
                 max_rounds=arguments.get("max_rounds", 3),
                 speech_order=arguments.get("speech_order", "fixed"),
                 created_by=arguments.get("created_by", "coordinator"),
+                web=arguments.get("web", False),
             )
             invite_agents = arguments.get("invite_agents", [])
             discussion_id = result.get("discussion_id", "")
+            invite_results = []
             for agent_id in invite_agents:
-                _invite_agent(db, conn, discussion_id, agent_id, invited_by=arguments.get("created_by", "coordinator"))
+                invite_results.append(
+                    _invite_agent(
+                        db,
+                        conn,
+                        discussion_id,
+                        agent_id,
+                        invited_by=arguments.get("created_by", "coordinator"),
+                    )
+                )
+            if invite_results:
+                result["invites"] = invite_results
             return result
 
         elif name == "roundtable_invite":
@@ -283,12 +309,24 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
             return {"messages": messages}
 
         elif name == "roundtable_speak":
-            return core.speak(
+            result = core.speak(
                 discussion_id=arguments["discussion_id"],
                 participant=arguments["participant"],
                 content=arguments["content"],
                 reply_to=arguments.get("reply_to"),
             )
+            next_speaker = result.get("next_speaker")
+            if next_speaker:
+                speech_round = int(result.get("round", 0))
+                notice_round = speech_round + 1 if result.get("round_complete") else speech_round
+                result["turn_notice"] = _notify_next_speaker(
+                    db,
+                    conn,
+                    arguments["discussion_id"],
+                    str(next_speaker),
+                    notice_round,
+                )
+            return result
 
         elif name == "roundtable_read":
             return core.read(
@@ -314,7 +352,13 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
             )
 
         elif name == "roundtable_wait_for_turn":
-            return _check_turn(core, arguments["discussion_id"], arguments["agent_id"])
+            return _check_turn(
+                core,
+                arguments["discussion_id"],
+                arguments["agent_id"],
+                wait_seconds=arguments.get("wait_seconds", 0),
+                poll_interval=arguments.get("poll_interval", 1),
+            )
 
         elif name == "roundtable_list":
             return core.list_discussions(
@@ -359,6 +403,9 @@ def _invite_agent(
         },
         discussion_id=discussion_id,
     )
+    delivery = _deliver_http_invitation(db, conn, agent_id, discussion_id, invited_by, role, perspective)
+    if delivery:
+        result["delivery"] = delivery
     return result
 
 
@@ -374,14 +421,104 @@ def _add_participant_from_invite(
     )
 
 
-def _check_turn(core: RoundtableCore, discussion_id: str, agent_id: str) -> dict[str, Any]:
-    status = core.status(discussion_id)
-    if not status.get("ok"):
-        return status
-    next_speaker = status.get("next_speaker")
+def _deliver_http_invitation(
+    db: RoundtableDB,
+    conn: Any,
+    agent_id: str,
+    discussion_id: str,
+    invited_by: str,
+    role: str | None,
+    perspective: str | None,
+) -> dict[str, Any] | None:
+    agent = db.get_agent(conn, agent_id)
+    if not agent or agent.get("transport") != "http" or not agent.get("endpoint"):
+        return None
+
+    payload = {
+        "type": "invitation",
+        "discussion_id": discussion_id,
+        "agent_id": agent_id,
+        "invited_by": invited_by,
+        "role": role,
+        "perspective": perspective,
+    }
+    url = f"{str(agent['endpoint']).rstrip('/')}/invite"
+    try:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=2) as response:
+            body = response.read().decode("utf-8")
+        return {"transport": "http", "endpoint": url, "ok": True, "response": body}
+    except (OSError, urllib.error.URLError, TimeoutError) as exc:
+        return {"transport": "http", "endpoint": url, "ok": False, "error": str(exc)}
+
+
+def _notify_next_speaker(
+    db: RoundtableDB,
+    conn: Any,
+    discussion_id: str,
+    agent_id: str,
+    round_num: Any,
+) -> dict[str, Any]:
+    agent = db.get_agent(conn, agent_id)
+    if not agent:
+        return {"skipped": True, "reason": "agent_not_registered"}
+
+    payload = {
+        "discussion_id": discussion_id,
+        "agent_id": agent_id,
+        "round": round_num,
+    }
+    message_id = db.push_inbox(conn, agent_id, "turn", payload=payload, discussion_id=discussion_id)
+    result: dict[str, Any] = {"inbox_message_id": message_id}
+
+    if agent.get("transport") != "http" or not agent.get("endpoint"):
+        return result
+
+    url = f"{str(agent['endpoint']).rstrip('/')}/turn"
+    try:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({"type": "turn", **payload}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=2) as response:
+            body = response.read().decode("utf-8")
+        result["delivery"] = {"transport": "http", "endpoint": url, "ok": True, "response": body}
+    except (OSError, urllib.error.URLError, TimeoutError) as exc:
+        result["delivery"] = {"transport": "http", "endpoint": url, "ok": False, "error": str(exc)}
+    return result
+
+
+def _check_turn(
+    core: RoundtableCore,
+    discussion_id: str,
+    agent_id: str,
+    *,
+    wait_seconds: float | int = 0,
+    poll_interval: float | int = 1,
+) -> dict[str, Any]:
+    deadline = time.time() + max(0.0, float(wait_seconds or 0))
+    interval = min(max(0.1, float(poll_interval or 1)), 5.0)
+
+    while True:
+        status = core.status(discussion_id)
+        if not status.get("ok"):
+            return status
+        next_speaker = status.get("next_speaker")
+        if next_speaker == agent_id or status.get("status") != "active" or time.time() >= deadline:
+            break
+        time.sleep(interval)
+
     return {
         "your_turn": next_speaker == agent_id,
         "next_speaker": next_speaker,
         "current_round": status.get("current_round"),
         "status": status.get("status"),
+        "waited": wait_seconds,
     }

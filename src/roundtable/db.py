@@ -283,6 +283,25 @@ class RoundtableDB:
         if current_round == 0 and participant != "coordinator":
             raise InvalidParticipantError("Round 0 is reserved for the coordinator opening statement")
 
+        active_names = self.get_active_participant_names(conn, discussion_id)
+        if current_round > 0 and participant in active_names:
+            speakers_this_round = conn.execute(
+                """SELECT DISTINCT participant FROM speeches
+                   WHERE discussion_id = ? AND round = ?""",
+                (discussion_id, current_round),
+            ).fetchall()
+            spoke_names = {r["participant"] for r in speakers_this_round}
+            if participant in spoke_names:
+                raise InvalidParticipantError(
+                    f"Participant '{participant}' has already spoken in round {current_round}"
+                )
+            if disc.speech_order == "fixed":
+                next_speaker = next((name for name in active_names if name not in spoke_names), None)
+                if next_speaker is not None and participant != next_speaker:
+                    raise InvalidParticipantError(
+                        f"It is not '{participant}' turn to speak. Next speaker: {next_speaker}"
+                    )
+
         if reply_to is not None:
             ref = conn.execute(
                 "SELECT id FROM speeches WHERE id = ? AND discussion_id = ?",
@@ -301,7 +320,6 @@ class RoundtableDB:
             )
             speech_id = cur.lastrowid
 
-            active_names = self.get_active_participant_names(conn, discussion_id)
             round_complete = False
             discussion_complete = False
 

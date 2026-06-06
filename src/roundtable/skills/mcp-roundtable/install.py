@@ -44,6 +44,9 @@ def install_for_platform(platform: str) -> str:
         raise ValueError(f"No config template for platform: {platform}")
 
     new_config = json.loads(config_file.read_text())
+    roundtable_server = new_config.get("mcpServers", {}).get("roundtable")
+    if isinstance(roundtable_server, dict):
+        roundtable_server["command"] = sys.executable
     paths = PLATFORM_PATHS.get(platform, [])
     if not paths:
         raise ValueError(f"Unknown platform path for: {platform}")

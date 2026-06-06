@@ -249,6 +249,32 @@ def test_speech_with_reply_to(rt_db, db_conn):
     assert s2.reply_to == s1.id
 
 
+def test_fixed_order_rejects_out_of_turn_speech(rt_db, db_conn):
+    disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS)
+    rt_db.add_speech(db_conn, disc.id, "coordinator", "opening")
+
+    with pytest.raises(ValueError, match="Next speaker: alice"):
+        rt_db.add_speech(db_conn, disc.id, "bob", "jumping the queue")
+
+
+def test_participant_cannot_speak_twice_in_same_round(rt_db, db_conn):
+    disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS)
+    rt_db.add_speech(db_conn, disc.id, "coordinator", "opening")
+    rt_db.add_speech(db_conn, disc.id, "alice", "first point")
+
+    with pytest.raises(ValueError, match="already spoken"):
+        rt_db.add_speech(db_conn, disc.id, "alice", "second point")
+
+
+def test_free_order_allows_any_unspoken_participant(rt_db, db_conn):
+    disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS, speech_order="free")
+    rt_db.add_speech(db_conn, disc.id, "coordinator", "opening")
+
+    result = rt_db.add_speech(db_conn, disc.id, "carol", "free order")
+
+    assert result["speech"].participant == "carol"
+
+
 def test_speech_reply_to_invalid(rt_db, db_conn):
     disc = rt_db.create_discussion(db_conn, topic="test", participants=PARTICIPANTS)
     rt_db.add_speech(db_conn, disc.id, "coordinator", "opening")

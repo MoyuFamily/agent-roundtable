@@ -22,7 +22,6 @@ from roundtable.demo import (
 from roundtable.exceptions import (
     DiscussionNotActiveError,
     DiscussionNotFoundError,
-    InvalidParticipantError,
 )
 from roundtable.models import ConvergenceRecord, Discussion, Participant, Speech
 from roundtable.notify import Notifier, validate_notification_config
@@ -214,29 +213,6 @@ class RoundtableCore:
 
         conn = self.db.connect()
         try:
-            disc = self.db.get_discussion(conn, discussion_id)
-            if not disc:
-                raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
-            if disc.status != "active":
-                raise DiscussionNotActiveError(f"Discussion {discussion_id} is {disc.status}")
-
-            active_names = self.db.get_active_participant_names(conn, discussion_id)
-            is_coordinator = participant == "coordinator"
-            if not is_coordinator and participant not in active_names:
-                raise InvalidParticipantError(
-                    f"Participant '{participant}' is not an active member of this discussion. "
-                    f"Active: {', '.join(active_names)}"
-                )
-            if is_coordinator and disc.current_round == 0:
-                existing_opening = conn.execute(
-                    """SELECT id FROM speeches
-                       WHERE discussion_id = ? AND round = 0 AND participant = 'coordinator'
-                       LIMIT 1""",
-                    (discussion_id,),
-                ).fetchone()
-                if existing_opening:
-                    raise InvalidParticipantError("Coordinator opening statement already exists for this discussion")
-
             result = self.db.add_speech(
                 conn,
                 discussion_id=discussion_id,
@@ -248,6 +224,10 @@ class RoundtableCore:
             round_complete = result["round_complete"]
             discussion_complete = result["discussion_complete"]
             next_speaker = result["next_speaker"]
+
+            disc = self.db.get_discussion(conn, discussion_id)
+            if not disc:
+                raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
 
             # Auto-calculate convergence when a round completes
             convergence_score = None

@@ -5,7 +5,7 @@ version: 1.0.0
 platforms: [linux, macos, windows]
 mcp:
   server: roundtable
-  command: "python -m roundtable.mcp"
+  command: "python3 -m roundtable.mcp"
   required_tools:
     - roundtable_register_agent
     - roundtable_create
@@ -29,7 +29,7 @@ act as coordinators (creating and managing discussions) or participants
 ## Installation
 
 ```bash
-python -m roundtable.skills.mcp-roundtable.install --platform=auto
+python3 -m roundtable.skills.mcp-roundtable.install --platform=auto
 ```
 
 Or manually add to your MCP config:
@@ -37,7 +37,7 @@ Or manually add to your MCP config:
 {
   "mcpServers": {
     "roundtable": {
-      "command": "python",
+      "command": "python3",
       "args": ["-m", "roundtable.mcp"]
     }
   }
@@ -59,7 +59,7 @@ Or manually add to your MCP config:
 1. Register yourself: `roundtable_register_agent(agent_id="my-agent", platform="cursor")`
 2. Check inbox: `roundtable_inbox(agent_id="my-agent")`
 3. Accept invitation: `roundtable_accept_invite(discussion_id, agent_id="my-agent")`
-4. Wait for turn: `roundtable_wait_for_turn(discussion_id, agent_id="my-agent")`
+4. Wait for turn: `roundtable_wait_for_turn(discussion_id, agent_id="my-agent", wait_seconds=30)`, or omit `wait_seconds` for an immediate check
 5. Speak: `roundtable_speak(discussion_id, "my-agent", "my viewpoint...")`
 6. Repeat steps 4-5 for each round
 

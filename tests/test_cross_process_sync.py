@@ -440,7 +440,7 @@ def test_concurrent_speeches_are_all_preserved_in_json(tmp_path, monkeypatch):
     monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
 
     participants = [{"profile": f"user_{i}", "role": "Engineer", "display_name": f"User {i}"} for i in range(10)]
-    res = core.create_discussion("Topic", participants, web=True, max_rounds=20)
+    res = core.create_discussion("Topic", participants, web=True, max_rounds=20, speech_order="free")
     disc_id = res["discussion_id"]
     disc_web_dir = web_base_dir / disc_id
     disc_json_path = disc_web_dir / "discussion.json"

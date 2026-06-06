@@ -14,8 +14,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-import platform
 import subprocess
+import webbrowser
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from roundtable.core import RoundtableCore
@@ -32,6 +33,7 @@ except ImportError:
     registry = _NoOpRegistry()
 
 logger = logging.getLogger(__name__)
+_notification_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="roundtable-hermes-notify")
 
 
 # ---------------------------------------------------------------------------
@@ -39,14 +41,22 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _hermes_send_fn(platform: str, chat_id: str, message: str) -> None:
+def _hermes_send_fn(channel_platform: str, chat_id: str, message: str) -> None:
     """Deliver a notification message to a messaging platform.
 
     Called by the Notifier when a discussion event fires.
     Must never raise — exceptions are caught and logged.
     """
     try:
-        if platform == "feishu":
+        _notification_executor.submit(_send_notification_sync, channel_platform, chat_id, message)
+    except RuntimeError as exc:
+        logger.warning("Notification executor unavailable (platform=%s, chat=%s): %s", channel_platform, chat_id, exc)
+
+
+def _send_notification_sync(channel_platform: str, chat_id: str, message: str) -> None:
+    """Run the blocking Hermes notification command outside the speaker path."""
+    try:
+        if channel_platform == "feishu":
             profile = os.environ.get("HERMES_PROFILE", "default")
             script = os.path.expanduser("~/.hermes/scripts/feishu-send.py")
             result = subprocess.run(
@@ -58,15 +68,15 @@ def _hermes_send_fn(platform: str, chat_id: str, message: str) -> None:
             if result.returncode != 0:
                 logger.warning(
                     "Notification send command failed (platform=%s, chat=%s, exit=%s): %s",
-                    platform,
+                    channel_platform,
                     chat_id,
                     result.returncode,
                     result.stderr.strip() or result.stdout.strip(),
                 )
         else:
-            logger.warning("Unsupported notification platform: %s", platform)
+            logger.warning("Unsupported notification platform: %s", channel_platform)
     except Exception as e:
-        logger.warning("Notification send failed (platform=%s, chat=%s): %s", platform, chat_id, e)
+        logger.warning("Notification send failed (platform=%s, chat=%s): %s", channel_platform, chat_id, e)
 
 
 # ---------------------------------------------------------------------------
@@ -134,22 +144,14 @@ def _handle_init(args: dict[str, Any], **kw: Any) -> str:
 
 def _open_web_viewer(web_url: str) -> tuple[bool, str | None]:
     """Best-effort browser opener with an explicit result for callers."""
-    system = platform.system()
-    if system == "Darwin":
-        cmd = ["open", web_url]
-    elif system == "Windows":
-        cmd = ["cmd", "/c", "start", "", web_url]
-    else:
-        cmd = ["xdg-open", web_url]
-
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        opened = webbrowser.open(web_url)
+    except Exception as exc:
         logger.debug("Could not auto-open browser for web viewer: %s", exc)
         return False, str(exc)
 
-    if result.returncode != 0:
-        error = (result.stderr or result.stdout or f"exit {result.returncode}").strip()
+    if not opened:
+        error = "webbrowser.open returned False"
         logger.debug("Could not auto-open browser for web viewer: %s", error)
         return False, error
 
@@ -166,14 +168,14 @@ def _handle_read(args: dict[str, Any], **kw: Any) -> str:
 
 
 def _handle_status(args: dict[str, Any], **kw: Any) -> str:
-    discussion_id = args.get("discussion_id", "").strip()
+    discussion_id = str(args.get("discussion_id") or "").strip()
     if not discussion_id:
         return _err("discussion_id is required")
     return _handle({"discussion_id": discussion_id}, "status")
 
 
 def _handle_summarize(args: dict[str, Any], **kw: Any) -> str:
-    discussion_id = args.get("discussion_id", "").strip()
+    discussion_id = str(args.get("discussion_id") or "").strip()
     if not discussion_id:
         return _err("discussion_id is required")
     compact = args.get("compact", False)
@@ -189,17 +191,17 @@ def _handle_list(args: dict[str, Any], **kw: Any) -> str:
 
 
 def _handle_advance(args: dict[str, Any], **kw: Any) -> str:
-    discussion_id = args.get("discussion_id", "").strip()
+    discussion_id = str(args.get("discussion_id") or "").strip()
     if not discussion_id:
         return _err("discussion_id is required")
     return _handle({"discussion_id": discussion_id}, "advance")
 
 
 def _handle_notify(args: dict[str, Any], **kw: Any) -> str:
-    discussion_id = args.get("discussion_id", "").strip()
+    discussion_id = str(args.get("discussion_id") or "").strip()
     if not discussion_id:
         return _err("discussion_id is required")
-    event = args.get("event", "").strip()
+    event = str(args.get("event") or "").strip()
     if not event:
         return _err("event is required")
     extra = {k: v for k, v in args.items() if k not in ("discussion_id", "event")}

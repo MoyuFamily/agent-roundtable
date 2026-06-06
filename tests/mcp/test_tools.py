@@ -1,5 +1,8 @@
 """Tests for MCP tool handlers."""
 
+import threading
+import time
+
 import pytest
 
 from roundtable.core import RoundtableCore
@@ -96,6 +99,33 @@ def test_create_discussion_and_invite(setup):
     inbox = handle_tool_call(core, db, "roundtable_inbox", {"agent_id": "participant-1"})
     assert len(inbox["messages"]) == 1
     assert inbox["messages"][0]["type"] == "invitation"
+
+
+def test_create_discussion_disables_web_by_default(setup, monkeypatch):
+    core, db = setup
+    calls = []
+
+    def fake_create_discussion(**kwargs):
+        calls.append(kwargs)
+        return {"ok": True, "discussion_id": "rt_fake", "web_url": "should-not-start"}
+
+    monkeypatch.setattr(core, "create_discussion", fake_create_discussion)
+
+    result = handle_tool_call(
+        core,
+        db,
+        "roundtable_create",
+        {
+            "topic": "No web by default",
+            "participants": [
+                {"profile": "alice", "role": "Dev"},
+                {"profile": "bob", "role": "PM"},
+            ],
+        },
+    )
+
+    assert result["discussion_id"] == "rt_fake"
+    assert calls[0]["web"] is False
 
 
 def test_accept_invite_and_speak(setup):
@@ -258,6 +288,67 @@ def test_wait_for_turn(setup):
         },
     )
     assert turn_bob["your_turn"] is False
+
+
+def test_wait_for_turn_can_poll_until_turn_arrives(setup):
+    core, db = setup
+    create_result = handle_tool_call(
+        core,
+        db,
+        "roundtable_create",
+        {
+            "topic": "Wait test",
+            "participants": [
+                {"profile": "alice", "role": "Dev"},
+                {"profile": "bob", "role": "PM"},
+            ],
+            "created_by": "coord",
+        },
+    )
+    disc_id = create_result["discussion_id"]
+    handle_tool_call(
+        core,
+        db,
+        "roundtable_speak",
+        {
+            "discussion_id": disc_id,
+            "participant": "coordinator",
+            "content": "Opening.",
+        },
+    )
+
+    def delayed_alice_speech():
+        time.sleep(0.2)
+        handle_tool_call(
+            core,
+            db,
+            "roundtable_speak",
+            {
+                "discussion_id": disc_id,
+                "participant": "alice",
+                "content": "Alice spoke.",
+            },
+        )
+
+    thread = threading.Thread(target=delayed_alice_speech)
+    thread.start()
+    try:
+        turn = handle_tool_call(
+            core,
+            db,
+            "roundtable_wait_for_turn",
+            {
+                "discussion_id": disc_id,
+                "agent_id": "bob",
+                "wait_seconds": 2,
+                "poll_interval": 0.05,
+            },
+        )
+    finally:
+        thread.join(timeout=2)
+
+    assert turn["your_turn"] is True
+    assert turn["next_speaker"] == "bob"
 
 
 def test_full_discussion_flow(setup):

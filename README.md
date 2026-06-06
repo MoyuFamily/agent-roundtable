@@ -84,13 +84,15 @@ pip install -e .
 
 ```bash
 pip install "agent-roundtable[mcp]"
-python -m roundtable.skills.mcp-roundtable.install --platform=auto
+python3 -m roundtable.skills.mcp-roundtable.install --platform=auto
 ```
+
+安装脚本会把 MCP server 的 `command` 写成当前 Python 解释器路径，适配 venv 和没有 `python` 命令的 macOS/Linux 环境。手动配置时建议优先使用 `python3`。
 
 任意 agent 可以做协调者并通过 invitation 把其他 agent 拉进来。Codex / WorkBuddy 没有原生 MCP，推荐直接用内置 Codex 入口启动 HTTP 桥：
 
 ```bash
-python -m roundtable.codex
+python3 -m roundtable.codex
 ```
 
 也可以在 Python 里手动启动 `roundtable.mcp.bridges.codex.CodexBridge` 或 `roundtable.mcp.bridges.GenericBridge`。详见 [docs/architecture.md](docs/architecture.md)。

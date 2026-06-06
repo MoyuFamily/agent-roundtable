@@ -117,6 +117,9 @@ class GenericBridge(AgentBridge):
         )
 
     def _on_core_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        self._post_webhook(event_type, payload)
+
+    def _post_webhook(self, event_type: str, payload: dict[str, Any]) -> None:
         if not self._webhook_url:
             return
         try:
@@ -194,6 +197,24 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
                     return
                 result = handle_tool_call(core, db, tool_name, arguments)
                 self._respond(200, result)
+
+            elif path == "/invite":
+                discussion_id = body.get("discussion_id")
+                if not discussion_id:
+                    self._respond(400, {"error": "discussion_id required"})
+                    return
+                result = handle_tool_call(
+                    core,
+                    db,
+                    "roundtable_accept_invite",
+                    {"discussion_id": discussion_id, "agent_id": agent_id},
+                )
+                bridge._post_webhook("invitation", {"request": body, "result": result})
+                self._respond(200, {"accepted": "error" not in result, "result": result})
+
+            elif path == "/turn":
+                bridge._post_webhook("turn", body)
+                self._respond(200, {"received": True, "payload": body})
 
             elif path == "/speak":
                 disc_id = body.get("discussion_id")

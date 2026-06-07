@@ -144,10 +144,7 @@ def test_v3_to_v4_migration_adds_query_indexes(tmp_path):
 
         migrate_db(raw)
 
-        indexes = {
-            row[0]
-            for row in raw.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
-        }
+        indexes = {row[0] for row in raw.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
         assert {
             "idx_dispatches_coordinator",
             "idx_summons_timeout",

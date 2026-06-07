@@ -263,9 +263,7 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
 
 def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
     """Add dispatch/summon tables and allow discussions to assemble before start."""
-    table_row = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'discussions'"
-    ).fetchone()
+    table_row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'discussions'").fetchone()
     needs_rebuild = table_row and "assembling" not in (table_row[0] or "")
     if needs_rebuild:
         fk = conn.execute("PRAGMA foreign_keys").fetchone()[0]

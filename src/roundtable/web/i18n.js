@@ -13,6 +13,7 @@
     'zh-CN': {
       // Header status
       statusWaiting: '等待中',
+      statusAssembling: '召集中',
       statusActive: '讨论中',
       statusConcluded: '已结束',
 
@@ -24,6 +25,20 @@
       // Waiting state
       waitingTitle: '讨论即将开始…',
       waitingSubtitle: '发言将会实时显示在这里',
+
+      // Dispatch
+      dispatchAssembling: '正在召集参与 Agent',
+      dispatchStatus: 'Agent 召集状态',
+      dispatchReady: '已就绪',
+      dispatchWaiting: '等待中',
+      dispatchAccepted: '已接受',
+      dispatchPending: '待响应',
+      dispatchDeclined: '已拒绝',
+      dispatchFailed: '异常',
+      dispatchModeManaged: '托管',
+      dispatchModeFederated: '联邦',
+      dispatchMinAccepts: '至少 {count} 位接受',
+      dispatchAgents: '{accepted}/{total} 已接受 · {waiting} 待响应 · {failed} 异常',
 
       // Participants
       participants: '参与者',
@@ -119,6 +134,7 @@
     'en-US': {
       // Header status
       statusWaiting: 'Waiting',
+      statusAssembling: 'Assembling',
       statusActive: 'Active',
       statusConcluded: 'Concluded',
 
@@ -130,6 +146,20 @@
       // Waiting state
       waitingTitle: 'Discussion starting soon…',
       waitingSubtitle: 'Speeches will appear here in real-time',
+
+      // Dispatch
+      dispatchAssembling: 'Summoning agents',
+      dispatchStatus: 'Agent dispatch status',
+      dispatchReady: 'Ready',
+      dispatchWaiting: 'Waiting',
+      dispatchAccepted: 'Accepted',
+      dispatchPending: 'Pending',
+      dispatchDeclined: 'Declined',
+      dispatchFailed: 'Issue',
+      dispatchModeManaged: 'Managed',
+      dispatchModeFederated: 'Federated',
+      dispatchMinAccepts: 'min {count} accepts',
+      dispatchAgents: '{accepted}/{total} accepted · {waiting} pending · {failed} issues',
 
       // Participants
       participants: 'Participants',

@@ -24,6 +24,8 @@
       roundSummaries: [],
       roundSummarySet: new Set(),
       streamSpeechMap: new Map(),
+      dispatches: [],
+      dispatchSummary: null,
     };
 
     // Token batching buffer (rAF-based)
@@ -50,6 +52,7 @@
     const $conclusionContent = document.getElementById('conclusionContent');
     const $revokedState = document.getElementById('revokedState');
     const $scrollBottomBtn = document.getElementById('scrollBottomBtn');
+    const $dispatchStatusPanel = document.getElementById('dispatchStatusPanel');
 
     // ---- Auto-scroll logic ----
     const mainEl = document.querySelector('main');
@@ -233,6 +236,12 @@
       if (data.status !== state.status) {
         state.status = data.status;
         updateStatusUI();
+      }
+
+      if (Array.isArray(data.dispatches)) {
+        state.dispatches = data.dispatches;
+        state.dispatchSummary = data.dispatch_summary || null;
+        renderDispatchStatus();
       }
 
       // Conclusion
@@ -779,6 +788,7 @@
     function updateStatusUI() {
       const statusMap = {
         waiting: { cls: 'waiting', label: t('statusWaiting') },
+        assembling: { cls: 'assembling', label: t('statusAssembling') },
         active:  { cls: 'live',    label: 'LIVE' },
         concluded: { cls: 'ended', label: t('statusConcluded') },
       };
@@ -789,6 +799,76 @@
         $waitingState.classList.add('hidden');
         $activeState.classList.remove('hidden');
       }
+    }
+
+    function dispatchCounts(item) {
+      const summons = Array.isArray(item?.summons) ? item.summons : [];
+      const counts = Object.assign(
+        { pending: 0, delivered: 0, accepted: 0, declined: 0, timeout: 0, failed: 0 },
+        item?.readiness?.counts || {}
+      );
+      if (!item?.readiness?.counts && summons.length > 0) {
+        for (const summon of summons) {
+          const status = summon.status || 'pending';
+          counts[status] = (counts[status] || 0) + 1;
+        }
+      }
+      return counts;
+    }
+
+    function renderDispatchStatus() {
+      if (!$dispatchStatusPanel) return;
+      const dispatches = Array.isArray(state.dispatches) ? state.dispatches : [];
+      if (dispatches.length === 0 || state.status === 'concluded') {
+        $dispatchStatusPanel.classList.add('hidden');
+        $dispatchStatusPanel.innerHTML = '';
+        return;
+      }
+
+      const summary = state.dispatchSummary || {};
+      const total = Number(summary.total_summons ?? dispatches.reduce((sum, item) => sum + (item.summons?.length || 0), 0));
+      const accepted = Number(summary.accepted || 0);
+      const waiting = Number(summary.pending || 0) + Number(summary.delivered || 0);
+      const failed = Number(summary.failed || 0) + Number(summary.timeout || 0);
+      const title = state.status === 'assembling' ? t('dispatchAssembling') : t('dispatchStatus');
+      const rows = dispatches.map(item => {
+        const dispatch = item.dispatch || {};
+        const readiness = item.readiness || {};
+        const counts = dispatchCounts(item);
+        const itemTotal = Number(readiness.total ?? item.summons?.length ?? 0);
+        const modeLabel = dispatch.mode === 'managed' ? t('dispatchModeManaged') : t('dispatchModeFederated');
+        const readyClass = readiness.ready ? 'ready' : 'waiting';
+        const readyText = readiness.ready ? t('dispatchReady') : t('dispatchWaiting');
+        const policy = `${escapeHtml(dispatch.start_policy || 'quorum')} · ${t('dispatchMinAccepts', { count: dispatch.min_accepts ?? 1 })}`;
+        return `
+          <div class="dispatch-row">
+            <div class="dispatch-row-main">
+              <div class="dispatch-row-title">
+                <span class="dispatch-mode">${modeLabel}</span>
+                <span class="dispatch-ready ${readyClass}">${readyText}</span>
+              </div>
+              <div class="dispatch-row-meta">${policy}</div>
+            </div>
+            <div class="dispatch-row-counts">
+              <span>${t('dispatchAccepted')}: ${Number(counts.accepted || 0)}/${itemTotal}</span>
+              <span>${t('dispatchPending')}: ${Number(counts.pending || 0) + Number(counts.delivered || 0)}</span>
+              <span>${t('dispatchDeclined')}: ${Number(counts.declined || 0)}</span>
+              ${Number(counts.failed || 0) || Number(counts.timeout || 0) ? `<span>${t('dispatchFailed')}: ${Number(counts.failed || 0) + Number(counts.timeout || 0)}</span>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      $dispatchStatusPanel.innerHTML = `
+        <div class="dispatch-panel-header">
+          <div>
+            <div class="dispatch-panel-title">${title}</div>
+            <div class="dispatch-panel-meta">${t('dispatchAgents', { accepted, total, waiting, failed })}</div>
+          </div>
+        </div>
+        <div class="dispatch-rows">${rows}</div>
+      `;
+      $dispatchStatusPanel.classList.remove('hidden');
     }
 
     function showRevoked() {

@@ -73,6 +73,14 @@ def test_mark_inbox_read_idempotent(db):
         conn.close()
 
 
+def test_mark_inbox_read_empty_list_is_noop(db):
+    conn = db.connect()
+    try:
+        assert db.mark_inbox_read(conn, []) == 0
+    finally:
+        conn.close()
+
+
 def test_invitation_lifecycle(db):
     conn = db.connect()
     try:

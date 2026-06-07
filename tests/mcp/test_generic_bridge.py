@@ -57,11 +57,11 @@ def _get(port: int, path: str) -> dict:
         return json.loads(r.read())
 
 
-def _post(port: int, path: str, body: dict) -> dict:
+def _post(port: int, path: str, body: dict, headers: dict[str, str] | None = None) -> dict:
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}",
         data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **(headers or {})},
         method="POST",
     )
     try:
@@ -151,6 +151,92 @@ def test_tool_dispatch_register_and_list(bridge):
     assert "peer" in ids
 
 
+def test_auth_token_protects_mutating_endpoints(tmp_path):
+    port = _free_port()
+    bridge = GenericBridge(
+        agent_id="wb-secure",
+        platform="workbuddy",
+        port=port,
+        auth_token="bridge-secret",
+        db_path=str(tmp_path / "secure.db"),
+    )
+    bridge.start()
+    _wait_ready(port)
+    try:
+        denied = _post(
+            port,
+            "/tool",
+            {"name": "roundtable_list_agents", "arguments": {}},
+        )
+        assert denied["error"] == "unauthorized"
+
+        allowed = _post(
+            port,
+            "/tool",
+            {"name": "roundtable_list_agents", "arguments": {}},
+            headers={"Authorization": "Bearer bridge-secret"},
+        )
+        assert "agents" in allowed
+
+        conn = bridge._db.connect()
+        try:
+            public_agent = bridge._db.get_agent(conn, "wb-secure")
+            private_agent = bridge._db.get_agent(conn, "wb-secure", include_private=True)
+        finally:
+            conn.close()
+        assert "_bridge_auth_token" not in public_agent["metadata"]
+        assert private_agent["metadata"]["_bridge_auth_token"] == "bridge-secret"
+    finally:
+        bridge.stop()
+
+
+def test_http_summon_delivery_uses_registered_bridge_auth_token(tmp_path):
+    port = _free_port()
+    db_path = tmp_path / "secure-summon.db"
+    invited = GenericBridge(
+        agent_id="wb-secure-summoned",
+        platform="workbuddy",
+        port=port,
+        auth_token="summon-secret",
+        db_path=str(db_path),
+    )
+    invited.start()
+    _wait_ready(port)
+    try:
+        db = RoundtableDB(db_path)
+        core = RoundtableCore(db=db)
+        handle_tool_call(
+            core,
+            db,
+            "roundtable_register_agent",
+            {
+                "agent_id": "coord",
+                "platform": "claude-code",
+                "skills": ["agent-roundtable"],
+                "availability": "idle",
+            },
+        )
+
+        result = handle_tool_call(
+            core,
+            db,
+            "roundtable_summon_agents",
+            {
+                "topic": "Secure HTTP summon",
+                "coordinator_agent_id": "coord",
+                "agent_ids": ["wb-secure-summoned"],
+                "required_skill": "agent-roundtable",
+                "min_accepts": 1,
+            },
+        )
+
+        assert result["ok"] is True
+        assert result["deliveries"][0]["ok"] is True
+        assert result["summons"][0]["status"] == "accepted"
+    finally:
+        invited.stop()
+
+
 def test_http_invite_delivery_accepts_and_adds_participant(tmp_path):
     port = _free_port()
     db_path = tmp_path / "shared.db"
@@ -204,6 +290,64 @@ def test_http_invite_delivery_accepts_and_adds_participant(tmp_path):
             conn.close()
         assert invitations[0]["status"] == "accepted"
         assert "wb-invited" in active
+    finally:
+        invited.stop()
+
+
+def test_http_summon_delivery_accepts_and_activates_discussion(tmp_path):
+    port = _free_port()
+    db_path = tmp_path / "summon.db"
+    invited = GenericBridge(
+        agent_id="wb-summoned",
+        platform="workbuddy",
+        port=port,
+        display_name="Summoned WorkBuddy",
+        db_path=str(db_path),
+    )
+    invited.start()
+    _wait_ready(port)
+    try:
+        db = RoundtableDB(db_path)
+        core = RoundtableCore(db=db)
+        handle_tool_call(
+            core,
+            db,
+            "roundtable_register_agent",
+            {
+                "agent_id": "coord",
+                "platform": "claude-code",
+                "skills": ["agent-roundtable"],
+                "availability": "idle",
+            },
+        )
+
+        result = handle_tool_call(
+            core,
+            db,
+            "roundtable_summon_agents",
+            {
+                "topic": "HTTP summon",
+                "coordinator_agent_id": "coord",
+                "agent_ids": ["wb-summoned"],
+                "required_skill": "agent-roundtable",
+                "min_accepts": 1,
+            },
+        )
+
+        assert result["ok"] is True
+        assert result["deliveries"][0]["ok"] is True
+        conn = db.connect()
+        try:
+            summons = db.get_summons(conn, discussion_id=result["discussion_id"], agent_id="wb-summoned")
+            active = db.get_active_participant_names(conn, result["discussion_id"])
+            discussion = db.get_discussion(conn, result["discussion_id"])
+            dispatch = db.get_dispatch(conn, result["dispatch"]["id"])
+        finally:
+            conn.close()
+        assert summons[0]["status"] == "accepted"
+        assert "wb-summoned" in active
+        assert discussion.status == "active"
+        assert dispatch["status"] == "active"
     finally:
         invited.stop()
 

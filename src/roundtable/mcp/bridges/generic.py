@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 import threading
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -30,6 +31,7 @@ class GenericBridge(AgentBridge):
         GET  /health            — liveness check
         GET  /inbox             — read unread messages (marks them read)
         POST /tool              — dispatch any roundtable tool
+        POST /summon            — accept a dispatch summon and join
         POST /speak             — shorthand for roundtable_speak
         GET  /status/{disc_id}  — discussion status
         GET  /agent             — this bridge's agent metadata
@@ -48,6 +50,11 @@ class GenericBridge(AgentBridge):
         host: str = "127.0.0.1",
         display_name: str | None = None,
         capabilities: list[str] | None = None,
+        skills: list[str] | None = None,
+        availability: str = "idle",
+        accept_policy: str = "auto",
+        metadata: dict[str, Any] | None = None,
+        auth_token: str | None = None,
         webhook_url: str | None = None,
         db_path: str | None = None,
     ):
@@ -57,6 +64,11 @@ class GenericBridge(AgentBridge):
         self._host = host
         self._display_name = display_name or agent_id
         self._capabilities = capabilities or ["speak", "listen"]
+        self._skills = skills or ["agent-roundtable"]
+        self._availability = availability
+        self._accept_policy = accept_policy
+        self._metadata = metadata or {}
+        self._auth_token = auth_token
         self._webhook_url = webhook_url
         self._db = RoundtableDB(db_path=db_path)
         self._core = RoundtableCore(db=self._db, on_event=self._on_core_event)
@@ -86,6 +98,13 @@ class GenericBridge(AgentBridge):
                 transport="http",
                 endpoint=f"http://{self._host}:{self._port}",
                 capabilities=self._capabilities,
+                metadata={
+                    **self._metadata,
+                    "skills": self._skills,
+                    "availability": self._availability,
+                    "accept_policy": self._accept_policy,
+                    **({"_bridge_auth_token": self._auth_token} if self._auth_token else {}),
+                },
             )
         finally:
             conn.close()
@@ -132,19 +151,25 @@ class GenericBridge(AgentBridge):
             )
             urllib.request.urlopen(req, timeout=2)
         except Exception as e:
-            logger.debug("Webhook delivery failed: %s", e)
+            logger.warning("Webhook delivery failed: %s", e)
 
 
 def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
     db = bridge._db
     core = bridge._core
     agent_id = bridge.agent_id
+    auth_token = bridge._auth_token
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             path = urlparse(self.path).path
 
             if path == "/health":
+                conn = db.connect()
+                try:
+                    db.touch_agent(conn, agent_id, availability=bridge._availability)
+                finally:
+                    conn.close()
                 self._respond(
                     200,
                     {
@@ -163,6 +188,8 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
                     conn.close()
 
             elif path == "/inbox":
+                if not self._require_auth():
+                    return
                 conn = db.connect()
                 try:
                     db.touch_agent(conn, agent_id)
@@ -182,6 +209,8 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:
             path = urlparse(self.path).path
+            if not self._require_auth():
+                return
             length = int(self.headers.get("Content-Length", 0))
             try:
                 body = json.loads(self.rfile.read(length)) if length else {}
@@ -212,6 +241,28 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
                 bridge._post_webhook("invitation", {"request": body, "result": result})
                 self._respond(200, {"accepted": "error" not in result, "result": result})
 
+            elif path == "/summon":
+                discussion_id = body.get("discussion_id")
+                if not discussion_id:
+                    self._respond(400, {"error": "discussion_id required"})
+                    return
+                auto_accept = bridge._accept_policy == "auto"
+                if auto_accept:
+                    result = handle_tool_call(
+                        core,
+                        db,
+                        "roundtable_accept_summon",
+                        {
+                            "discussion_id": discussion_id,
+                            "agent_id": agent_id,
+                            "metadata": {"source": "generic_bridge", "summon_id": body.get("summon_id")},
+                        },
+                    )
+                else:
+                    result = {"status": "pending", "reason": "manual_accept_required"}
+                bridge._post_webhook("summon", {"request": body, "result": result})
+                self._respond(200, {"accepted": auto_accept and "error" not in result, "result": result})
+
             elif path == "/turn":
                 bridge._post_webhook("turn", body)
                 self._respond(200, {"received": True, "payload": body})
@@ -233,6 +284,19 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
 
             else:
                 self._respond(404, {"error": "not found", "path": path})
+
+        def _require_auth(self) -> bool:
+            if not auth_token:
+                return True
+            bearer = self.headers.get("Authorization", "")
+            token = ""
+            if bearer.startswith("Bearer "):
+                token = bearer[len("Bearer ") :].strip()
+            token = token or self.headers.get("X-Roundtable-Token", "")
+            if secrets.compare_digest(token, auth_token):
+                return True
+            self._respond(401, {"error": "unauthorized"})
+            return False
 
         def _respond(self, status: int, data: dict[str, Any]) -> None:
             payload = json.dumps(data, ensure_ascii=False, default=str).encode()

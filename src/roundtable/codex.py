@@ -15,6 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="127.0.0.1", help="HTTP host (default: 127.0.0.1)")
     parser.add_argument("--display-name", default="Codex Agent", help="Human-readable agent name")
     parser.add_argument("--db", type=str, default=None, help="SQLite database path")
+    parser.add_argument("--auth-token", default=None, help="Optional bearer token required by bridge endpoints")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     return parser
 
@@ -31,6 +32,7 @@ def main() -> None:
         host=args.host,
         display_name=args.display_name,
         db_path=args.db,
+        auth_token=args.auth_token,
     )
     bridge.start()
 

@@ -776,3 +776,61 @@ def test_fallback_conclude_preserves_final_summary_verdict(tmp_path, monkeypatch
     # If final_summary was written, its verdict should match
     if data.get("final_summary"):
         assert data["final_summary"]["verdict"] == "使用 Python"
+
+
+def test_web_sync_writes_dispatch_snapshot_and_joiners(tmp_path, monkeypatch):
+    from roundtable.mcp.tools import handle_tool_call
+    from roundtable.web_publisher import WebPublisher
+
+    monkeypatch.setattr(WebPublisher, "_ensure_shared_server_running", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WebPublisher, "stop", lambda *args, **kwargs: None)
+
+    db_path = tmp_path / "roundtable.db"
+    db = RoundtableDB(db_path)
+    core = RoundtableCore(db)
+    web_base_dir = tmp_path / "roundtable_web"
+    web_base_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(core, "_get_web_dir", lambda discussion_id: web_base_dir / discussion_id)
+
+    handle_tool_call(core, db, "roundtable_register_agent", {"agent_id": "coord", "platform": "claude-code"})
+    handle_tool_call(
+        core,
+        db,
+        "roundtable_register_agent",
+        {
+            "agent_id": "agent-1",
+            "platform": "codex",
+            "skills": ["agent-roundtable"],
+            "availability": "idle",
+        },
+    )
+
+    summon = handle_tool_call(
+        core,
+        db,
+        "roundtable_summon_agents",
+        {
+            "topic": "Web dispatch snapshot",
+            "coordinator_agent_id": "coord",
+            "agent_ids": ["agent-1"],
+            "required_skill": "agent-roundtable",
+            "web": True,
+            "min_accepts": 1,
+        },
+    )
+
+    disc_id = summon["discussion_id"]
+    disc_json_path = web_base_dir / disc_id / "discussion.json"
+    data = json.loads(disc_json_path.read_text())
+    assert data["schema_version"] == 3
+    assert data["status"] == "assembling"
+    assert data["dispatch_summary"]["total_summons"] == 1
+    assert data["dispatches"][0]["dispatch"]["id"] == summon["dispatch"]["id"]
+    assert data["dispatches"][0]["summons"][0]["agent_id"] == "agent-1"
+
+    handle_tool_call(core, db, "roundtable_accept_summon", {"discussion_id": disc_id, "agent_id": "agent-1"})
+
+    data = json.loads(disc_json_path.read_text())
+    assert data["status"] == "active"
+    assert data["dispatch_summary"]["accepted"] == 1
+    assert [participant["profile"] for participant in data["participants"]] == ["agent-1"]

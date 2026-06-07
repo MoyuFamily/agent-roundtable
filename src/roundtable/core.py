@@ -81,6 +81,7 @@ class RoundtableCore:
         created_by: str = "coordinator",
         output_path: str | None = None,
         notifications: dict[str, Any] | None = None,
+        status: str = "active",
         web: bool = True,
         web_port: int = 8199,
         expires_at: float | None = None,
@@ -114,9 +115,11 @@ class RoundtableCore:
                 speech_order = tpl["speech_order"]
         if not topic or not topic.strip():
             raise ValueError("topic is required")
-        if not participants or not isinstance(participants, list):
+        if participants is None or not isinstance(participants, list):
             raise ValueError("participants must be a non-empty array of objects")
-        if len(participants) < 2:
+        if status != "assembling" and not participants:
+            raise ValueError("participants must be a non-empty array of objects")
+        if status != "assembling" and len(participants) < 2:
             raise ValueError("At least 2 participants are required for a discussion")
 
         if notifications is not None:
@@ -141,6 +144,7 @@ class RoundtableCore:
                 created_by=created_by,
                 output_path=output_path,
                 notifications=notifications,
+                status=status,
             )
 
             # Optionally start web viewer
@@ -165,6 +169,7 @@ class RoundtableCore:
                             }
                             for p in participants
                         ],
+                        status=disc.status,
                         expires_at=expires_at,
                     )
                 except Exception as exc:
@@ -475,6 +480,24 @@ class RoundtableCore:
             if not disc:
                 raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
 
+            dispatches = self.db.list_dispatches(conn, discussion_id=discussion_id)
+            dispatch_status = []
+            for dispatch in dispatches:
+                readiness_result = self.db.apply_dispatch_readiness(conn, dispatch["id"])
+                updated_dispatch = readiness_result.get("dispatch") or dispatch
+                dispatch_status.append(
+                    {
+                        "dispatch": updated_dispatch,
+                        "readiness": readiness_result.get("readiness"),
+                        "summons": self.db.get_summons(conn, dispatch_id=dispatch["id"]),
+                        "discussion_activated": readiness_result.get("discussion_activated", False),
+                    }
+                )
+            if any(item.get("discussion_activated") for item in dispatch_status):
+                refreshed = self.db.get_discussion(conn, discussion_id)
+                if refreshed:
+                    disc = refreshed
+
             participants = self.db.get_participants(conn, discussion_id)
             speech_count = self.db.get_speech_count(conn, discussion_id)
             findings = self.db.get_findings(conn, discussion_id)
@@ -513,6 +536,7 @@ class RoundtableCore:
                 "speech_count": speech_count,
                 "participant_count": len(participants),
                 "next_speaker": next_speaker,
+                "dispatches": dispatch_status,
                 "convergence_history": [
                     {
                         "round": c.round,
@@ -658,6 +682,16 @@ class RoundtableCore:
             if not disc:
                 raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
             if disc.status != "active":
+                if force and disc.status == "assembling":
+                    ok = self.db.cancel_discussion(conn, discussion_id)
+                    self._emit("discussion_ended", discussion_id=discussion_id, action="cancelled")
+                    return {
+                        "ok": True,
+                        "discussion_id": discussion_id,
+                        "action": "cancelled",
+                        "success": ok,
+                        "web_retained": False,
+                    }
                 if disc.status == "concluded" and not force and conclusion is not None:
                     conn.execute(
                         "UPDATE discussions SET conclusion = ? WHERE id = ?",
@@ -671,7 +705,7 @@ class RoundtableCore:
                             self._build_output_markdown(conn, disc_after, conclusion_override=conclusion),
                         )
 
-                    publisher = self._publishers.get(discussion_id)
+                    publisher = self._publishers.pop(discussion_id, None)
                     web_retained = False
                     if publisher:
                         try:
@@ -686,6 +720,7 @@ class RoundtableCore:
                             )
                             publisher.conclude(conclusion)
                             web_retained = True
+                            logger.info("Web publisher retained for concluded discussion %s", discussion_id)
                         except (OSError, RuntimeError, ValueError):
                             logger.exception("Web publisher conclude update failed for %s", discussion_id)
                     else:
@@ -729,7 +764,7 @@ class RoundtableCore:
 
             # Web publisher hook. A concluded viewer remains online for post-meeting
             # review; force-cancel still stops it immediately.
-            publisher = self._publishers.get(discussion_id)
+            publisher = self._publishers.pop(discussion_id, None)
             web_retained = False
             if publisher:
                 try:
@@ -744,12 +779,8 @@ class RoundtableCore:
                         )
                         publisher.conclude(disc_after.conclusion or "")
                         web_retained = True
-                        # Disk-backed viewer keeps serving via shared PM2 server;
-                        # release the in-memory publisher to avoid leaking.
-                        self._publishers.pop(discussion_id, None)
                         logger.info("Web publisher retained for concluded discussion %s", discussion_id)
                     else:
-                        self._publishers.pop(discussion_id, None)
                         publisher.stop()
                         logger.info("Web publisher stopped for %s", discussion_id)
                 except (OSError, RuntimeError, ValueError):

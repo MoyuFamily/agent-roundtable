@@ -118,6 +118,8 @@ def test_codex_parser_accepts_bridge_options():
             "Codex Product",
             "--db",
             "/tmp/roundtable.db",
+            "--auth-token",
+            "codex-secret",
         ]
     )
 
@@ -126,3 +128,4 @@ def test_codex_parser_accepts_bridge_options():
     assert args.host == "localhost"
     assert args.display_name == "Codex Product"
     assert args.db == "/tmp/roundtable.db"
+    assert args.auth_token == "codex-secret"

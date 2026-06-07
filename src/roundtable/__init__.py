@@ -44,6 +44,7 @@ from roundtable.models import (
     Speech,
 )
 from roundtable.notify import Notifier
+from roundtable.orchestrator import FederatedOrchestrator, ManagedOrchestrator
 from roundtable.web_publisher import WebPublisher
 from roundtable.webhook import WebhookSender
 
@@ -89,11 +90,13 @@ __all__ = [
     "Discussion",
     "DiscussionNotActiveError",
     "DiscussionNotFoundError",
+    "FederatedOrchestrator",
     "Finding",
     "InvalidFindingTypeError",
     "InvalidParticipantError",
     "InvalidReplyToError",
     "InvalidSpeechOrderError",
+    "ManagedOrchestrator",
     "Notifier",
     "Participant",
     "Roundtable",

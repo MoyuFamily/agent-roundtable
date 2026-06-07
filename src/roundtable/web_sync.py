@@ -28,6 +28,63 @@ class WebDiscussionSync:
     def __init__(self, db: RoundtableDB):
         self.db = db
 
+    def _participants_snapshot(self, conn: sqlite3.Connection, discussion_id: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "profile": participant.participant,
+                "participant": participant.participant,
+                "display_name": participant.display_name or participant.participant,
+                "role": participant.role or "",
+                "perspective": participant.perspective or "",
+                "is_active": participant.is_active,
+            }
+            for participant in self.db.get_participants(conn, discussion_id)
+        ]
+
+    def _dispatch_snapshot(
+        self,
+        conn: sqlite3.Connection,
+        discussion_id: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        dispatch_items: list[dict[str, Any]] = []
+        summary = {
+            "count": 0,
+            "total_summons": 0,
+            "accepted": 0,
+            "declined": 0,
+            "pending": 0,
+            "delivered": 0,
+            "failed": 0,
+            "timeout": 0,
+            "ready": False,
+            "active": 0,
+            "waiting": 0,
+        }
+        for dispatch in self.db.list_dispatches(conn, discussion_id=discussion_id):
+            readiness_result = self.db.apply_dispatch_readiness(conn, dispatch["id"])
+            updated_dispatch = readiness_result.get("dispatch") or dispatch
+            summons = self.db.get_summons(conn, dispatch_id=dispatch["id"])
+            readiness = readiness_result.get("readiness") or {}
+            counts = readiness.get("counts") or {}
+            for key in ("accepted", "declined", "pending", "delivered", "failed", "timeout"):
+                summary[key] += int(counts.get(key, 0) or 0)
+            summary["count"] += 1
+            summary["total_summons"] += len(summons)
+            if readiness.get("ready"):
+                summary["ready"] = True
+            if updated_dispatch.get("status") == "active":
+                summary["active"] += 1
+            elif updated_dispatch.get("status") == "pending":
+                summary["waiting"] += 1
+            dispatch_items.append(
+                {
+                    "dispatch": updated_dispatch,
+                    "readiness": readiness,
+                    "summons": summons,
+                }
+            )
+        return dispatch_items, summary
+
     def append_token_stream(self, web_dir: Path, event: dict[str, Any]) -> None:
         target = web_dir / "token_stream.jsonl"
         try:
@@ -63,9 +120,27 @@ class WebDiscussionSync:
                     if not disc:
                         return
 
+                    dispatches, dispatch_summary = self._dispatch_snapshot(conn, discussion_id)
+                    refreshed_disc = self.db.get_discussion(conn, discussion_id)
+                    if refreshed_disc:
+                        disc = refreshed_disc
+
                     old_status = data.get("status")
                     if old_status != disc.status:
                         data["status"] = disc.status
+                        changed = True
+
+                    participants = self._participants_snapshot(conn, discussion_id)
+                    if data.get("participants") != participants:
+                        data["participants"] = participants
+                        changed = True
+
+                    if data.get("dispatches") != dispatches:
+                        data["dispatches"] = dispatches
+                        changed = True
+
+                    if data.get("dispatch_summary") != dispatch_summary:
+                        data["dispatch_summary"] = dispatch_summary
                         changed = True
 
                     if disc.status == "concluded" and data.get("conclusion") != disc.conclusion:

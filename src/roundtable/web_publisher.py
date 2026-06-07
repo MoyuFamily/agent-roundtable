@@ -123,6 +123,7 @@ class WebPublisher:
         token: str | None = None,
         topic: str | None = None,
         participants: list[dict[str, Any]] | None = None,
+        status: str = "active",
         expires_at: float | None = None,
     ) -> str:
         """Start the web viewer service and return the full URL.
@@ -136,6 +137,7 @@ class WebPublisher:
         self._token = token or _generate_token()
         self._topic = topic or f"Discussion {discussion_id}"
         self._participants = participants or []
+        self._status = status
         self._expires_at = expires_at
 
         self._write_discussion_json()
@@ -455,7 +457,7 @@ class WebPublisher:
         """Write current state to discussion.json with atomic file lock."""
         token_hash = _hash_token(self._token) if self._token else None
         data = {
-            "schema_version": 2,
+            "schema_version": 3,
             "discussion_id": self._discussion_id,
             "topic": self._topic,
             "status": self._status,
@@ -631,6 +633,12 @@ class WebPublisher:
                     if existing.get("status") == "concluded" and data.get("status") != "concluded":
                         data["status"] = "concluded"
                         self._status = "concluded"
+                    elif existing.get("status") == "active" and data.get("status") == "assembling":
+                        data["status"] = "active"
+                        self._status = "active"
+                    elif existing.get("status") == "cancelled" and data.get("status") in {"assembling", "active"}:
+                        data["status"] = "cancelled"
+                        self._status = "cancelled"
 
                     existing_conclusion = existing.get("conclusion")
                     new_conclusion = data.get("conclusion")
@@ -685,6 +693,28 @@ class WebPublisher:
                     # 7. Preserve password_hash from disk if memory doesn't have one
                     if existing.get("password_hash") and not data.get("password_hash"):
                         data["password_hash"] = existing["password_hash"]
+
+                    # 8. Preserve cross-process dispatch snapshots and joiners.
+                    # The in-memory publisher may have been created before summoned
+                    # agents accepted. Avoid reverting DB-backed sync fields.
+                    for key in ("dispatches", "dispatch_summary"):
+                        if key in existing and key not in data:
+                            data[key] = existing[key]
+
+                    existing_participants = existing.get("participants", [])
+                    new_participants = data.get("participants", [])
+                    if existing_participants:
+                        participant_map = {
+                            p.get("profile") or p.get("participant"): p
+                            for p in existing_participants
+                            if p.get("profile") or p.get("participant")
+                        }
+                        for p in new_participants:
+                            key = p.get("profile") or p.get("participant")
+                            if key:
+                                participant_map[key] = p
+                        data["participants"] = list(participant_map.values())
+                        self._participants = data["participants"]
 
                 with open(tmp, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)

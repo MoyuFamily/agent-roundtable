@@ -34,16 +34,44 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 },
                 "transport": {"type": "string", "enum": ["stdio", "http"], "default": "stdio"},
                 "endpoint": {"type": "string", "description": "Webhook URL for http transport agents"},
+                "metadata": {"type": "object", "description": "Agent registry metadata"},
+                "skills": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Installed skills, e.g. agent-roundtable",
+                },
+                "skill_versions": {"type": "object", "description": "Skill version map"},
+                "roles": {"type": "array", "items": {"type": "string"}, "description": "Preferred roles"},
+                "availability": {"type": "string", "description": "idle|busy|offline or platform-specific state"},
+                "accept_policy": {"type": "string", "description": "auto|manual|never"},
             },
             "required": ["agent_id", "platform"],
         },
     },
     {
         "name": "roundtable_list_agents",
-        "description": "List registered agents. Use online_only=true to see only active agents.",
+        "description": "List registered agents. Use filters to discover active agents with a required skill.",
         "inputSchema": {
             "type": "object",
-            "properties": {"online_only": {"type": "boolean", "default": False}},
+            "properties": {
+                "online_only": {"type": "boolean", "default": False},
+                "timeout_seconds": {"type": "integer", "default": 90},
+                "required_skill": {"type": "string"},
+                "availability": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "roundtable_heartbeat",
+        "description": "Refresh this agent's runtime presence and availability.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "string"},
+                "availability": {"type": "string"},
+                "metadata": {"type": "object"},
+            },
+            "required": ["agent_id"],
         },
     },
     {
@@ -64,8 +92,107 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "web": {"type": "boolean", "default": False, "description": "Start the Web Viewer for this discussion"},
                 "invite_agents": {"type": "array", "items": {"type": "string"}, "description": "Agent IDs to invite"},
                 "created_by": {"type": "string", "description": "Creator agent ID"},
+                "status": {"type": "string", "enum": ["assembling", "active"], "default": "active"},
             },
-            "required": ["topic", "participants"],
+            "required": ["topic"],
+        },
+    },
+    {
+        "name": "roundtable_summon_agents",
+        "description": "Summon registered agents into a dispatch, optionally creating an assembling discussion first.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "discussion_id": {"type": "string", "description": "Existing discussion to summon into"},
+                "topic": {"type": "string", "description": "Topic when creating a new assembling discussion"},
+                "context": {"type": "string"},
+                "participants": {"type": "array", "items": {"type": "object"}, "default": []},
+                "max_rounds": {"type": "integer", "default": 3},
+                "speech_order": {"type": "string", "default": "fixed"},
+                "web": {"type": "boolean", "default": False},
+                "coordinator_agent_id": {"type": "string"},
+                "agent_ids": {"type": "array", "items": {"type": "string"}, "description": "Explicit agents to summon"},
+                "required_skill": {"type": "string", "description": "Only summon agents advertising this skill"},
+                "availability": {"type": "string", "description": "Only summon agents with this availability"},
+                "online_only": {"type": "boolean", "default": True},
+                "timeout_seconds": {"type": "integer", "default": 90},
+                "dispatch_timeout_seconds": {"type": "integer", "default": 60},
+                "mode": {"type": "string", "enum": ["managed", "federated"], "default": "federated"},
+                "start_policy": {
+                    "type": "string",
+                    "enum": ["immediate", "quorum", "all", "timeout"],
+                    "default": "quorum",
+                },
+                "min_accepts": {"type": "integer", "default": 1},
+                "role": {"type": "string"},
+                "perspective": {"type": "string"},
+                "metadata": {"type": "object"},
+                "idempotency_key": {"type": "string"},
+                "allow_terminal_retry": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Release a terminal idempotency_key and create a retry dispatch.",
+                },
+            },
+            "required": ["coordinator_agent_id"],
+        },
+    },
+    {
+        "name": "roundtable_dispatch_status",
+        "description": "Inspect a dispatch and apply readiness/timeout transitions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "dispatch_id": {"type": "string"},
+                "discussion_id": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "roundtable_retry_summon",
+        "description": "Retry pending, failed, delivered, or timed-out summons without creating duplicate summon rows.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "dispatch_id": {"type": "string"},
+                "summon_id": {"type": "string"},
+                "discussion_id": {"type": "string"},
+                "agent_ids": {"type": "array", "items": {"type": "string"}},
+                "statuses": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "default": ["pending", "delivered", "failed", "timeout"],
+                },
+                "retry_timeout_seconds": {"type": "integer", "default": 60},
+                "requeue_inbox": {"type": "boolean", "default": True},
+                "redeliver_http": {"type": "boolean", "default": True},
+            },
+        },
+    },
+    {
+        "name": "roundtable_accept_summon",
+        "description": "Accept a summon and join its discussion.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "discussion_id": {"type": "string"},
+                "agent_id": {"type": "string"},
+                "metadata": {"type": "object"},
+            },
+            "required": ["discussion_id", "agent_id"],
+        },
+    },
+    {
+        "name": "roundtable_decline_summon",
+        "description": "Decline a summon.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "discussion_id": {"type": "string"},
+                "agent_id": {"type": "string"},
+                "metadata": {"type": "object"},
+            },
+            "required": ["discussion_id", "agent_id"],
         },
     },
     {
@@ -218,7 +345,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "status": {"type": "string", "enum": ["active", "concluded", "cancelled"]},
+                "status": {"type": "string", "enum": ["assembling", "active", "concluded", "cancelled"]},
                 "limit": {"type": "integer", "default": 20},
             },
         },
@@ -238,6 +365,7 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
     conn = db.connect()
     try:
         if name == "roundtable_register_agent":
+            metadata = _agent_metadata_from_arguments(arguments)
             return db.upsert_agent(
                 conn,
                 agent_id=arguments["agent_id"],
@@ -247,19 +375,37 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
                 capabilities=arguments.get("capabilities"),
                 transport=arguments.get("transport", "stdio"),
                 endpoint=arguments.get("endpoint"),
+                metadata=metadata,
             )
 
         elif name == "roundtable_list_agents":
-            return {"agents": db.list_agents(conn, online_only=arguments.get("online_only", False))}
+            return {
+                "agents": db.list_agents(
+                    conn,
+                    online_only=arguments.get("online_only", False),
+                    timeout_seconds=arguments.get("timeout_seconds", 90),
+                    required_skill=arguments.get("required_skill"),
+                    availability=arguments.get("availability"),
+                )
+            }
+
+        elif name == "roundtable_heartbeat":
+            return db.heartbeat_agent(
+                conn,
+                arguments["agent_id"],
+                availability=arguments.get("availability"),
+                metadata=arguments.get("metadata"),
+            )
 
         elif name == "roundtable_create":
             result = core.create_discussion(
                 topic=arguments["topic"],
-                participants=arguments["participants"],
+                participants=arguments.get("participants", []),
                 context=arguments.get("context"),
                 max_rounds=arguments.get("max_rounds", 3),
                 speech_order=arguments.get("speech_order", "fixed"),
                 created_by=arguments.get("created_by", "coordinator"),
+                status=arguments.get("status", "active"),
                 web=arguments.get("web", False),
             )
             invite_agents = arguments.get("invite_agents", [])
@@ -277,6 +423,43 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
                 )
             if invite_results:
                 result["invites"] = invite_results
+            return result
+
+        elif name == "roundtable_summon_agents":
+            return _summon_agents(core, db, conn, arguments)
+
+        elif name == "roundtable_dispatch_status":
+            return _dispatch_status(db, conn, arguments)
+
+        elif name == "roundtable_retry_summon":
+            return _retry_summon(core, db, conn, arguments)
+
+        elif name == "roundtable_accept_summon":
+            result = db.respond_summon(
+                conn,
+                arguments["discussion_id"],
+                arguments["agent_id"],
+                accept=True,
+                metadata=arguments.get("metadata"),
+            )
+            dispatch_id = result.get("dispatch_id") if isinstance(result, dict) else None
+            if dispatch_id:
+                result["dispatch"] = db.apply_dispatch_readiness(conn, dispatch_id)
+            core._sync_web_discussion_state(arguments["discussion_id"], conn)
+            return result
+
+        elif name == "roundtable_decline_summon":
+            result = db.respond_summon(
+                conn,
+                arguments["discussion_id"],
+                arguments["agent_id"],
+                accept=False,
+                metadata=arguments.get("metadata"),
+            )
+            dispatch_id = result.get("dispatch_id") if isinstance(result, dict) else None
+            if dispatch_id:
+                result["dispatch"] = db.apply_dispatch_readiness(conn, dispatch_id)
+            core._sync_web_discussion_state(arguments["discussion_id"], conn)
             return result
 
         elif name == "roundtable_invite":
@@ -374,6 +557,274 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
         conn.close()
 
 
+def _agent_metadata_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = dict(arguments.get("metadata") or {})
+    for key in ("skills", "skill_versions", "roles", "availability", "accept_policy"):
+        value = arguments.get(key)
+        if value is not None:
+            metadata[key] = value
+    return metadata or None
+
+
+def _summon_agents(core: RoundtableCore, db: RoundtableDB, conn: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+    discussion_id = arguments.get("discussion_id")
+    created = None
+    if not discussion_id:
+        if not arguments.get("topic"):
+            return {"error": "topic is required when discussion_id is not provided"}
+        created = core.create_discussion(
+            topic=arguments["topic"],
+            participants=arguments.get("participants", []),
+            context=arguments.get("context"),
+            max_rounds=arguments.get("max_rounds", 3),
+            speech_order=arguments.get("speech_order", "fixed"),
+            created_by=arguments["coordinator_agent_id"],
+            status="assembling",
+            web=arguments.get("web", False),
+        )
+        discussion_id = created["discussion_id"]
+
+    agents = _select_summon_agents(db, conn, arguments)
+    if not agents:
+        return {
+            "ok": False,
+            "error": "No matching agents found",
+            "discussion_id": discussion_id,
+            "created": created,
+        }
+
+    dispatch = db.create_dispatch(
+        conn,
+        discussion_id,
+        arguments["coordinator_agent_id"],
+        mode=arguments.get("mode", "federated"),
+        start_policy=arguments.get("start_policy", "quorum"),
+        min_accepts=arguments.get("min_accepts", 1),
+        timeout_seconds=arguments.get("dispatch_timeout_seconds", 60),
+        idempotency_key=arguments.get("idempotency_key"),
+        allow_terminal_retry=arguments.get("allow_terminal_retry", False),
+        metadata=arguments.get("metadata"),
+    )
+
+    summons = []
+    deliveries = []
+    expires_at = int(time.time()) + int(arguments.get("dispatch_timeout_seconds", 60))
+    for agent in agents:
+        summon = db.create_summon(
+            conn,
+            discussion_id,
+            agent["agent_id"],
+            arguments["coordinator_agent_id"],
+            dispatch_id=dispatch["id"],
+            role=arguments.get("role"),
+            perspective=arguments.get("perspective"),
+            required_skill=arguments.get("required_skill"),
+            expires_at=expires_at,
+            allow_terminal_retry=arguments.get("allow_terminal_retry", False),
+            metadata=arguments.get("metadata"),
+        )
+        summons.append(summon)
+        inbox_id = db.push_inbox(
+            conn,
+            agent["agent_id"],
+            "summon",
+            payload={
+                "summon_id": summon["id"],
+                "dispatch_id": dispatch["id"],
+                "discussion_id": discussion_id,
+                "invited_by": arguments["coordinator_agent_id"],
+                "role": summon.get("role"),
+                "perspective": summon.get("perspective"),
+                "required_skill": summon.get("required_skill"),
+                "expires_at": summon.get("expires_at"),
+            },
+            discussion_id=discussion_id,
+        )
+        delivery = _deliver_http_summon(db, conn, summon["id"])
+        if delivery:
+            deliveries.append(delivery)
+        else:
+            deliveries.append({"agent_id": agent["agent_id"], "inbox_message_id": inbox_id})
+
+    readiness = db.apply_dispatch_readiness(conn, dispatch["id"])
+    core._sync_web_discussion_state(discussion_id, conn)
+    return {
+        "ok": True,
+        "discussion_id": discussion_id,
+        "created": created,
+        "dispatch": readiness.get("dispatch") or dispatch,
+        "readiness": readiness.get("readiness"),
+        "summons": db.get_summons(conn, dispatch_id=dispatch["id"]),
+        "deliveries": deliveries,
+    }
+
+
+def _select_summon_agents(db: RoundtableDB, conn: Any, arguments: dict[str, Any]) -> list[dict[str, Any]]:
+    explicit_ids = arguments.get("agent_ids") or []
+    if explicit_ids:
+        agents = []
+        for agent_id in explicit_ids:
+            agent = db.get_agent(conn, agent_id)
+            if agent:
+                agents.append(agent)
+    else:
+        agents = db.list_agents(
+            conn,
+            online_only=arguments.get("online_only", True),
+            timeout_seconds=arguments.get("timeout_seconds", 90),
+            required_skill=arguments.get("required_skill"),
+            availability=arguments.get("availability"),
+        )
+
+    selected = []
+    required_skill = arguments.get("required_skill")
+    availability = arguments.get("availability")
+    coordinator = arguments.get("coordinator_agent_id")
+    for agent in agents:
+        if agent["agent_id"] == coordinator:
+            continue
+        if required_skill and required_skill not in agent.get("skills", []):
+            continue
+        if availability and agent.get("availability") != availability:
+            continue
+        selected.append(agent)
+    return selected
+
+
+def _dispatch_status(db: RoundtableDB, conn: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+    dispatch_ids = []
+    if arguments.get("dispatch_id"):
+        dispatch_ids.append(arguments["dispatch_id"])
+    elif arguments.get("discussion_id"):
+        dispatch_ids.extend(d["id"] for d in db.list_dispatches(conn, discussion_id=arguments["discussion_id"]))
+    else:
+        return {"error": "dispatch_id or discussion_id is required"}
+
+    results = []
+    for dispatch_id in dispatch_ids:
+        status = db.apply_dispatch_readiness(conn, dispatch_id)
+        dispatch = status.get("dispatch")
+        results.append(
+            {
+                **status,
+                "summons": db.get_summons(conn, dispatch_id=dispatch_id),
+                "events": db.list_summon_events(conn, dispatch_id=dispatch_id),
+                "discussion_id": dispatch.get("discussion_id") if dispatch else None,
+            }
+        )
+    return {"ok": True, "dispatches": results, "count": len(results)}
+
+
+def _retry_summon(core: RoundtableCore, db: RoundtableDB, conn: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+    summons = _select_retry_summons(db, conn, arguments)
+    if isinstance(summons, dict):
+        return summons
+
+    retryable_statuses = {"pending", "delivered", "failed", "timeout"}
+    requested_statuses = set(arguments.get("statuses") or ["pending", "delivered", "failed", "timeout"])
+    retry_statuses = requested_statuses & retryable_statuses
+    agent_ids = set(arguments.get("agent_ids") or [])
+    retry_timeout_seconds = int(arguments.get("retry_timeout_seconds", 60))
+    expires_at = int(time.time()) + max(0, retry_timeout_seconds) if retry_timeout_seconds >= 0 else None
+    requeue_inbox = arguments.get("requeue_inbox", True)
+    redeliver_http = arguments.get("redeliver_http", True)
+
+    retried = []
+    skipped = []
+    deliveries = []
+    dispatch_ids: set[str] = set()
+    discussion_ids: set[str] = set()
+    for summon in summons:
+        if agent_ids and summon["agent_id"] not in agent_ids:
+            skipped.append({"summon_id": summon["id"], "agent_id": summon["agent_id"], "reason": "agent_filtered"})
+            continue
+        if summon["status"] not in retry_statuses:
+            skipped.append(
+                {
+                    "summon_id": summon["id"],
+                    "agent_id": summon["agent_id"],
+                    "status": summon["status"],
+                    "reason": "status_not_retryable",
+                }
+            )
+            continue
+
+        if summon.get("dispatch_id"):
+            db.reopen_dispatch_for_retry(
+                conn,
+                summon["dispatch_id"],
+                retry_timeout_seconds=retry_timeout_seconds,
+            )
+            dispatch_ids.add(summon["dispatch_id"])
+        discussion_ids.add(summon["discussion_id"])
+        reset = db.reset_summon_for_retry(
+            conn,
+            summon["id"],
+            expires_at=expires_at,
+            payload={"previous_status": summon["status"], "retry_timeout_seconds": retry_timeout_seconds},
+        )
+        if not reset:
+            skipped.append({"summon_id": summon["id"], "agent_id": summon["agent_id"], "reason": "not_found"})
+            continue
+
+        delivery: dict[str, Any] = {"agent_id": summon["agent_id"], "summon_id": summon["id"]}
+        if requeue_inbox:
+            inbox_id = db.push_inbox(
+                conn,
+                summon["agent_id"],
+                "summon",
+                payload={
+                    "summon_id": summon["id"],
+                    "dispatch_id": summon.get("dispatch_id"),
+                    "discussion_id": summon["discussion_id"],
+                    "invited_by": summon["invited_by"],
+                    "role": summon.get("role"),
+                    "perspective": summon.get("perspective"),
+                    "required_skill": summon.get("required_skill"),
+                    "expires_at": expires_at,
+                    "retry": True,
+                },
+                discussion_id=summon["discussion_id"],
+            )
+            delivery["inbox_message_id"] = inbox_id
+        if redeliver_http:
+            http_delivery = _deliver_http_summon(db, conn, summon["id"])
+            if http_delivery:
+                delivery["http"] = http_delivery
+        deliveries.append(delivery)
+        retried.append(db.get_summon(conn, summon["id"]) or reset)
+
+    dispatch_results = []
+    for dispatch_id in sorted(dispatch_ids):
+        dispatch_results.append(db.apply_dispatch_readiness(conn, dispatch_id))
+    for discussion_id in sorted(discussion_ids):
+        core._sync_web_discussion_state(discussion_id, conn)
+
+    return {
+        "ok": True,
+        "retried": retried,
+        "skipped": skipped,
+        "deliveries": deliveries,
+        "dispatches": dispatch_results,
+        "count": len(retried),
+    }
+
+
+def _select_retry_summons(
+    db: RoundtableDB,
+    conn: Any,
+    arguments: dict[str, Any],
+) -> list[dict[str, Any]] | dict[str, Any]:
+    if arguments.get("summon_id"):
+        summon = db.get_summon(conn, arguments["summon_id"])
+        return [summon] if summon else {"error": "summon not found"}
+    if arguments.get("dispatch_id"):
+        return db.get_summons(conn, dispatch_id=arguments["dispatch_id"])
+    if arguments.get("discussion_id"):
+        return db.get_summons(conn, discussion_id=arguments["discussion_id"])
+    return {"error": "summon_id, dispatch_id, or discussion_id is required"}
+
+
 def _invite_agent(
     db: RoundtableDB,
     conn: Any,
@@ -412,12 +863,13 @@ def _invite_agent(
 def _add_participant_from_invite(
     db: RoundtableDB, conn: Any, discussion_id: str, agent_id: str, invitation: dict[str, Any]
 ) -> None:
-    now = int(time.time())
-    conn.execute(
-        """INSERT OR IGNORE INTO participants
-           (discussion_id, participant, role, perspective, display_name, joined_at, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, 1)""",
-        (discussion_id, agent_id, invitation.get("role"), invitation.get("perspective"), agent_id, now),
+    db.add_participant(
+        conn,
+        discussion_id,
+        agent_id,
+        role=invitation.get("role"),
+        perspective=invitation.get("perspective"),
+        display_name=agent_id,
     )
 
 
@@ -430,7 +882,7 @@ def _deliver_http_invitation(
     role: str | None,
     perspective: str | None,
 ) -> dict[str, Any] | None:
-    agent = db.get_agent(conn, agent_id)
+    agent = db.get_agent(conn, agent_id, include_private=True)
     if not agent or agent.get("transport") != "http" or not agent.get("endpoint"):
         return None
 
@@ -447,7 +899,7 @@ def _deliver_http_invitation(
         request = urllib.request.Request(
             url,
             data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
+            headers=_http_headers_for_agent(agent),
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=2) as response:
@@ -457,6 +909,49 @@ def _deliver_http_invitation(
         return {"transport": "http", "endpoint": url, "ok": False, "error": str(exc)}
 
 
+def _deliver_http_summon(db: RoundtableDB, conn: Any, summon_id: str) -> dict[str, Any] | None:
+    summon = db.get_summon(conn, summon_id)
+    if not summon:
+        return None
+    agent = db.get_agent(conn, summon["agent_id"], include_private=True)
+    if not agent or agent.get("transport") != "http" or not agent.get("endpoint"):
+        return None
+
+    payload = {
+        "type": "summon",
+        "summon_id": summon["id"],
+        "dispatch_id": summon["dispatch_id"],
+        "discussion_id": summon["discussion_id"],
+        "agent_id": summon["agent_id"],
+        "invited_by": summon["invited_by"],
+        "role": summon["role"],
+        "perspective": summon["perspective"],
+        "required_skill": summon["required_skill"],
+        "expires_at": summon["expires_at"],
+    }
+    url = f"{str(agent['endpoint']).rstrip('/')}/summon"
+    try:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers=_http_headers_for_agent(agent),
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=2) as response:
+            body = response.read().decode("utf-8")
+        delivery = {"agent_id": summon["agent_id"], "transport": "http", "endpoint": url, "ok": True, "response": body}
+    except (OSError, urllib.error.URLError, TimeoutError) as exc:
+        delivery = {
+            "agent_id": summon["agent_id"],
+            "transport": "http",
+            "endpoint": url,
+            "ok": False,
+            "error": str(exc),
+        }
+    db.mark_summon_delivered(conn, summon_id, delivery, transport="http", endpoint=url)
+    return delivery
+
+
 def _notify_next_speaker(
     db: RoundtableDB,
     conn: Any,
@@ -464,7 +959,7 @@ def _notify_next_speaker(
     agent_id: str,
     round_num: Any,
 ) -> dict[str, Any]:
-    agent = db.get_agent(conn, agent_id)
+    agent = db.get_agent(conn, agent_id, include_private=True)
     if not agent:
         return {"skipped": True, "reason": "agent_not_registered"}
 
@@ -484,7 +979,7 @@ def _notify_next_speaker(
         request = urllib.request.Request(
             url,
             data=json.dumps({"type": "turn", **payload}).encode(),
-            headers={"Content-Type": "application/json"},
+            headers=_http_headers_for_agent(agent),
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=2) as response:
@@ -493,6 +988,20 @@ def _notify_next_speaker(
     except (OSError, urllib.error.URLError, TimeoutError) as exc:
         result["delivery"] = {"transport": "http", "endpoint": url, "ok": False, "error": str(exc)}
     return result
+
+
+def _http_headers_for_agent(agent: dict[str, Any]) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    metadata = agent.get("metadata") or {}
+    token = (
+        metadata.get("_bridge_auth_token")
+        or metadata.get("bridge_auth_token")
+        or metadata.get("auth_token")
+        or metadata.get("roundtable_auth_token")
+    )
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def _check_turn(

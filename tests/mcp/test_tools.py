@@ -59,6 +59,49 @@ def test_list_agents(setup):
     assert len(result["agents"]) == 2
 
 
+def test_register_agent_metadata_filters_and_heartbeat(setup):
+    core, db = setup
+    handle_tool_call(
+        core,
+        db,
+        "roundtable_register_agent",
+        {
+            "agent_id": "codex-agent",
+            "platform": "codex",
+            "skills": ["agent-roundtable"],
+            "availability": "idle",
+            "accept_policy": "auto",
+        },
+    )
+    handle_tool_call(
+        core,
+        db,
+        "roundtable_register_agent",
+        {
+            "agent_id": "plain-agent",
+            "platform": "cursor",
+            "skills": ["other"],
+            "availability": "idle",
+        },
+    )
+
+    filtered = handle_tool_call(
+        core,
+        db,
+        "roundtable_list_agents",
+        {"required_skill": "agent-roundtable", "availability": "idle"},
+    )
+    assert [agent["agent_id"] for agent in filtered["agents"]] == ["codex-agent"]
+
+    heartbeat = handle_tool_call(
+        core,
+        db,
+        "roundtable_heartbeat",
+        {"agent_id": "codex-agent", "availability": "busy"},
+    )
+    assert heartbeat["metadata"]["availability"] == "busy"
+
+
 def test_create_discussion_and_invite(setup):
     core, db = setup
     handle_tool_call(
@@ -99,6 +142,229 @@ def test_create_discussion_and_invite(setup):
     inbox = handle_tool_call(core, db, "roundtable_inbox", {"agent_id": "participant-1"})
     assert len(inbox["messages"]) == 1
     assert inbox["messages"][0]["type"] == "invitation"
+
+
+def test_summon_agents_creates_assembling_discussion_and_activates_on_accept(setup):
+    core, db = setup
+    handle_tool_call(
+        core,
+        db,
+        "roundtable_register_agent",
+        {
+            "agent_id": "coord",
+            "platform": "claude-code",
+            "skills": ["agent-roundtable"],
+            "availability": "idle",
+        },
+    )
+    handle_tool_call(
+        core,
+        db,
+        "roundtable_register_agent",
+        {
+            "agent_id": "agent-1",
+            "platform": "codex",
+            "skills": ["agent-roundtable"],
+            "availability": "idle",
+        },
+    )
+
+    summon = handle_tool_call(
+        core,
+        db,
+        "roundtable_summon_agents",
+        {
+            "topic": "Summon flow",
+            "coordinator_agent_id": "coord",
+            "required_skill": "agent-roundtable",
+            "availability": "idle",
+            "agent_ids": ["agent-1"],
+            "min_accepts": 1,
+        },
+    )
+
+    assert summon["ok"] is True
+    assert summon["created"]["status"] == "assembling"
+    assert summon["summons"][0]["agent_id"] == "agent-1"
+    assert summon["readiness"]["ready"] is False
+
+    inbox = handle_tool_call(core, db, "roundtable_inbox", {"agent_id": "agent-1", "mark_read": False})
+    assert inbox["messages"][0]["type"] == "summon"
+
+    accepted = handle_tool_call(
+        core,
+        db,
+        "roundtable_accept_summon",
+        {"discussion_id": summon["discussion_id"], "agent_id": "agent-1"},
+    )
+    assert accepted["status"] == "accepted"
+    assert accepted["dispatch"]["dispatch"]["status"] == "active"
+
+    status = handle_tool_call(core, db, "roundtable_status", {"discussion_id": summon["discussion_id"]})
+    assert status["status"] == "active"
+    assert status["participant_count"] == 1
+
+
+def test_dispatch_status_by_discussion(setup):
+    core, db = setup
+    handle_tool_call(core, db, "roundtable_register_agent", {"agent_id": "coord", "platform": "claude-code"})
+    handle_tool_call(
+        core,
+        db,
+        "roundtable_register_agent",
+        {
+            "agent_id": "agent-1",
+            "platform": "codex",
+            "skills": ["agent-roundtable"],
+            "availability": "idle",
+        },
+    )
+    summon = handle_tool_call(
+        core,
+        db,
+        "roundtable_summon_agents",
+        {
+            "topic": "Dispatch status",
+            "coordinator_agent_id": "coord",
+            "agent_ids": ["agent-1"],
+            "required_skill": "agent-roundtable",
+        },
+    )
+
+    status = handle_tool_call(core, db, "roundtable_dispatch_status", {"discussion_id": summon["discussion_id"]})
+    assert status["ok"] is True
+    assert status["count"] == 1
+    assert status["dispatches"][0]["dispatch"]["id"] == summon["dispatch"]["id"]
+
+
+def test_retry_summon_requeues_without_duplicate_rows(setup):
+    core, db = setup
+    handle_tool_call(core, db, "roundtable_register_agent", {"agent_id": "coord", "platform": "claude-code"})
+    handle_tool_call(
+        core,
+        db,
+        "roundtable_register_agent",
+        {
+            "agent_id": "agent-1",
+            "platform": "codex",
+            "skills": ["agent-roundtable"],
+            "availability": "idle",
+        },
+    )
+    summon = handle_tool_call(
+        core,
+        db,
+        "roundtable_summon_agents",
+        {
+            "topic": "Retry summon",
+            "coordinator_agent_id": "coord",
+            "agent_ids": ["agent-1"],
+            "required_skill": "agent-roundtable",
+            "dispatch_timeout_seconds": 1,
+        },
+    )
+    summon_id = summon["summons"][0]["id"]
+
+    conn = db.connect()
+    try:
+        db.mark_summon_delivered(conn, summon_id, {"ok": False, "error": "network"})
+    finally:
+        conn.close()
+
+    retry = handle_tool_call(
+        core,
+        db,
+        "roundtable_retry_summon",
+        {
+            "dispatch_id": summon["dispatch"]["id"],
+            "retry_timeout_seconds": 30,
+            "redeliver_http": False,
+        },
+    )
+
+    assert retry["ok"] is True
+    assert retry["count"] == 1
+    assert retry["retried"][0]["id"] == summon_id
+    assert retry["retried"][0]["status"] == "pending"
+
+    conn = db.connect()
+    try:
+        summons = db.get_summons(conn, dispatch_id=summon["dispatch"]["id"])
+        inbox = db.read_inbox(conn, "agent-1", unread_only=False)
+        events = db.list_summon_events(conn, summon_id=summon_id)
+    finally:
+        conn.close()
+    assert len(summons) == 1
+    assert len([msg for msg in inbox if msg["type"] == "summon"]) == 2
+    assert "summon.retry" in [event["event"] for event in events]
+
+
+def test_summon_agents_allows_terminal_dispatch_retry_with_same_key(setup):
+    core, db = setup
+    handle_tool_call(core, db, "roundtable_register_agent", {"agent_id": "coord", "platform": "claude-code"})
+    handle_tool_call(
+        core,
+        db,
+        "roundtable_register_agent",
+        {
+            "agent_id": "agent-1",
+            "platform": "codex",
+            "skills": ["agent-roundtable"],
+            "availability": "idle",
+        },
+    )
+    first = handle_tool_call(
+        core,
+        db,
+        "roundtable_summon_agents",
+        {
+            "topic": "Retry dispatch key",
+            "coordinator_agent_id": "coord",
+            "agent_ids": ["agent-1"],
+            "required_skill": "agent-roundtable",
+            "idempotency_key": "mcp-retry-key",
+        },
+    )
+
+    conn = db.connect()
+    try:
+        db.update_dispatch_status(conn, first["dispatch"]["id"], "cancelled")
+    finally:
+        conn.close()
+
+    second = handle_tool_call(
+        core,
+        db,
+        "roundtable_summon_agents",
+        {
+            "discussion_id": first["discussion_id"],
+            "coordinator_agent_id": "coord",
+            "agent_ids": ["agent-1"],
+            "required_skill": "agent-roundtable",
+            "idempotency_key": "mcp-retry-key",
+            "allow_terminal_retry": True,
+        },
+    )
+
+    assert second["ok"] is True
+    assert second["dispatch"]["id"] != first["dispatch"]["id"]
+    assert second["summons"][0]["id"] == first["summons"][0]["id"]
+    assert second["summons"][0]["dispatch_id"] == second["dispatch"]["id"]
+    assert second["summons"][0]["status"] == "pending"
+
+    conn = db.connect()
+    try:
+        summons = db.get_summons(conn, discussion_id=first["discussion_id"], agent_id="agent-1")
+        old_dispatch = db.get_dispatch(conn, first["dispatch"]["id"])
+        old_events = db.list_summon_events(conn, dispatch_id=first["dispatch"]["id"])
+        summon_events = db.list_summon_events(conn, summon_id=first["summons"][0]["id"])
+    finally:
+        conn.close()
+
+    assert len(summons) == 1
+    assert old_dispatch["idempotency_key"] == f"mcp-retry-key#released:{first['dispatch']['id']}"
+    assert "dispatch.idempotency_key.released" in [event["event"] for event in old_events]
+    assert "summon.reused_for_retry" in [event["event"] for event in summon_events]
 
 
 def test_create_discussion_disables_web_by_default(setup, monkeypatch):

@@ -214,6 +214,31 @@ class TestEndDiscussionWithPublisher:
         assert end_result["ok"] is True
         assert disc_id not in core._publishers
 
+    def test_publisher_conclude_failure_releases_publisher(self, core):
+        """Conclude failures should not leave a stale in-memory publisher."""
+        disc_id, mock_pub = self._create_web_discussion(core)
+        mock_pub.conclude.side_effect = RuntimeError("PM2 crash")
+
+        end_result = core.end_discussion(disc_id)
+
+        assert end_result["ok"] is True
+        assert end_result["web_retained"] is False
+        assert disc_id not in core._publishers
+
+    def test_concluded_update_releases_publisher(self, core):
+        """Updating an already concluded discussion should also release publisher state."""
+        disc_id, _mock_pub = self._create_web_discussion(core)
+        core.end_discussion(disc_id, conclusion="Initial conclusion")
+        update_pub = _mock_publisher()
+        core._publishers[disc_id] = update_pub
+
+        end_result = core.end_discussion(disc_id, conclusion="Updated conclusion")
+
+        assert end_result["ok"] is True
+        assert end_result["web_retained"] is True
+        update_pub.conclude.assert_called_once_with("Updated conclusion")
+        assert disc_id not in core._publishers
+
 
 # ---------------------------------------------------------------------------
 # Schema validation

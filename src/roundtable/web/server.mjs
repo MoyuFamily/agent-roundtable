@@ -25,7 +25,7 @@ import {
 } from "node:fs";
 import * as readline from "node:readline";
 import { join, resolve, dirname, basename } from "node:path";
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual, pbkdf2Sync } from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // CLI args
@@ -61,6 +61,7 @@ const SERVER_SECRET = randomBytes(32);
  *   discussionPath: string,
  *   tokenStreamPath: string,
  *   passwordHash: string | null,
+ *   ownerSecretHash: string | null,
  *   expiresAt: number | null,
  *   revokedTokenHashes: Set<string>,
  *   tokenHash: string,
@@ -102,6 +103,7 @@ function registerDiscussion(dir, discussionId) {
     discussionPath: discPath,
     tokenStreamPath: join(dir, "token_stream.jsonl"),
     passwordHash: data.password_hash || null,
+    ownerSecretHash: data.owner_secret_hash || null,
     expiresAt: data.expires_at ?? null,
     revokedTokenHashes: new Set(data.revoked_token_hashes || []),
     tokenHash,
@@ -124,6 +126,7 @@ function refreshEntry(entry) {
     byTokenHash.set(tokenHash, entry);
   }
   entry.passwordHash = data.password_hash || null;
+  entry.ownerSecretHash = data.owner_secret_hash || null;
   entry.expiresAt = data.expires_at ?? null;
   entry.revokedTokenHashes = new Set(data.revoked_token_hashes || []);
   return data;
@@ -182,6 +185,39 @@ function _safeStrEqual(a, b) {
   return timingSafeEqual(ab, bb);
 }
 
+function verifySecretHash(secret, hash) {
+  if (!secret || !hash) return false;
+  return _safeStrEqual(_hashToken(secret), hash);
+}
+
+function getQuery(req) {
+  return new URL(req.url, `http://${req.headers.host}`).searchParams;
+}
+
+async function readJSONBody(req) {
+  let body = "";
+  for await (const chunk of req) body += chunk;
+  if (!body.trim()) return {};
+  return JSON.parse(body);
+}
+
+function getOwnerSecret(req, body = {}) {
+  const query = getQuery(req);
+  return (
+    req.headers["x-roundtable-owner-secret"]
+    || body.owner_secret
+    || body.ownerSecret
+    || query.get("owner")
+    || ""
+  );
+}
+
+function isOwnerAuthorized(req, entry, data, body = {}) {
+  const ownerHash = data?.owner_secret_hash || entry?.ownerSecretHash || "";
+  if (!ownerHash) return false;
+  return verifySecretHash(getOwnerSecret(req, body), ownerHash);
+}
+
 function isTokenValid(token) {
   const entry = entryForToken(token);
   if (!entry) return false;
@@ -208,6 +244,28 @@ async function loadBcrypt() {
     console.error("[Roundtable Web] bcryptjs not available:", err.message);
   }
   return _bcrypt;
+}
+
+async function verifyPassword(password, storedHash) {
+  if (!storedHash) return true;
+  if (storedHash.startsWith("pbkdf2_sha256$")) {
+    const parts = storedHash.split("$");
+    if (parts.length !== 4) return false;
+    const iterations = Number.parseInt(parts[1], 10);
+    const salt = parts[2];
+    const expectedHex = parts[3];
+    if (!Number.isFinite(iterations) || !salt || !expectedHex) return false;
+    const derived = pbkdf2Sync(password, salt, iterations, expectedHex.length / 2, "sha256").toString("hex");
+    return _safeStrEqual(derived, expectedHex);
+  }
+
+  const bcrypt = await loadBcrypt();
+  if (!bcrypt) {
+    const err = new Error("Password verification unavailable: bcryptjs dependency is missing");
+    err.code = "PASSWORD_VERIFY_UNAVAILABLE";
+    throw err;
+  }
+  return bcrypt.compare(password, storedHash);
 }
 
 function _signSession(token) {
@@ -390,6 +448,7 @@ function safeDiscussion(data) {
   delete safe.token_hash;
   delete safe.revoked_token_hashes;
   delete safe.password_hash;
+  delete safe.owner_secret_hash;
   return safe;
 }
 
@@ -627,6 +686,15 @@ const router = new MiniRouter();
 // Routes
 // ---------------------------------------------------------------------------
 
+router.get("/healthz", (_req, res) => {
+  sendJSON(res, {
+    ok: true,
+    service: "roundtable-web",
+    data_dir: DATA_DIR,
+    discussions: byDiscussionId.size,
+  });
+});
+
 router.get("/share/:token", (req, res, params) => {
   const entry = entryForToken(params.token);
   if (!entry) return send403(res);
@@ -740,14 +808,18 @@ function renderViewer(req, res, entry, token, opts) {
       return sendHTML(res, `<h1>Roundtable Web Viewer</h1><p>${templateName} not found</p>`);
     }
     const html = readFileSync(templatePath, "utf-8");
+    const disc = readDiscussionFor(entry);
+    const ownerSecret = getQuery(req).get("owner") || "";
+    const ownerAuthorized = !embed && disc ? verifySecretHash(ownerSecret, disc.owner_secret_hash || entry.ownerSecretHash) : false;
     const config = JSON.stringify({
       token,
       port,
       host: "0.0.0.0",
       hasPassword: !!entry.passwordHash,
       embed: !!embed,
+      ownerSecret: ownerAuthorized ? ownerSecret : "",
+      canRevoke: ownerAuthorized,
     });
-    const disc = readDiscussionFor(entry);
     const ogTitle = disc?.topic ? `圆桌讨论: ${disc.topic}` : "Roundtable 圆桌讨论";
     const participantNames = (disc?.participants || []).map(p => p.display_name || p.profile).filter(Boolean).join("、");
     const ogDesc = disc?.topic
@@ -792,7 +864,6 @@ router.get("/r/:token", async (req, res, params) => {
   if (!entry || !isTokenValid(params.token)) return send403(res);
 
   if (entry.passwordHash) {
-    await loadBcrypt();
     if (!isAuthenticated(req, entry, params.token)) return sendPasswordPage(res);
   }
 
@@ -808,7 +879,6 @@ router.get("/embed/:token", async (req, res, params) => {
   // no good way to surface a password prompt and it leaks UX onto the host page.
   // Surface a clean "open in new tab" hint instead.
   if (entry.passwordHash) {
-    await loadBcrypt();
     if (!isAuthenticated(req, entry, params.token)) {
       const url = `/r/${encodeURIComponent(params.token)}`;
       const html = `<!DOCTYPE html>
@@ -854,7 +924,6 @@ router.get("/api/:token/data", async (req, res, params) => {
   const entry = entryForToken(params.token);
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
-    await loadBcrypt();
     if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
@@ -867,7 +936,6 @@ router.get("/api/:token/events", async (req, res, params) => {
   const entry = entryForToken(params.token);
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
-    await loadBcrypt();
     if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
@@ -911,7 +979,6 @@ router.get("/api/:token/poll", async (req, res, params) => {
   const entry = entryForToken(params.token);
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
-    await loadBcrypt();
     if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
@@ -946,12 +1013,22 @@ router.post("/api/:token/share", (req, res, params) => {
   sendJSON(res, { ok: true, share_url: `/share/${params.token}` });
 });
 
-router.post("/api/:token/revoke", (req, res, params) => {
+router.post("/api/:token/revoke", async (req, res, params) => {
   const entry = entryForToken(params.token);
   if (!entry || !isTokenValid(params.token)) return send403(res);
 
   const data = readDiscussionFor(entry);
   if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
+
+  let body = {};
+  try {
+    body = await readJSONBody(req);
+  } catch {
+    return sendJSON(res, { error: "Invalid request" }, 400);
+  }
+  if (!isOwnerAuthorized(req, entry, data, body)) {
+    return sendJSON(res, { error: "Owner authorization required" }, 403);
+  }
 
   const incomingHash = _hashToken(params.token);
   if (!data.revoked_token_hashes) data.revoked_token_hashes = [];
@@ -975,16 +1052,13 @@ router.post("/api/:token/validate-password", async (req, res, params) => {
   if (!entry) return send403(res);
   if (!entry.passwordHash) return sendJSON(res, { ok: true, noPassword: true });
 
-  const bcrypt = await loadBcrypt();
-  if (!bcrypt) return sendJSON(res, { ok: false, error: "Password verification unavailable" }, 500);
-
-  let body = "";
-  for await (const chunk of req) body += chunk;
+  let body = {};
   try {
-    const { password } = JSON.parse(body);
+    body = await readJSONBody(req);
+    const { password } = body;
     if (!password) return sendJSON(res, { ok: false, error: "Password required" }, 400);
 
-    const match = await bcrypt.compare(password, entry.passwordHash);
+    const match = await verifyPassword(password, entry.passwordHash);
     if (match) {
       const sig = _signSession(entry.tokenHash);
       const cookieAttrs = `Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}`;
@@ -995,7 +1069,18 @@ router.post("/api/:token/validate-password", async (req, res, params) => {
       return sendJSON(res, { ok: true });
     }
     return sendJSON(res, { ok: false, error: "Incorrect password" }, 401);
-  } catch {
+  } catch (err) {
+    if (err?.code === "PASSWORD_VERIFY_UNAVAILABLE") {
+      return sendJSON(
+        res,
+        {
+          ok: false,
+          error: "Password verification unavailable",
+          detail: "Install web dependencies with `npm install --omit=dev` to enable bcrypt password checks.",
+        },
+        503
+      );
+    }
     return sendJSON(res, { ok: false, error: "Invalid request" }, 400);
   }
 });
@@ -1004,7 +1089,6 @@ router.get("/api/:token/export/markdown", async (req, res, params) => {
   const entry = entryForToken(params.token);
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
-    await loadBcrypt();
     if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
@@ -1025,7 +1109,6 @@ router.get("/api/:token/export/pdf", async (req, res, params) => {
   const entry = entryForToken(params.token);
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
-    await loadBcrypt();
     if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
@@ -1078,12 +1161,28 @@ router.get("/api/:token/export/pdf", async (req, res, params) => {
       });
       res.end(pdfBuffer);
     } else {
-      sendJSON(res, { error: "PDF generation failed — output not found" }, 500);
+      sendJSON(
+        res,
+        {
+          error: "PDF export unavailable",
+          detail: "md-to-pdf completed but did not produce a PDF file.",
+          help: "Markdown export is still available. Install web dependencies and Chromium/Puppeteer support to enable PDF export.",
+        },
+        503
+      );
     }
   } catch (err) {
     if (!clientClosed) {
       console.error("[export/pdf] Error:", err.message);
-      sendJSON(res, { error: "PDF generation failed", detail: err.message }, 500);
+      sendJSON(
+        res,
+        {
+          error: "PDF export unavailable",
+          detail: err.message,
+          help: "Markdown export is still available. Install web dependencies and Chromium/Puppeteer support to enable PDF export.",
+        },
+        503
+      );
     }
   } finally {
     try { unlinkSync(tmpMdPath); } catch { /* ignore */ }

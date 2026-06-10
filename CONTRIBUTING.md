@@ -45,7 +45,7 @@
 ```bash
 # 克隆仓库
 git clone https://github.com/MoyuFamily/agent-roundtable.git
-cd roundtable
+cd agent-roundtable
 
 # 创建虚拟环境
 python -m venv .venv
@@ -62,28 +62,40 @@ pytest tests/test_core.py
 pytest tests/test_core.py::TestCreateDiscussion -v
 
 # 运行 lint
-ruff check .
-ruff format --check .
+ruff check src tests
+ruff format --check src tests
 
 # 类型检查
-mypy src/
+mypy src
 ```
 
 ### Web Viewer 本地开发
 
-Web viewer 需要 Node.js >= 18。
+Web Viewer 需要 Node.js >= 18。`create_discussion()` 默认会以 `web=True` 尽力启动 Viewer；如果 Node 不存在或依赖安装失败，核心讨论仍应创建成功，并通过 `web_status`、`web_error`、`web_help` 返回诊断。
 
 ```bash
 # 安装 Node 依赖
 npm install
 
+# 检查 Web Viewer 语法
+npm run check
+
 # 运行带 web viewer 的 demo
 python -m roundtable.demo --web
+
+# 或显式关闭 web viewer
+python -m roundtable.demo --no-web
 ```
 
-可选 Python 依赖（web 功能）：`nanoid`、`bcrypt`。通过 `pip install -e ".[web]"` 安装。
+`package-lock.json` 是发布输入的一部分，请提交并维护。首跑自动安装只允许写入项目/包可控目录；不要在代码里无提示安装全局 npm 包。自动安装会设置 `PUPPETEER_SKIP_DOWNLOAD=true`，避免首跑下载 Chromium；PDF 导出缺浏览器时应返回明确错误。
 
-可选 Node 依赖（server.mjs）：`bcryptjs`、`md-to-pdf`。已在 package.json 中声明，`npm install` 即可。
+可选 Python 依赖（web 功能）：`nanoid`，通过 `pip install -e ".[web]"` 安装。Node 依赖（server.mjs）：`bcryptjs`、`md-to-pdf`，已在 `package.json` 中声明；普通运行可用 `npm install --omit=dev`。
+
+发布前请运行：
+
+```bash
+scripts/release/preflight-check.sh
+```
 
 ### Web Viewer Schema 迁移
 

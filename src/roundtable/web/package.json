@@ -1,0 +1,22 @@
+{
+  "name": "roundtable-web-viewer",
+  "version": "2.1.0",
+  "private": true,
+  "description": "Bundled Express server for Roundtable Web Viewer",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check viewer.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "express": "^5.1.0",
+    "md-to-pdf": "^5.2.4"
+  },
+  "overrides": {
+    "puppeteer": "24.43.1"
+  }
+}

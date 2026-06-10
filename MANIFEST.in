@@ -6,11 +6,15 @@ include CHANGELOG.md
 include SECURITY.md
 include pyproject.toml
 
-recursive-include src/roundtable/web *.html *.css *.mjs *.cjs
+recursive-include src/roundtable/web *.html *.css *.js *.json *.mjs *.cjs
+recursive-include src/roundtable/templates *.json
+recursive-include src/roundtable/skills *.md *.py *.json
+include src/skills/SKILL.md
 recursive-include docs *.md
 
 prune docs/internal
 prune docs/product
+prune src/skills/references
 prune .github
 prune .hermes
 prune .venv

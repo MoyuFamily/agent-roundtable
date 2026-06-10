@@ -378,57 +378,133 @@ class TestStop:
 
 
 # ---------------------------------------------------------------------------
-# start() — shared PM2 integration
+# start() — shared server startup integration
 # ---------------------------------------------------------------------------
 
 
 class TestSharedServer:
-    @patch("roundtable.web_publisher.subprocess.run")
-    def test_ensure_shared_starts_pm2_when_not_running(self, mock_run, tmp_path):
-        # First call: pm2 jlist returns empty (not running)
-        # Second call: pm2 start succeeds
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="[]"),  # jlist
-            MagicMock(returncode=0),  # start
-        ]
-
+    def test_ensure_shared_reuses_ready_roundtable_server(self, tmp_path):
         pub = WebPublisher(str(tmp_path), port=19011)
 
-        with patch.object(pub, "_wait_for_port"):
+        with (
+            patch.object(pub, "_is_roundtable_server_ready", return_value=True) as ready,
+            patch.object(pub, "_start_direct_node_server") as start_node,
+        ):
             pub._ensure_shared_server_running()
 
-        # Should have called pm2 start
-        assert mock_run.call_count == 2
-        start_cmd = mock_run.call_args_list[1][0][0]
-        assert "pm2" in start_cmd
-        assert "start" in start_cmd
-        assert "--data-dir" in start_cmd
+        ready.assert_called()
+        start_node.assert_not_called()
+
+    def test_ensure_shared_starts_direct_node_when_not_running(self, tmp_path):
+        pub = WebPublisher(str(tmp_path), port=19012)
+
+        with (
+            patch.object(pub, "_select_port", return_value=19012),
+            patch.object(pub, "_is_roundtable_server_ready", return_value=False),
+            patch.object(pub, "_is_shared_running", return_value=False),
+            patch("roundtable.web_publisher.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"),
+            patch.object(pub, "_ensure_supported_node"),
+            patch.object(pub, "_start_direct_node_server", return_value=True) as start_node,
+            patch.object(pub, "_install_web_dependencies") as install_deps,
+            patch.object(pub, "_start_pm2_server") as start_pm2,
+        ):
+            pub._ensure_shared_server_running()
+
+        start_node.assert_called_once()
+        install_deps.assert_not_called()
+        start_pm2.assert_not_called()
+
+    def test_ensure_shared_installs_deps_and_retries_direct_node(self, tmp_path):
+        pub = WebPublisher(str(tmp_path), port=19013)
+
+        with (
+            patch.object(pub, "_select_port", return_value=19013),
+            patch.object(pub, "_is_roundtable_server_ready", return_value=False),
+            patch.object(pub, "_is_shared_running", return_value=False),
+            patch("roundtable.web_publisher.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"),
+            patch.object(pub, "_ensure_supported_node"),
+            patch.object(pub, "_start_direct_node_server", side_effect=[False, True]) as start_node,
+            patch.object(
+                pub,
+                "_install_web_dependencies",
+                return_value="`npm install --omit=dev` completed",
+            ) as install,
+            patch.object(pub, "_start_pm2_server") as start_pm2,
+        ):
+            pub._ensure_shared_server_running()
+
+        assert start_node.call_count == 2
+        install.assert_called_once()
+        start_pm2.assert_not_called()
+
+    def test_install_web_dependencies_skips_puppeteer_browser_download(self, tmp_path):
+        pub = WebPublisher(str(tmp_path), port=19013)
+        project_dir = tmp_path / "npm-project"
+        project_dir.mkdir()
+
+        with (
+            patch.object(pub, "_find_npm_project_dir", return_value=project_dir),
+            patch("roundtable.web_publisher.shutil.which", return_value="/usr/bin/npm"),
+            patch("roundtable.web_publisher.subprocess.run") as run,
+        ):
+            run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            result = pub._install_web_dependencies()
+
+        assert result == "`npm install --omit=dev` completed"
+        kwargs = run.call_args.kwargs
+        assert kwargs["cwd"] == project_dir
+        assert kwargs["env"]["PUPPETEER_SKIP_DOWNLOAD"] == "true"
+
+    def test_ensure_shared_missing_node_raises_clear_error(self, tmp_path):
+        pub = WebPublisher(str(tmp_path), port=19014)
+
+        with (
+            patch.object(pub, "_select_port", return_value=19014),
+            patch.object(pub, "_is_roundtable_server_ready", return_value=False),
+            patch.object(pub, "_is_shared_running", return_value=False),
+            patch("roundtable.web_publisher.shutil.which", return_value=None),
+            pytest.raises(RuntimeError, match=r"Node.js 18\+ is required"),
+        ):
+            pub._ensure_shared_server_running()
+
+    def test_ensure_shared_all_startup_paths_fail_raises_diagnostic(self, tmp_path):
+        pub = WebPublisher(str(tmp_path), port=19015)
+
+        with (
+            patch.object(pub, "_select_port", return_value=19015),
+            patch.object(pub, "_is_roundtable_server_ready", return_value=False),
+            patch.object(pub, "_is_shared_running", return_value=False),
+            patch("roundtable.web_publisher.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"),
+            patch.object(pub, "_ensure_supported_node"),
+            patch.object(pub, "_start_direct_node_server", return_value=False),
+            patch.object(pub, "_install_web_dependencies", return_value="npm failed"),
+            patch.object(pub, "_start_pm2_server", return_value="pm2 failed"),
+            pytest.raises(RuntimeError, match="Could not start Roundtable web viewer"),
+        ):
+            pub._ensure_shared_server_running()
+
+    def test_ensure_shared_old_node_raises_clear_error(self, tmp_path):
+        pub = WebPublisher(str(tmp_path), port=19016)
+
+        with (
+            patch.object(pub, "_select_port", return_value=19016),
+            patch.object(pub, "_is_roundtable_server_ready", return_value=False),
+            patch.object(pub, "_is_shared_running", return_value=False),
+            patch("roundtable.web_publisher.shutil.which", return_value="/usr/bin/node"),
+            patch("roundtable.web_publisher.subprocess.run") as run_node,
+            pytest.raises(RuntimeError, match=r"Node.js 18\+ is required"),
+        ):
+            run_node.return_value = MagicMock(returncode=0, stdout="v14.18.2", stderr="")
+            pub._ensure_shared_server_running()
 
     @patch("roundtable.web_publisher.subprocess.run")
-    def test_ensure_shared_skips_when_already_running(self, mock_run, tmp_path):
-        # pm2 jlist returns the shared process as online
+    def test_is_shared_running_detects_pm2_online(self, mock_run, tmp_path):
         jlist_output = json.dumps([{"name": "roundtable-web", "pm2_env": {"status": "online"}}])
         mock_run.return_value = MagicMock(returncode=0, stdout=jlist_output)
 
-        pub = WebPublisher(str(tmp_path), port=19012)
-
-        with patch.object(pub, "_wait_for_port"):
-            pub._ensure_shared_server_running()
-
-        # Should only have called pm2 jlist, not pm2 start
-        assert mock_run.call_count == 1
-
-    @patch("roundtable.web_publisher.subprocess.run")
-    def test_start_pm2_failure_raises(self, mock_run, tmp_path):
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="[]"),  # jlist: not running
-            MagicMock(returncode=1, stderr="PM2 error"),  # start: fails
-            MagicMock(returncode=0, stdout="[]"),  # jlist re-check: still not running
-        ]
-
-        pub = WebPublisher(str(tmp_path), port=19013)
-        with pytest.raises(RuntimeError, match="PM2 start failed"):
-            pub._ensure_shared_server_running()
+        pub = WebPublisher(str(tmp_path), port=19016)
+        with patch("roundtable.web_publisher.shutil.which", return_value="/usr/bin/pm2"):
+            assert pub._is_shared_running() is True
 
 
 # ---------------------------------------------------------------------------

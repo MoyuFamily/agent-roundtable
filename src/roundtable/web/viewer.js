@@ -915,6 +915,11 @@
     const $revokeModalOverlay = document.getElementById('revokeModalOverlay');
     const $revokeCancelBtn = document.getElementById('revokeCancelBtn');
     const $revokeConfirmBtn = document.getElementById('revokeConfirmBtn');
+    const canRevoke = Boolean(CONFIG.canRevoke && CONFIG.ownerSecret);
+    if (!canRevoke) {
+      if ($revokeLinkBtn) $revokeLinkBtn.style.display = 'none';
+      if ($sheetRevokeLinkBtn) $sheetRevokeLinkBtn.style.display = 'none';
+    }
 
     // State
     let shareLink = '';
@@ -1129,13 +1134,15 @@
       revokeModalOpen = false;
     }
 
-    $revokeLinkBtn.addEventListener('click', () => {
-      openRevokeModal();
-    });
+    if (canRevoke) {
+      $revokeLinkBtn.addEventListener('click', () => {
+        openRevokeModal();
+      });
 
-    $sheetRevokeLinkBtn.addEventListener('click', () => {
-      openRevokeModal();
-    });
+      $sheetRevokeLinkBtn.addEventListener('click', () => {
+        openRevokeModal();
+      });
+    }
 
     $revokeCancelBtn.addEventListener('click', closeRevokeModal);
 
@@ -1154,6 +1161,11 @@
       try {
         const resp = await fetch(`${API_BASE}/api/${CONFIG.token}/revoke`, {
           method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Roundtable-Owner-Secret': CONFIG.ownerSecret,
+          },
+          body: JSON.stringify({ owner_secret: CONFIG.ownerSecret }),
         });
 
         if (resp.ok) {
@@ -1168,7 +1180,7 @@
       } catch {
         alert(t('networkError'));
         $revokeConfirmBtn.disabled = false;
-        $revokeConfirmBtn.textContent = '确认撤销';
+        $revokeConfirmBtn.textContent = t('confirmRevoke');
       }
     });
 

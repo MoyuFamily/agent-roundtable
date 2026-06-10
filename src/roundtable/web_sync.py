@@ -10,18 +10,32 @@ know where SHARED_DATA_DIR lives — that lookup belongs to RoundtableCore.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import os
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised through import smoke tests
+    fcntl = None  # type: ignore[assignment]
 
 from roundtable.db import RoundtableDB
 
 logger = logging.getLogger(__name__)
+
+
+def _lock_ex(file_obj: IO[Any]) -> None:
+    if fcntl is not None:
+        fcntl.flock(file_obj.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock(file_obj: IO[Any]) -> None:
+    if fcntl is not None:
+        fcntl.flock(file_obj.fileno(), fcntl.LOCK_UN)
 
 
 class WebDiscussionSync:
@@ -89,14 +103,14 @@ class WebDiscussionSync:
         target = web_dir / "token_stream.jsonl"
         try:
             with open(target, "a") as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                _lock_ex(f)
                 try:
                     f.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
                     f.write("\n")
                     f.flush()
                     os.fsync(f.fileno())
                 finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    _unlock(f)
         except Exception:
             logger.debug("Failed to append event to token_stream.jsonl at %s", target)
 
@@ -108,7 +122,7 @@ class WebDiscussionSync:
         lock_path = json_path.with_suffix(".json.lock")
         try:
             with open(lock_path, "a") as lock_file:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                _lock_ex(lock_file)
                 try:
                     with open(json_path) as f:
                         data = json.load(f)
@@ -265,7 +279,7 @@ class WebDiscussionSync:
                         os.rename(str(tmp), str(json_path))
                         logger.info("Synchronized web discussion.json for %s from database", discussion_id)
                 finally:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                    _unlock(lock_file)
         except Exception:
             logger.exception("Failed to sync web discussion state for %s", discussion_id)
 
@@ -284,7 +298,7 @@ class WebDiscussionSync:
         lock_path = json_path.with_suffix(".json.lock")
         try:
             with open(lock_path, "a") as lock_file:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                _lock_ex(lock_file)
                 try:
                     with open(json_path) as f:
                         data = json.load(f)
@@ -317,7 +331,7 @@ class WebDiscussionSync:
                     os.rename(str(tmp), str(json_path))
                     logger.info("Updated web discussion.json for %s (cross-process)", discussion_id)
                 finally:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                    _unlock(lock_file)
         except Exception:
             logger.exception("Failed to update web discussion.json for %s", discussion_id)
 
@@ -329,7 +343,7 @@ class WebDiscussionSync:
         lock_path = json_path.with_suffix(".json.lock")
         try:
             with open(lock_path, "a") as lock_file:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                _lock_ex(lock_file)
                 try:
                     with open(json_path) as f:
                         data = json.load(f)
@@ -365,6 +379,6 @@ class WebDiscussionSync:
                     os.rename(str(tmp), str(json_path))
                     logger.info("Concluded web discussion.json for %s (cross-process)", discussion_id)
                 finally:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                    _unlock(lock_file)
         except Exception:
             logger.exception("Failed to conclude web discussion.json for %s", discussion_id)

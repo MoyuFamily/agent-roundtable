@@ -1,25 +1,27 @@
 """WebPublisher — manages a live web viewer for a roundtable discussion.
 
-Uses PM2 to manage the Express subprocess, fcntl for atomic file locking,
-and nanoid for token generation. Discussion data flows one-way through
-a JSON file that Express reads via shared lock + fs.watch.
+Starts a shared local Node.js web server when possible, writes discussion
+state to JSON for the server to read, and keeps the Python discussion flow
+independent from web viewer startup.
 """
 
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import json
 import logging
 import os
 import secrets
+import shutil
 import socket
 import subprocess
 import tempfile
 import time
 from pathlib import Path
 from typing import Any
+from urllib import error as url_error
+from urllib import request as url_request
 
 from roundtable.web_helpers import (
     get_avatar_for_participant,
@@ -31,6 +33,44 @@ logger = logging.getLogger(__name__)
 
 SHARED_PM2_NAME = "roundtable-web"
 SHARED_DATA_DIR = Path(tempfile.gettempdir()) / "roundtable_web"
+MIN_NODE_MAJOR = 18
+WEB_HELP = (
+    "Roundtable created the discussion but could not start the web viewer. "
+    "Install Node.js 18+ and run `npm install --omit=dev` in the project if automatic setup failed."
+)
+_DIRECT_SERVER_PROCESSES: list[Any] = []
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised on Windows
+    fcntl = None  # type: ignore[assignment]
+
+
+class _FileLock:
+    """Best-effort advisory file lock with a no-op fallback on platforms without fcntl."""
+
+    def __init__(self, file_obj: Any, mode: int) -> None:
+        self._file_obj = file_obj
+        self._mode = mode
+
+    def __enter__(self) -> None:
+        if fcntl is not None:
+            fcntl.flock(self._file_obj.fileno(), self._mode)
+
+    def __exit__(self, *_exc: object) -> None:
+        if fcntl is not None:
+            fcntl.flock(self._file_obj.fileno(), fcntl.LOCK_UN)
+
+
+def _lock_ex(file_obj: Any) -> _FileLock:
+    mode = fcntl.LOCK_EX if fcntl is not None else 0
+    return _FileLock(file_obj, mode)
+
+
+def _lock_sh(file_obj: Any) -> _FileLock:
+    mode = fcntl.LOCK_SH if fcntl is not None else 0
+    return _FileLock(file_obj, mode)
+
 
 # ---------------------------------------------------------------------------
 # Token generation
@@ -50,6 +90,31 @@ except ImportError:
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _hash_password(password: str) -> str:
+    """Return a Node-verifiable PBKDF2 password hash."""
+    salt = secrets.token_urlsafe(18)
+    iterations = 260_000
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations)
+    return f"pbkdf2_sha256${iterations}${salt}${digest.hex()}"
+
+
+def _safe_tail(text: str, limit: int = 500) -> str:
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
+
+
+def _parse_node_major(version: str) -> int | None:
+    cleaned = version.strip()
+    if cleaned.startswith("v"):
+        cleaned = cleaned[1:]
+    major = cleaned.split(".", 1)[0]
+    if not major.isdigit():
+        return None
+    return int(major)
 
 
 # ---------------------------------------------------------------------------
@@ -93,12 +158,10 @@ class WebPublisher:
         self._host = host
         self._url_host = "127.0.0.1" if host in {"", "0.0.0.0", "::"} else host
         self._password = password
-        self._password_hash: str | None = None
-        if password:
-            import bcrypt  # type: ignore[import-not-found,unused-ignore]
-
-            self._password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        self._password_hash: str | None = _hash_password(password) if password else None
         self._token: str | None = None
+        self._owner_secret: str | None = None
+        self._owner_secret_hash: str | None = None
         self._discussion_id: str | None = None
         self._revoked: bool = False
         self._speeches: list[dict[str, Any]] = []
@@ -130,11 +193,13 @@ class WebPublisher:
 
         1. Generate token (nanoid 21) if not provided
         2. Write initial discussion.json (includes password_hash if set)
-        3. Ensure the shared Express PM2 process is running on the configured port
-        4. Return URL: ``http://<host>:<port>/r/<token>``
+        3. Ensure the shared local Node.js web server is running
+        4. Return owner URL: ``http://<host>:<port>/r/<token>?owner=<secret>``
         """
         self._discussion_id = discussion_id
         self._token = token or _generate_token()
+        self._owner_secret = _generate_token(32)
+        self._owner_secret_hash = _hash_token(self._owner_secret)
         self._topic = topic or f"Discussion {discussion_id}"
         self._participants = participants or []
         self._status = status
@@ -364,7 +429,10 @@ class WebPublisher:
     def url(self) -> str | None:
         """Current web page URL, or None if not started."""
         if self._actual_port and self._token:
-            return f"http://{self._url_host}:{self._actual_port}/r/{self._token}"
+            url = f"http://{self._url_host}:{self._actual_port}/r/{self._token}"
+            if self._owner_secret:
+                return f"{url}?owner={self._owner_secret}"
+            return url
         return None
 
     @property
@@ -377,50 +445,88 @@ class WebPublisher:
         """The access token."""
         return self._token
 
+    @property
+    def owner_secret(self) -> str | None:
+        """Secret required for owner-only operations such as link revocation."""
+        return self._owner_secret
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     def _ensure_shared_server_running(self) -> None:
-        """Start the shared PM2 process on demand. No-op if already online."""
-        if self._is_shared_running():
-            self._wait_for_port(timeout=3.0)
-            return
-
+        """Start or reuse a shared local web server on a usable port."""
         server_path = Path(__file__).parent / "web" / "server.mjs"
         if not server_path.exists():
-            raise FileNotFoundError(f"Express server not found: {server_path}")
+            raise FileNotFoundError(f"Roundtable web server not found: {server_path}")
 
         SHARED_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self._actual_port = self._select_port(self._port)
 
-        cmd = [
-            "pm2",
-            "start",
-            str(server_path),
-            "--name",
-            SHARED_PM2_NAME,
-            "--interpreter",
-            "node",
-            "--",
-            "--port",
-            str(self._port),
-            "--data-dir",
-            str(SHARED_DATA_DIR),
-        ]
+        if self._is_roundtable_server_ready(self._actual_port):
+            return
 
-        logger.info("Starting shared PM2: %s", " ".join(cmd))
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if self._is_shared_running() and self._wait_for_port(timeout=3.0):
+            return
 
-        if result.returncode != 0:
-            if self._is_shared_running():
-                self._wait_for_port(timeout=10.0)
+        node = shutil.which("node")
+        if not node:
+            raise RuntimeError("Node.js 18+ is required for the web viewer but `node` was not found on PATH.")
+        self._ensure_supported_node(node)
+
+        attempts: list[str] = []
+        if self._start_direct_node_server(node, server_path):
+            return
+        attempts.append("direct `node server.mjs` did not become ready")
+
+        install_result = self._install_web_dependencies()
+        if install_result is not None:
+            attempts.append(install_result)
+            if self._start_direct_node_server(node, server_path):
                 return
-            raise RuntimeError(f"PM2 start failed (exit {result.returncode}): {result.stderr}")
 
-        self._wait_for_port(timeout=10.0)
+        pm2_result = self._start_pm2_server(node, server_path)
+        if pm2_result is None:
+            return
+        attempts.append(pm2_result)
+
+        detail = "; ".join(a for a in attempts if a)
+        raise RuntimeError(f"Could not start Roundtable web viewer on port {self._actual_port}. {detail}")
+
+    def _ensure_supported_node(self, node: str) -> None:
+        try:
+            result = subprocess.run(
+                [node, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(f"Could not check Node.js version for the web viewer: {exc}") from exc
+
+        version = (result.stdout or result.stderr).strip()
+        major = _parse_node_major(version)
+        if result.returncode != 0 or major is None:
+            raise RuntimeError(f"Could not check Node.js version for the web viewer: {version or 'unknown error'}")
+        if major < MIN_NODE_MAJOR:
+            raise RuntimeError(
+                f"Node.js {MIN_NODE_MAJOR}+ is required for the web viewer; found {version}. "
+                "Install a current Node.js release or run with web=False."
+            )
+
+    def _select_port(self, preferred: int) -> int:
+        """Return a reusable Roundtable port or the next free local TCP port."""
+        for candidate in range(preferred, preferred + 50):
+            if self._is_roundtable_server_ready(candidate):
+                return candidate
+            if not self._is_port_open(candidate):
+                return candidate
+        raise RuntimeError(f"No free port found in range {preferred}-{preferred + 49}")
 
     def _is_shared_running(self) -> bool:
         """Check whether the shared PM2 process is online."""
+        if shutil.which("pm2") is None:
+            return False
         try:
             result = subprocess.run(
                 ["pm2", "jlist"],
@@ -439,19 +545,155 @@ class WebPublisher:
             return False
         return False
 
-    def _wait_for_port(self, timeout: float = 10.0) -> None:
+    def _wait_for_port(self, timeout: float = 10.0) -> bool:
         """Block until the shared server accepts TCP connections on self._port."""
         deadline = time.time() + timeout
         while time.time() < deadline:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                try:
-                    s.settimeout(0.5)
-                    s.connect(("127.0.0.1", self._port))
-                    logger.info("Shared web server ready on port %d", self._port)
-                    return
-                except OSError:
-                    time.sleep(0.25)
-        logger.warning("Shared web server not reachable on port %d after %.1fs", self._port, timeout)
+            if self._is_roundtable_server_ready(self._actual_port):
+                logger.info("Shared web server ready on port %d", self._actual_port)
+                return True
+            time.sleep(0.25)
+        logger.warning("Shared web server not reachable on port %d after %.1fs", self._actual_port, timeout)
+        return False
+
+    def _is_port_open(self, port: int) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.settimeout(0.3)
+                s.connect(("127.0.0.1", port))
+                return True
+            except OSError:
+                return False
+
+    def _is_roundtable_server_ready(self, port: int) -> bool:
+        try:
+            with url_request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=0.5) as response:
+                if response.status != 200:
+                    return False
+                payload = json.loads(response.read().decode("utf-8"))
+                data_dir = Path(str(payload.get("data_dir", ""))).resolve()
+                return bool(payload.get("ok")) and data_dir == SHARED_DATA_DIR.resolve()
+        except (OSError, TimeoutError, url_error.URLError, json.JSONDecodeError, ValueError):
+            return False
+
+    def _start_direct_node_server(self, node: str, server_path: Path) -> bool:
+        cmd = [
+            node,
+            str(server_path),
+            "--port",
+            str(self._actual_port),
+            "--data-dir",
+            str(SHARED_DATA_DIR),
+        ]
+        log_path = SHARED_DATA_DIR / f"server-{self._actual_port}.log"
+        logger.info("Starting Roundtable web server: %s", " ".join(cmd))
+        log_file = None
+        try:
+            log_file = open(log_path, "ab")  # noqa: SIM115 - kept open while the child process owns it.
+            popen_kwargs: dict[str, Any] = {
+                "stdout": log_file,
+                "stderr": log_file,
+                "stdin": subprocess.DEVNULL,
+            }
+            if os.name == "nt":
+                popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            else:
+                popen_kwargs["start_new_session"] = True
+            proc = subprocess.Popen(cmd, **popen_kwargs)
+            _DIRECT_SERVER_PROCESSES.append((proc, log_file))
+        except OSError as exc:
+            if log_file is not None:
+                with contextlib.suppress(OSError):
+                    log_file.close()
+            logger.warning("Direct Node web server start failed: %s", exc)
+            return False
+
+        if self._wait_for_port(timeout=8.0):
+            return True
+
+        if proc.poll() is not None:
+            logger.warning(
+                "Roundtable web server exited with code %s. Log tail: %s",
+                proc.returncode,
+                self._read_server_log_tail(log_path),
+            )
+        return False
+
+    def _read_server_log_tail(self, log_path: Path) -> str:
+        try:
+            return _safe_tail(log_path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            return ""
+
+    def _find_npm_project_dir(self) -> Path | None:
+        candidates = [
+            Path(__file__).resolve().parent / "web",
+            Path(__file__).resolve().parents[2],
+        ]
+        for candidate in candidates:
+            if (candidate / "package.json").exists():
+                return candidate
+        return None
+
+    def _install_web_dependencies(self) -> str | None:
+        npm = shutil.which("npm")
+        project_dir = self._find_npm_project_dir()
+        if project_dir is None:
+            return "no local package.json found for npm dependency installation"
+        if npm is None:
+            return "npm was not found on PATH, so web dependencies could not be installed automatically"
+
+        cmd = [npm, "install", "--omit=dev"]
+        logger.info("Installing Roundtable web dependencies in %s: %s", project_dir, " ".join(cmd))
+        env = os.environ.copy()
+        env.setdefault("PUPPETEER_SKIP_DOWNLOAD", "true")
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=project_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"`npm install --omit=dev` failed: {exc}"
+
+        if result.returncode != 0:
+            stderr = _safe_tail(result.stderr or result.stdout)
+            return f"`npm install --omit=dev` exited {result.returncode}: {stderr}"
+        return "`npm install --omit=dev` completed"
+
+    def _start_pm2_server(self, node: str, server_path: Path) -> str | None:
+        pm2 = shutil.which("pm2")
+        if pm2 is None:
+            return "PM2 is not installed; skipped optional PM2 fallback"
+
+        cmd = [
+            pm2,
+            "start",
+            str(server_path),
+            "--name",
+            SHARED_PM2_NAME,
+            "--interpreter",
+            node,
+            "--",
+            "--port",
+            str(self._actual_port),
+            "--data-dir",
+            str(SHARED_DATA_DIR),
+        ]
+
+        logger.info("Starting shared PM2 web server: %s", " ".join(cmd))
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"PM2 fallback failed: {exc}"
+
+        if result.returncode == 0 and self._wait_for_port(timeout=10.0):
+            return None
+        stderr = _safe_tail(result.stderr or result.stdout)
+        return f"PM2 fallback exited {result.returncode}: {stderr}"
 
     def _write_discussion_json(self) -> None:
         """Write current state to discussion.json with atomic file lock."""
@@ -463,6 +705,7 @@ class WebPublisher:
             "status": self._status,
             "token_hash": token_hash,
             "password_hash": self._password_hash,
+            "owner_secret_hash": self._owner_secret_hash,
             "participants": self._participants,
             "speeches": self._speeches,
             "round_summaries": self._round_summaries,
@@ -525,15 +768,11 @@ class WebPublisher:
     def _append_token_stream_jsonl(self, event: dict[str, Any]) -> None:
         """Append one event to token_stream.jsonl for SSE tailing/replay."""
         target = self._discussion_dir / "token_stream.jsonl"
-        with open(target, "a") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
-                f.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
-                f.write("\n")
-                f.flush()
-                os.fsync(f.fileno())
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        with open(target, "a") as f, _lock_ex(f):
+            f.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
 
     def _write_discussion_json_raw(self, data: dict[str, Any]) -> None:
         """Atomic write: flock lock file → read/merge existing disk state → write .tmp → fsync → rename."""
@@ -541,188 +780,186 @@ class WebPublisher:
         lock_path = target.with_suffix(".json.lock")
         tmp = target.with_suffix(".json.tmp")
 
-        with open(lock_path, "a") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            try:
-                # Read existing data to merge and prevent overwriting cross-process changes
-                existing = None
-                if target.exists():
-                    try:
-                        with open(target, encoding="utf-8") as f:
-                            existing = json.load(f)
-                    except (json.JSONDecodeError, FileNotFoundError):
-                        pass
+        with open(lock_path, "a") as lock_file, _lock_ex(lock_file):
+            # Read existing data to merge and prevent overwriting cross-process changes
+            existing = None
+            if target.exists():
+                try:
+                    with open(target, encoding="utf-8") as f:
+                        existing = json.load(f)
+                except (json.JSONDecodeError, FileNotFoundError):
+                    pass
 
-                if existing:
-                    # 1. Merge speeches by id
-                    existing_speeches = existing.get("speeches", [])
-                    speech_map = {s["id"]: s for s in existing_speeches}
-                    for s in data.get("speeches", []):
-                        speech_map[s["id"]] = s
-                    data["speeches"] = sorted(speech_map.values(), key=lambda s: s["id"])
-                    self._speeches = data["speeches"]
+            if existing:
+                # 1. Merge speeches by id
+                existing_speeches = existing.get("speeches", [])
+                speech_map = {s["id"]: s for s in existing_speeches}
+                for s in data.get("speeches", []):
+                    speech_map[s["id"]] = s
+                data["speeches"] = sorted(speech_map.values(), key=lambda s: s["id"])
+                self._speeches = data["speeches"]
 
-                    # 2. Merge round_summaries by round
-                    existing_summaries = existing.get("round_summaries", [])
-                    summary_map = {s["round"]: s for s in existing_summaries if "round" in s}
-                    for s in data.get("round_summaries", []):
-                        r_num = s.get("round")
-                        if r_num is not None:
-                            if r_num in summary_map:
-                                existing_s = summary_map[r_num]
-                                existing_ts = existing_s.get("timestamp", 0.0)
-                                data_ts = s.get("timestamp", 0.0)
-                                if data_ts < existing_ts:
-                                    # Existing on disk is newer; keep it.
+                # 2. Merge round_summaries by round
+                existing_summaries = existing.get("round_summaries", [])
+                summary_map = {s["round"]: s for s in existing_summaries if "round" in s}
+                for s in data.get("round_summaries", []):
+                    r_num = s.get("round")
+                    if r_num is not None:
+                        if r_num in summary_map:
+                            existing_s = summary_map[r_num]
+                            existing_ts = existing_s.get("timestamp", 0.0)
+                            data_ts = s.get("timestamp", 0.0)
+                            if data_ts < existing_ts:
+                                # Existing on disk is newer; keep it.
+                                pass
+                            elif data_ts > existing_ts:
+                                # Live memory version is newer; use it.
+                                summary_map[r_num] = s
+                            else:
+                                # Timestamps are equal, resolve by completeness
+                                ex_has_score = "convergence_score" in existing_s
+                                new_has_score = "convergence_score" in s
+                                if ex_has_score and not new_has_score:
+                                    # Existing has score, keep existing
                                     pass
-                                elif data_ts > existing_ts:
-                                    # Live memory version is newer; use it.
+                                elif not ex_has_score and new_has_score:
                                     summary_map[r_num] = s
                                 else:
-                                    # Timestamps are equal, resolve by completeness
-                                    ex_has_score = "convergence_score" in existing_s
-                                    new_has_score = "convergence_score" in s
-                                    if ex_has_score and not new_has_score:
-                                        # Existing has score, keep existing
-                                        pass
-                                    elif not ex_has_score and new_has_score:
+                                    # Compare information quantity (consensus + disagreement items count)
+                                    ex_items = len(existing_s.get("consensus", [])) + len(
+                                        existing_s.get("disagreement", [])
+                                    )
+                                    new_items = len(s.get("consensus", [])) + len(s.get("disagreement", []))
+                                    if new_items > ex_items:
                                         summary_map[r_num] = s
-                                    else:
-                                        # Compare information quantity (consensus + disagreement items count)
-                                        ex_items = len(existing_s.get("consensus", [])) + len(
-                                            existing_s.get("disagreement", [])
-                                        )
-                                        new_items = len(s.get("consensus", [])) + len(s.get("disagreement", []))
-                                        if new_items > ex_items:
-                                            summary_map[r_num] = s
-                            else:
-                                summary_map[r_num] = s
-                    data["round_summaries"] = sorted(summary_map.values(), key=lambda s: s.get("round", 0))
-                    self._round_summaries = data["round_summaries"]
+                        else:
+                            summary_map[r_num] = s
+                data["round_summaries"] = sorted(summary_map.values(), key=lambda s: s.get("round", 0))
+                self._round_summaries = data["round_summaries"]
 
-                    # 3. Merge final_summary
-                    existing_fs = existing.get("final_summary")
-                    data_fs = data.get("final_summary")
-                    existing_ts = existing_fs.get("timestamp", 0) if existing_fs else 0
-                    data_ts = data_fs.get("timestamp", 0) if data_fs else 0
+                # 3. Merge final_summary
+                existing_fs = existing.get("final_summary")
+                data_fs = data.get("final_summary")
+                existing_ts = existing_fs.get("timestamp", 0) if existing_fs else 0
+                data_ts = data_fs.get("timestamp", 0) if data_fs else 0
 
-                    if existing_fs and not data_fs:
+                if existing_fs and not data_fs:
+                    data["final_summary"] = existing_fs
+                    self._final_summary = existing_fs
+                elif existing_fs and data_fs:
+                    if data_ts < existing_ts:
                         data["final_summary"] = existing_fs
                         self._final_summary = existing_fs
-                    elif existing_fs and data_fs:
-                        if data_ts < existing_ts:
+                    elif data_ts > existing_ts:
+                        self._final_summary = data_fs
+                    else:
+                        # Equal timestamps, merge based on completeness/verdict
+                        ex_verdict = existing_fs.get("verdict", "")
+                        new_verdict = data_fs.get("verdict", "")
+                        ex_items = len(existing_fs.get("consensus", [])) + len(existing_fs.get("disagreement", []))
+                        new_items = len(data_fs.get("consensus", [])) + len(data_fs.get("disagreement", []))
+                        verdict_changed = new_verdict != ex_verdict
+                        has_more_items = new_items > ex_items
+                        if not verdict_changed and not has_more_items:
                             data["final_summary"] = existing_fs
                             self._final_summary = existing_fs
-                        elif data_ts > existing_ts:
-                            self._final_summary = data_fs
                         else:
-                            # Equal timestamps, merge based on completeness/verdict
-                            ex_verdict = existing_fs.get("verdict", "")
-                            new_verdict = data_fs.get("verdict", "")
-                            ex_items = len(existing_fs.get("consensus", [])) + len(existing_fs.get("disagreement", []))
-                            new_items = len(data_fs.get("consensus", [])) + len(data_fs.get("disagreement", []))
-                            verdict_changed = new_verdict != ex_verdict
-                            has_more_items = new_items > ex_items
-                            if not verdict_changed and not has_more_items:
-                                data["final_summary"] = existing_fs
-                                self._final_summary = existing_fs
-                            else:
-                                self._final_summary = data_fs
+                            self._final_summary = data_fs
 
-                    # 4. Merge status & conclusion
-                    if existing.get("status") == "concluded" and data.get("status") != "concluded":
-                        data["status"] = "concluded"
-                        self._status = "concluded"
-                    elif existing.get("status") == "active" and data.get("status") == "assembling":
-                        data["status"] = "active"
-                        self._status = "active"
-                    elif existing.get("status") == "cancelled" and data.get("status") in {"assembling", "active"}:
-                        data["status"] = "cancelled"
-                        self._status = "cancelled"
+                # 4. Merge status & conclusion
+                if existing.get("status") == "concluded" and data.get("status") != "concluded":
+                    data["status"] = "concluded"
+                    self._status = "concluded"
+                elif existing.get("status") == "active" and data.get("status") == "assembling":
+                    data["status"] = "active"
+                    self._status = "active"
+                elif existing.get("status") == "cancelled" and data.get("status") in {"assembling", "active"}:
+                    data["status"] = "cancelled"
+                    self._status = "cancelled"
 
-                    existing_conclusion = existing.get("conclusion")
-                    new_conclusion = data.get("conclusion")
-                    if existing_conclusion:
-                        if not new_conclusion:
+                existing_conclusion = existing.get("conclusion")
+                new_conclusion = data.get("conclusion")
+                if existing_conclusion:
+                    if not new_conclusion:
+                        data["conclusion"] = existing_conclusion
+                        self._conclusion = existing_conclusion
+                    elif new_conclusion != existing_conclusion:
+                        if data_ts < existing_ts:
                             data["conclusion"] = existing_conclusion
                             self._conclusion = existing_conclusion
-                        elif new_conclusion != existing_conclusion:
-                            if data_ts < existing_ts:
-                                data["conclusion"] = existing_conclusion
-                                self._conclusion = existing_conclusion
-                            else:
-                                self._conclusion = new_conclusion
+                        else:
+                            self._conclusion = new_conclusion
 
-                    # 5. Merge root events (e.g. speech_delta, status_delta from fallback sync)
-                    existing_events = existing.get("events", [])
-                    new_events = data.get("events", [])
-                    if existing_events:
-                        seen_events = set()
-                        merged_events = []
+                # 5. Merge root events (e.g. speech_delta, status_delta from fallback sync)
+                existing_events = existing.get("events", [])
+                new_events = data.get("events", [])
+                if existing_events:
+                    seen_events = set()
+                    merged_events = []
 
-                        def get_event_sig(ev: dict[str, Any]) -> Any:
-                            ev_type = ev.get("type")
-                            if ev_type == "speech_delta":
-                                return ("speech_delta", ev.get("speech", {}).get("id"))
-                            elif ev_type == "status_delta":
-                                return ("status_delta", ev.get("status"), ev.get("conclusion"))
-                            elif ev_type == "round_summary":
-                                return ("round_summary", ev.get("round"))
-                            elif ev_type == "final_summary":
-                                return ("final_summary", ev.get("verdict"))
-                            else:
-                                return json.dumps(ev, sort_keys=True)
+                    def get_event_sig(ev: dict[str, Any]) -> Any:
+                        ev_type = ev.get("type")
+                        if ev_type == "speech_delta":
+                            return ("speech_delta", ev.get("speech", {}).get("id"))
+                        elif ev_type == "status_delta":
+                            return ("status_delta", ev.get("status"), ev.get("conclusion"))
+                        elif ev_type == "round_summary":
+                            return ("round_summary", ev.get("round"))
+                        elif ev_type == "final_summary":
+                            return ("final_summary", ev.get("verdict"))
+                        else:
+                            return json.dumps(ev, sort_keys=True)
 
-                        for ev in existing_events + new_events:
-                            sig = get_event_sig(ev)
-                            if sig not in seen_events:
-                                seen_events.add(sig)
-                                merged_events.append(ev)
-                        data["events"] = merged_events
+                    for ev in existing_events + new_events:
+                        sig = get_event_sig(ev)
+                        if sig not in seen_events:
+                            seen_events.add(sig)
+                            merged_events.append(ev)
+                    data["events"] = merged_events
 
-                    existing_revoked = list(existing.get("revoked_token_hashes", []))
-                    for old_token in existing.get("revoked_tokens", []):
-                        existing_revoked.append(_hash_token(old_token))
-                    new_revoked = data.get("revoked_token_hashes", [])
-                    merged_revoked = list(set(existing_revoked + new_revoked))
-                    data["revoked_token_hashes"] = merged_revoked
-                    data.pop("revoked_tokens", None)
-                    if self._token and _hash_token(self._token) in merged_revoked:
-                        self._revoked = True
+                existing_revoked = list(existing.get("revoked_token_hashes", []))
+                for old_token in existing.get("revoked_tokens", []):
+                    existing_revoked.append(_hash_token(old_token))
+                new_revoked = data.get("revoked_token_hashes", [])
+                merged_revoked = list(set(existing_revoked + new_revoked))
+                data["revoked_token_hashes"] = merged_revoked
+                data.pop("revoked_tokens", None)
+                if self._token and _hash_token(self._token) in merged_revoked:
+                    self._revoked = True
 
-                    # 7. Preserve password_hash from disk if memory doesn't have one
-                    if existing.get("password_hash") and not data.get("password_hash"):
-                        data["password_hash"] = existing["password_hash"]
+                # 7. Preserve password_hash from disk if memory doesn't have one
+                if existing.get("password_hash") and not data.get("password_hash"):
+                    data["password_hash"] = existing["password_hash"]
+                if existing.get("owner_secret_hash") and not data.get("owner_secret_hash"):
+                    data["owner_secret_hash"] = existing["owner_secret_hash"]
 
-                    # 8. Preserve cross-process dispatch snapshots and joiners.
-                    # The in-memory publisher may have been created before summoned
-                    # agents accepted. Avoid reverting DB-backed sync fields.
-                    for key in ("dispatches", "dispatch_summary"):
-                        if key in existing and key not in data:
-                            data[key] = existing[key]
+                # 8. Preserve cross-process dispatch snapshots and joiners.
+                # The in-memory publisher may have been created before summoned
+                # agents accepted. Avoid reverting DB-backed sync fields.
+                for key in ("dispatches", "dispatch_summary"):
+                    if key in existing and key not in data:
+                        data[key] = existing[key]
 
-                    existing_participants = existing.get("participants", [])
-                    new_participants = data.get("participants", [])
-                    if existing_participants:
-                        participant_map = {
-                            p.get("profile") or p.get("participant"): p
-                            for p in existing_participants
-                            if p.get("profile") or p.get("participant")
-                        }
-                        for p in new_participants:
-                            key = p.get("profile") or p.get("participant")
-                            if key:
-                                participant_map[key] = p
-                        data["participants"] = list(participant_map.values())
-                        self._participants = data["participants"]
+                existing_participants = existing.get("participants", [])
+                new_participants = data.get("participants", [])
+                if existing_participants:
+                    participant_map = {
+                        p.get("profile") or p.get("participant"): p
+                        for p in existing_participants
+                        if p.get("profile") or p.get("participant")
+                    }
+                    for p in new_participants:
+                        key = p.get("profile") or p.get("participant")
+                        if key:
+                            participant_map[key] = p
+                    data["participants"] = list(participant_map.values())
+                    self._participants = data["participants"]
 
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.rename(str(tmp), str(target))
-            finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.rename(str(tmp), str(target))
 
     def _read_discussion_json(self) -> dict[str, Any] | None:
         """Read discussion.json with shared lock on lock file."""
@@ -731,13 +968,11 @@ class WebPublisher:
             return None
 
         lock_path = target.with_suffix(".json.lock")
-        with open(lock_path, "a") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_SH)
+        with open(lock_path, "a") as lock_file, _lock_sh(lock_file):
             try:
                 with open(target) as f:
                     result: dict[str, Any] | None = json.load(f)
                     return result
             except (json.JSONDecodeError, FileNotFoundError):
                 return None
-            finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        return None

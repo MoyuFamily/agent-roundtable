@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from roundtable.db import RoundtableDB
-from roundtable.demo import (
+from roundtable.demo_data import (
     DEMO_FINDINGS,
     DEMO_PARTICIPANTS,
     DEMO_SPEECHES,
@@ -147,10 +147,14 @@ class RoundtableCore:
                 status=status,
             )
 
-            # Optionally start web viewer
+            # Optionally start web viewer. Web is a product default, but it is
+            # intentionally best-effort so core discussion creation still works.
             web_url = None
+            web_status = "disabled"
+            web_error = None
+            web_help = None
             if web:
-                from roundtable.web_publisher import WebPublisher
+                from roundtable.web_publisher import WEB_HELP, WebPublisher
 
                 output_dir = self._get_web_dir(disc.id)
                 try:
@@ -172,11 +176,14 @@ class RoundtableCore:
                         status=disc.status,
                         expires_at=expires_at,
                     )
+                    web_status = "ready"
+                    self._publishers[disc.id] = publisher
+                    logger.info("Web viewer started for discussion %s: %s", disc.id, web_url)
                 except Exception as exc:
+                    web_status = "failed"
+                    web_error = str(exc)
+                    web_help = WEB_HELP
                     logger.exception("Failed to start web viewer for discussion %s", disc.id)
-                    raise RuntimeError(f"Failed to start web viewer: {exc}") from exc
-                self._publishers[disc.id] = publisher
-                logger.info("Web viewer started for discussion %s: %s", disc.id, web_url)
 
             return {
                 "ok": True,
@@ -187,6 +194,9 @@ class RoundtableCore:
                 "speech_order": disc.speech_order,
                 "status": disc.status,
                 "web_url": web_url,
+                "web_status": web_status,
+                "web_error": web_error,
+                "web_help": web_help,
             }
         finally:
             conn.close()

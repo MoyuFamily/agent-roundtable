@@ -34,8 +34,8 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-# Minimal dependencies — bcrypt for password hashing
-dependencies = ["bcrypt>=4.0.0"]
+# Minimal core: stdlib + SQLite only. Optional extras add integration helpers.
+dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/MoyuFamily/agent-roundtable"
@@ -63,14 +63,19 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["roundtable*"]
 
 [tool.setuptools.package-data]
 "roundtable" = [
     "py.typed",
     "web/*.html",
     "web/*.css",
+    "web/*.js",
+    "web/package*.json",
     "web/*.mjs",
     "web/*.cjs",
+    "templates/*.json",
+    "skills/mcp-roundtable/*.md",
     "skills/mcp-roundtable/SKILL.md",
     "skills/mcp-roundtable/install.py",
     "skills/mcp-roundtable/configs/*.json",

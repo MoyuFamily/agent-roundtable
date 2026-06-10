@@ -57,6 +57,7 @@ def discussion_dir(tmp_path):
     disc_subdir.mkdir()
     disc = {
         "token_hash": hashlib.sha256(b"test_token_abc123").hexdigest(),
+        "owner_secret_hash": hashlib.sha256(b"owner_secret_123").hexdigest(),
         "topic": "Test Discussion Topic",
         "status": "completed",
         "schema_version": 2,
@@ -249,6 +250,17 @@ class TestServerLifecycle:
         assert len(data["participants"]) == 2
         # Token should NOT be in the response
         assert "token" not in data
+        assert "token_hash" not in data
+        assert "owner_secret_hash" not in data
+
+    def test_healthz_identifies_roundtable_server(self, server):
+        base, _, discussion_dir = server
+        resp = requests.get(f"{base}/healthz", timeout=5)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["service"] == "roundtable-web"
+        assert data["data_dir"] == str(discussion_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -295,8 +307,9 @@ class TestPasswordProtection:
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True
-        # Should set rt_pw_<token> cookie
-        assert "rt_pw_pw_token_456" in resp.cookies
+        # Should set rt_pw_<token_hash> cookie without exposing the raw token.
+        token_hash = hashlib.sha256(b"pw_token_456").hexdigest()
+        assert f"rt_pw_{token_hash}" in resp.cookies
 
     def test_password_cookie_grants_access(self, pw_server):
         """After authenticating, the cookie should allow direct access."""
@@ -399,6 +412,8 @@ class TestExportPDF:
     def test_export_pdf_success(self, server):
         base, _, _ = server
         resp = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=90)
+        if resp.status_code == 503:
+            pytest.skip(f"PDF export unavailable in this environment: {resp.json().get('detail')}")
         assert resp.status_code == 200
         ct = resp.headers.get("content-type", "")
         assert "pdf" in ct
@@ -409,6 +424,8 @@ class TestExportPDF:
     def test_export_pdf_filename(self, server):
         base, _, _ = server
         resp = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=90)
+        if resp.status_code == 503:
+            pytest.skip(f"PDF export unavailable in this environment: {resp.json().get('detail')}")
         cd = resp.headers.get("content-disposition", "")
         assert "Test_Discussion_Topic" in cd or "discussion" in cd
 
@@ -421,6 +438,57 @@ class TestExportPDF:
         base, _, _ = pw_server
         resp = requests.get(f"{base}/api/pw_token_456/export/pdf", timeout=5)
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Owner-only revoke tests
+# ---------------------------------------------------------------------------
+
+
+class TestRevokeAuthorization:
+    def test_revoke_without_owner_secret_returns_403(self, server):
+        base, _, _ = server
+        resp = requests.post(f"{base}/api/test_token_abc123/revoke", json={}, timeout=5)
+        assert resp.status_code == 403
+        assert "Owner authorization" in resp.json()["error"]
+
+    def test_revoke_with_wrong_owner_secret_returns_403(self, server):
+        base, _, _ = server
+        resp = requests.post(
+            f"{base}/api/test_token_abc123/revoke",
+            json={"owner_secret": "wrong"},
+            timeout=5,
+        )
+        assert resp.status_code == 403
+
+    def test_revoke_with_owner_secret_succeeds(self, server):
+        base, _, discussion_dir = server
+        resp = requests.post(
+            f"{base}/api/test_token_abc123/revoke",
+            json={"owner_secret": "owner_secret_123"},
+            timeout=5,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["revoked"] is True
+
+        disc_path = discussion_dir / "test_disc" / "discussion.json"
+        data = json.loads(disc_path.read_text())
+        token_hash = hashlib.sha256(b"test_token_abc123").hexdigest()
+        assert token_hash in data["revoked_token_hashes"]
+
+    def test_owner_viewer_config_contains_owner_capability(self, server):
+        base, _, _ = server
+        resp = requests.get(f"{base}/r/test_token_abc123?owner=owner_secret_123", timeout=5)
+        assert resp.status_code == 200
+        assert '"canRevoke":true' in resp.text
+        assert '"ownerSecret":"owner_secret_123"' in resp.text
+
+    def test_public_viewer_config_hides_owner_secret(self, server):
+        base, _, _ = server
+        resp = requests.get(f"{base}/r/test_token_abc123", timeout=5)
+        assert resp.status_code == 200
+        assert '"canRevoke":false' in resp.text
+        assert "owner_secret_123" not in resp.text
 
 
 # ---------------------------------------------------------------------------

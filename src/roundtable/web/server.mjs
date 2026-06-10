@@ -168,6 +168,55 @@ function readDiscussionFor(entry) {
   return data;
 }
 
+function readDiscussionSnapshot(path) {
+  try {
+    if (!existsSync(path)) return null;
+    const before = statSync(path);
+    const raw = readFileSync(path, "utf-8");
+    const data = JSON.parse(raw);
+    const after = statSync(path);
+    if (before.mtimeMs !== after.mtimeMs || before.size !== after.size) return null;
+    return { data, signature: `${after.mtimeMs}:${after.size}` };
+  } catch {
+    return null;
+  }
+}
+
+function writeRevocationHash(entry, incomingHash) {
+  // Python owns full discussion.json merge semantics under discussion.json.lock.
+  // Node's revoke endpoint performs only a targeted revocation merge: re-read the
+  // latest disk snapshot, add this token hash, and retry if the file changes
+  // before the atomic rename.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const tmpPath = `${entry.discussionPath}.node-revoke-${process.pid}-${Date.now()}-${attempt}.tmp`;
+    const snapshot = readDiscussionSnapshot(entry.discussionPath);
+    if (!snapshot) continue;
+
+    const data = snapshot.data;
+    const revoked = Array.isArray(data.revoked_token_hashes) ? data.revoked_token_hashes : [];
+    const revokedSet = new Set(revoked);
+    revokedSet.add(incomingHash);
+    data.revoked_token_hashes = [...revokedSet];
+    delete data.revoked_tokens;
+    data.updated_at = Math.floor(Date.now() / 1000);
+
+    try {
+      const latest = statSync(entry.discussionPath);
+      const latestSignature = `${latest.mtimeMs}:${latest.size}`;
+      if (latestSignature !== snapshot.signature) continue;
+
+      writeFileSync(tmpPath, JSON.stringify(data, null, 2));
+      renameSync(tmpPath, entry.discussionPath);
+      return data;
+    } catch {
+      try { unlinkSync(tmpPath); } catch { /* ignore cleanup races */ }
+      continue;
+    }
+  }
+
+  throw new Error("Unable to safely persist revocation");
+}
+
 // ---------------------------------------------------------------------------
 // Token + password validation
 // ---------------------------------------------------------------------------
@@ -1031,15 +1080,11 @@ router.post("/api/:token/revoke", async (req, res, params) => {
   }
 
   const incomingHash = _hashToken(params.token);
-  if (!data.revoked_token_hashes) data.revoked_token_hashes = [];
-  if (!data.revoked_token_hashes.includes(incomingHash)) {
-    data.revoked_token_hashes.push(incomingHash);
+  try {
+    writeRevocationHash(entry, incomingHash);
+  } catch {
+    return sendJSON(res, { error: "Unable to persist revocation" }, 500);
   }
-  data.updated_at = Math.floor(Date.now() / 1000);
-
-  const tmpPath = entry.discussionPath + ".tmp";
-  writeFileSync(tmpPath, JSON.stringify(data, null, 2));
-  renameSync(tmpPath, entry.discussionPath);
 
   entry.revokedTokenHashes.add(incomingHash);
   broadcastToSSE(entry.discussionId, "revoked", { revoked: true });

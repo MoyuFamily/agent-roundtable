@@ -476,6 +476,36 @@ class TestRevokeAuthorization:
         token_hash = hashlib.sha256(b"test_token_abc123").hexdigest()
         assert token_hash in data["revoked_token_hashes"]
 
+    def test_revoke_preserves_cross_process_disk_updates(self, server):
+        base, _, discussion_dir = server
+        disc_path = discussion_dir / "test_disc" / "discussion.json"
+        data = json.loads(disc_path.read_text())
+        data["dispatch_summary"] = {"accepted": 2, "pending": 0}
+        data["speeches"].append(
+            {
+                "seq": 4,
+                "round": 1,
+                "agent_id": "carol",
+                "display_name": "Carol",
+                "participant": "carol",
+                "content": "A cross-process update that Node must preserve.",
+            }
+        )
+        disc_path.write_text(json.dumps(data, indent=2))
+
+        resp = requests.post(
+            f"{base}/api/test_token_abc123/revoke",
+            json={"owner_secret": "owner_secret_123"},
+            timeout=5,
+        )
+        assert resp.status_code == 200
+
+        result = json.loads(disc_path.read_text())
+        token_hash = hashlib.sha256(b"test_token_abc123").hexdigest()
+        assert token_hash in result["revoked_token_hashes"]
+        assert result["dispatch_summary"] == {"accepted": 2, "pending": 0}
+        assert any(s["agent_id"] == "carol" for s in result["speeches"])
+
     def test_owner_viewer_config_contains_owner_capability(self, server):
         base, _, _ = server
         resp = requests.get(f"{base}/r/test_token_abc123?owner=owner_secret_123", timeout=5)

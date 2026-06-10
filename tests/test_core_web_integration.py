@@ -8,6 +8,11 @@ WebPublisher is mocked to avoid real PM2 subprocess calls.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -37,6 +42,40 @@ def _mock_publisher():
     return mock
 
 
+def test_import_roundtable_without_fcntl():
+    """Top-level import should work on platforms without fcntl (for example Windows)."""
+    code = textwrap.dedent(
+        """
+        import builtins
+
+        real_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "fcntl":
+                raise ImportError("simulated missing fcntl")
+            return real_import(name, globals, locals, fromlist, level)
+
+        builtins.__import__ = fake_import
+
+        import roundtable
+        from roundtable.web_sync import WebDiscussionSync
+
+        assert roundtable.__version__ == "2.1.0"
+        assert WebDiscussionSync.__name__ == "WebDiscussionSync"
+        """
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 # ---------------------------------------------------------------------------
 # create_discussion with web=True
 # ---------------------------------------------------------------------------
@@ -56,6 +95,9 @@ class TestCreateDiscussionWeb:
 
         assert result["ok"] is True
         assert result["web_url"] == "http://localhost:8199/rt_test123"
+        assert result["web_status"] == "ready"
+        assert result["web_error"] is None
+        assert result["web_help"] is None
         disc_id = result["discussion_id"]
         assert core._publishers[disc_id] is mock_pub
         mock_pub.start.assert_called_once()
@@ -71,20 +113,25 @@ class TestCreateDiscussionWeb:
         )
         assert result["ok"] is True
         assert result["web_url"] is None
+        assert result["web_status"] == "disabled"
+        assert result["web_error"] is None
+        assert result["web_help"] is None
         assert len(core._publishers) == 0
 
     def test_web_failure_is_reported(self, core):
-        """If web=True is requested, a WebPublisher startup failure is visible."""
-        with (
-            patch("roundtable.web_publisher.WebPublisher", side_effect=RuntimeError("PM2 not found")),
-            pytest.raises(RuntimeError, match="Failed to start web viewer"),
-        ):
-            core.create_discussion(
+        """If web=True startup fails, discussion creation still succeeds with diagnostics."""
+        with patch("roundtable.web_publisher.WebPublisher", side_effect=RuntimeError("Node not found")):
+            result = core.create_discussion(
                 "Test topic",
                 _make_participants(),
                 web=True,
             )
 
+        assert result["ok"] is True
+        assert result["web_url"] is None
+        assert result["web_status"] == "failed"
+        assert "Node not found" in result["web_error"]
+        assert "could not start the web viewer" in result["web_help"]
         assert len(core._publishers) == 0
 
     def test_publisher_stored_by_discussion_id(self, core):

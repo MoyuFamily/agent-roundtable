@@ -13,3 +13,12 @@ from roundtable import RoundtableCore
 
 core = RoundtableCore()
 result = core.run_demo()
+
+print("\nDemo complete")
+print(f"Discussion ID: {result['discussion_id']}")
+print(f"Web status: {result.get('web_status')}")
+if result.get("web_url"):
+    print(f"Web viewer: {result['web_url']}")
+elif result.get("web_error"):
+    print(f"Web error: {result['web_error']}")
+    print(result.get("web_help", ""))

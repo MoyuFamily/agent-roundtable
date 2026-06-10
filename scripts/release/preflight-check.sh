@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-# preflight-check.sh — Run all checks before release.
-# Exits non-zero if any check fails.
+# preflight-check.sh — Run all release gates before publishing.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-
 cd "$ROOT_DIR"
 
 RED='\033[0;31m'
@@ -17,14 +15,43 @@ NC='\033[0m'
 pass() { echo -e "${GREEN}✓${NC} $1"; }
 fail() { echo -e "${RED}✗${NC} $1"; exit 1; }
 warn() { echo -e "${YELLOW}⚠${NC} $1"; }
-info() { echo -e "  $1"; }
+info() { echo "  $1"; }
+run() {
+  local label="$1"
+  echo ""
+  echo "▶ $label"
+  shift
+  "$@"
+  pass "$label passed"
+}
+
+if [ -n "${PYTHON:-}" ]; then
+  PYTHON_BIN="$PYTHON"
+elif [ -x ".venv/bin/python" ]; then
+  PYTHON_BIN=".venv/bin/python"
+elif command -v python3.12 >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python3.12)"
+elif command -v python3.11 >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python3.11)"
+elif command -v python3.10 >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python3.10)"
+else
+  PYTHON_BIN="${PYTHON:-python3}"
+fi
 
 echo "═══════════════════════════════════"
 echo "  Release Preflight Checks"
 echo "═══════════════════════════════════"
-echo ""
 
-# 1. Git clean
+if ! "$PYTHON_BIN" - <<'PY' >/dev/null; then
+import sys
+
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+PY
+  fail "Python 3.10+ is required before releasing. Set PYTHON=/path/to/python3.11 if needed."
+fi
+
+echo ""
 echo "▶ Checking git status..."
 DIRTY=$(git status --porcelain)
 if [ -n "$DIRTY" ]; then
@@ -32,115 +59,90 @@ if [ -n "$DIRTY" ]; then
 fi
 pass "Git working directory clean"
 
-# 2. On a valid branch
 BRANCH=$(git branch --show-current)
 if [ -z "$BRANCH" ]; then
   fail "Not on a branch (detached HEAD)."
 fi
 info "Branch: $BRANCH"
-
-# 3. Up to date with remote
-git fetch --quiet 2>/dev/null || warn "Could not fetch from remote (offline?)"
-LOCAL=$(git rev-parse HEAD)
+git fetch --quiet 2>/dev/null || warn "Could not fetch from remote"
 REMOTE=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
-if [ -n "$REMOTE" ] && [ "$LOCAL" != "$REMOTE" ]; then
+if [ -n "$REMOTE" ] && [ "$(git rev-parse HEAD)" != "$REMOTE" ]; then
   warn "Local branch is not in sync with origin/$BRANCH"
 fi
-pass "Branch check passed"
 
-# 4. Python tests (this is a Python package — pytest is authoritative)
 echo ""
-echo "▶ Running Python tests..."
-# Prefer `python -m pytest` so we never depend on a console-script shebang
-# that may be stale (e.g. when the venv was moved or the repo renamed).
-if [ -x ".venv/bin/python" ]; then
-  PYTEST_BIN=".venv/bin/python -m pytest"
-elif command -v python3 >/dev/null 2>&1 && python3 -c "import pytest" 2>/dev/null; then
-  PYTEST_BIN="python3 -m pytest"
-elif command -v pytest >/dev/null 2>&1; then
-  PYTEST_BIN=pytest
-else
-  fail "pytest not found. Install with: pip install -e '.[dev]'"
-fi
+echo "▶ Installing release check tools..."
+"$PYTHON_BIN" -m pip install --upgrade pip build twine >/dev/null
+"$PYTHON_BIN" -m pip install -e ".[dev]" >/dev/null
+pass "Release tools installed"
 
-if $PYTEST_BIN tests/ --ignore=tests/test_web_viewer.py -q; then
-  pass "Python tests passed"
-else
-  fail "Python tests failed"
-fi
+run "Ruff lint" "$PYTHON_BIN" -m ruff check src tests
+run "Ruff format" "$PYTHON_BIN" -m ruff format --check src tests
+run "Mypy" "$PYTHON_BIN" -m mypy src
 
-# 5. npm tests (if present)
-echo ""
-echo "▶ Running npm tests..."
 if [ -f "package.json" ]; then
-  SCRIPTS=$(node -e "const p=require('./package.json'); console.log(Object.keys(p.scripts||{}).join(','))")
-  if echo "$SCRIPTS" | grep -q "test"; then
-    npm test 2>&1 && pass "npm tests passed" || fail "npm tests failed"
+  if command -v npm >/dev/null 2>&1; then
+    NODE_MAJOR=$(node -e "const major=Number(process.versions.node.split('.')[0]); process.stdout.write(String(major));")
+    if [ "$NODE_MAJOR" -lt 18 ]; then
+      fail "Node.js 18+ is required before releasing. Current version: $(node --version)"
+    fi
+    echo ""
+    echo "▶ Installing npm dependencies..."
+    npm install --omit=dev
+    pass "npm dependencies installed"
+    run "Node syntax check" npm run check
   else
-    warn "No npm test script found — skipping"
-  fi
-else
-  warn "No package.json found — skipping npm tests"
-fi
-
-# 6. Lint
-echo ""
-echo "▶ Running lint..."
-if [ -f "package.json" ]; then
-  if echo "${SCRIPTS:-}" | grep -q "lint"; then
-    npm run lint 2>&1 && pass "Lint passed" || fail "Lint failed"
-  else
-    warn "No lint script found — skipping"
+    fail "npm not found. Install Node.js 18+ before releasing."
   fi
 fi
 
-# 7. Build
-echo ""
-echo "▶ Running build..."
-if [ -f "package.json" ]; then
-  if echo "${SCRIPTS:-}" | grep -q "build"; then
-    npm run build 2>&1 && pass "Build passed" || fail "Build failed"
-  else
-    warn "No build script found — skipping"
-  fi
-fi
+run "Pytest" "$PYTHON_BIN" -m pytest -q
 
-# 8. Version consistency across package.json, pyproject.toml, SKILL.md, src/skills/SKILL.md
 echo ""
 echo "▶ Checking version consistency..."
-
 PKG_VERSION=$(node -e "console.log(require('./package.json').version)")
-info "package.json version:        $PKG_VERSION"
-
-PYPROJECT_VERSION=""
-if [ -f "pyproject.toml" ]; then
-  PYPROJECT_VERSION=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/^version = "(.+)"/\1/')
-  info "pyproject.toml version:      $PYPROJECT_VERSION"
-fi
-
-SKILL_VERSION=""
-if [ -f "SKILL.md" ]; then
-  SKILL_VERSION=$(grep -E '^version: ' SKILL.md | head -1 | sed -E 's/^version: //')
-  info "SKILL.md version:            $SKILL_VERSION"
-fi
-
-SRC_SKILL_VERSION=""
-if [ -f "src/skills/SKILL.md" ]; then
-  SRC_SKILL_VERSION=$(grep -E '^version: ' src/skills/SKILL.md | head -1 | sed -E 's/^version: //')
-  info "src/skills/SKILL.md version: $SRC_SKILL_VERSION"
-fi
-
-# All non-empty versions must match package.json
-MISMATCH=0
-for v in "$PYPROJECT_VERSION" "$SKILL_VERSION" "$SRC_SKILL_VERSION"; do
-  if [ -n "$v" ] && [ "$v" != "$PKG_VERSION" ]; then
-    MISMATCH=1
+WEB_PKG_VERSION=$(node -e "console.log(require('./src/roundtable/web/package.json').version)")
+PYPROJECT_VERSION=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/^version = "(.+)"/\1/')
+INIT_VERSION=$("$PYTHON_BIN" -c "import roundtable; print(roundtable.__version__)")
+SKILL_VERSION=$(grep -E '^version: ' SKILL.md | head -1 | sed -E 's/^version: //')
+SRC_SKILL_VERSION=$(grep -E '^version: ' src/skills/SKILL.md | head -1 | sed -E 's/^version: //')
+for item in "$WEB_PKG_VERSION" "$PYPROJECT_VERSION" "$INIT_VERSION" "$SKILL_VERSION" "$SRC_SKILL_VERSION"; do
+  if [ "$item" != "$PKG_VERSION" ]; then
+    fail "Version mismatch: package.json=$PKG_VERSION web/package.json=$WEB_PKG_VERSION pyproject=$PYPROJECT_VERSION __init__=$INIT_VERSION SKILL=$SKILL_VERSION src/skills=$SRC_SKILL_VERSION"
   fi
 done
-if [ $MISMATCH -eq 1 ]; then
-  fail "Version mismatch — all of package.json, pyproject.toml, SKILL.md, src/skills/SKILL.md must agree."
-fi
 pass "Version check passed"
+
+echo ""
+echo "▶ Building distributions..."
+rm -rf dist build
+"$PYTHON_BIN" -m build
+pass "Build passed"
+run "Twine check" "$PYTHON_BIN" -m twine check dist/*
+
+echo ""
+echo "▶ Wheel install smoke test..."
+SMOKE_DIR=$(mktemp -d)
+"$PYTHON_BIN" -m venv "$SMOKE_DIR/venv"
+"$SMOKE_DIR/venv/bin/python" -m pip install --upgrade pip >/dev/null
+"$SMOKE_DIR/venv/bin/python" -m pip install dist/*.whl >/dev/null
+"$SMOKE_DIR/venv/bin/python" - <<'PY'
+from importlib import resources
+
+import roundtable
+
+assert roundtable.__version__ == "2.1.0"
+assert (resources.files("roundtable") / "web" / "viewer.js").is_file()
+assert (resources.files("roundtable") / "web" / "i18n.js").is_file()
+assert (resources.files("roundtable") / "web" / "package.json").is_file()
+assert (resources.files("roundtable") / "web" / "package-lock.json").is_file()
+assert (resources.files("roundtable") / "templates" / "product-review.json").is_file()
+assert (resources.files("roundtable") / "skills" / "mcp-roundtable" / "SKILL.md").is_file()
+print("wheel smoke ok")
+PY
+"$SMOKE_DIR/venv/bin/python" -m roundtable.demo --no-web --rounds 1 >/dev/null
+rm -rf "$SMOKE_DIR"
+pass "Wheel install smoke test passed"
 
 echo ""
 echo "═══════════════════════════════════"

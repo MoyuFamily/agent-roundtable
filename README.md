@@ -39,6 +39,7 @@ pip install agent-roundtable
 | 包名和导入名是什么？ | 安装 `agent-roundtable`，代码里 `import roundtable` |
 | 能不能独立使用？ | 可以，核心库只依赖 Python 标准库和 SQLite |
 | 能不能接 Agent 框架？ | 可以，通过 adapter 接入 Hermes Agent 或任意 Agent 系统 |
+| Web Viewer 会不会影响首跑？ | 默认会尽力启动 Web Viewer；失败不阻断讨论，可看 `web_status` / `web_error` |
 | 输出是什么？ | 讨论状态、convergence score、共识/分歧、结构化 summary 与结论 |
 
 ## 🧭 什么时候用它？
@@ -62,13 +63,13 @@ pip install agent-roundtable
 
 ### 安装
 
-PyPI 发布后，请使用正式包名安装：
+正式包名是 `agent-roundtable`：
 
 ```bash
 pip install agent-roundtable
 ```
 
-发布前或需要验证当前分支时，可从源码安装：
+需要验证当前分支或本地修改时，可从源码安装：
 
 ```bash
 git clone https://github.com/MoyuFamily/agent-roundtable.git
@@ -117,6 +118,11 @@ result = core.create_discussion(
     max_rounds=3,
 )
 disc_id = result["discussion_id"]
+if result["web_status"] == "ready":
+    print(f"Web Viewer: {result['web_url']}")
+elif result["web_status"] == "failed":
+    print(result["web_error"])
+    print(result["web_help"])
 
 # 2. 参与者发言
 core.speak(disc_id, "backend_architect", "PostgreSQL 的 JSON 和事务能力更适合复杂业务建模。")
@@ -134,6 +140,16 @@ print(summary["structured_summary"])
 # 5. 结束讨论
 core.end_discussion(disc_id, conclusion="选择 PostgreSQL，优先支持复杂数据结构和长期扩展。")
 ```
+
+### 默认 Web Viewer
+
+`create_discussion()` 默认 `web=True`，会尽力启动本地 Web Viewer，这是 Roundtable 的核心体验之一。核心讨论创建优先成功；如果本机没有 Node.js、npm 依赖安装失败或端口不可用，返回值会包含：
+
+- `web_status`: `"ready"`、`"failed"` 或 `"disabled"`
+- `web_url`: Viewer 地址，失败时为 `None`
+- `web_error` / `web_help`: 可读诊断和修复提示
+
+Web Viewer 需要 Node.js 18+。Roundtable 会复用已在线服务、直接启动 `node server.mjs`，并在缺少本地 npm 依赖时尝试 `npm install --omit=dev`；不会自动安装 Node 本体，也不会无提示安装全局 PM2。自动安装会跳过 Puppeteer 的 Chromium 下载；Markdown 导出始终可用，PDF 导出缺浏览器时会返回清晰诊断。
 
 ### 错误安全模式（推荐用于生产环境）
 
@@ -174,6 +190,7 @@ result = rt.init(
 | 📊 **收敛追踪** | 自动计算每轮共识度（convergence score），量化讨论进展 |
 | 🧾 **结构化总结** | 输出共识、分歧、决策建议和结论，适合沉淀会议记录与决策文档 |
 | 🔌 **框架无关** | 独立运行，或通过 adapter 接入任何 Agent 框架 |
+| 🖥️ **默认 Web Viewer** | 创建讨论时默认尽力启动实时 Viewer，失败不阻断核心讨论 |
 | 🔔 **实时通知** | 讨论事件推送到飞书、Slack 或任意消息平台 |
 | 🛡️ **错误安全** | Generic adapter 所有方法返回 dict，永不抛异常 |
 | 🗂️ **SQLite 持久化** | 讨论记录持久存储，随时回溯 |
@@ -226,7 +243,6 @@ src/roundtable/
 
 ## 🛣️ 后续计划
 
-- 发布 `agent-roundtable` 到 PyPI
 - 补充 CLI 示例和端到端 Demo
 - 增强结构化总结模板
 - 补充更多 Agent 框架 adapter

@@ -35,6 +35,7 @@ When you let multiple AI agents discuss a complex problem, the hard part is not 
 | Is the discussion converging? | Automatically track convergence score, consensus points, and disagreement points |
 | How are conclusions captured? | Generate structured summaries for meeting notes, PRDs, architecture reviews, and decision records |
 | Can it integrate with existing agent systems? | Framework-agnostic; integrate via adapters with Hermes Agent or any agent framework |
+| What about the Web Viewer? | It starts by default on a best-effort path; failures do not block discussion creation |
 | Is it heavy to run? | The core library has zero external dependencies and uses only Python stdlib + SQLite |
 
 **In one sentence: `agent-roundtable` is a Python package embeddable in any AI agent system; you pick the participants and define the topic, and it manages multi-agent roundtable discussions, ordered speaking, consensus/disagreement tracking, and structured meeting notes.**
@@ -51,13 +52,13 @@ When you let multiple AI agents discuss a complex problem, the hard part is not 
 
 ### Installation
 
-The official PyPI package name is planned as `agent-roundtable`. After release, install it with:
+The official PyPI package name is `agent-roundtable`:
 
 ```bash
 pip install agent-roundtable
 ```
 
-Before the PyPI release, use source installation for local validation:
+Use source installation when you need to validate the current branch or local changes:
 
 ```bash
 git clone https://github.com/MoyuFamily/agent-roundtable.git
@@ -98,6 +99,11 @@ result = core.create_discussion(
     max_rounds=3,
 )
 disc_id = result["discussion_id"]
+if result["web_status"] == "ready":
+    print(f"Web Viewer: {result['web_url']}")
+elif result["web_status"] == "failed":
+    print(result["web_error"])
+    print(result["web_help"])
 
 # 2. Participants speak
 core.speak(disc_id, "backend_architect", "PostgreSQL has stronger JSON and transaction support for complex business modeling.")
@@ -115,6 +121,16 @@ print(summary["structured_summary"])
 # 5. End discussion
 core.end_discussion(disc_id, conclusion="Choose PostgreSQL for complex data modeling and long-term extensibility.")
 ```
+
+### Default Web Viewer
+
+`create_discussion()` defaults to `web=True` and starts the local Web Viewer on a best-effort path. Discussion creation takes priority; if Node.js is missing, npm dependency installation fails, or the port is unavailable, the result includes:
+
+- `web_status`: `"ready"`, `"failed"`, or `"disabled"`
+- `web_url`: viewer URL, or `None` on failure
+- `web_error` / `web_help`: readable diagnostics and next steps
+
+The Web Viewer needs Node.js 18+. Roundtable reuses an existing healthy server, tries `node server.mjs`, and may run local `npm install --omit=dev` for missing web dependencies. It does not install Node itself or silently install global PM2. Automatic install skips Puppeteer's Chromium download; Markdown export always works, while PDF export returns a clear diagnostic when a browser is unavailable.
 
 ### Error-Safe Mode (Recommended for Production)
 
@@ -155,6 +171,7 @@ result = rt.init(
 | 📊 **Convergence Tracking** | Auto-calculate consensus score per round to quantify discussion progress |
 | 🧾 **Structured Summaries** | Output consensus, disagreements, recommendations, and conclusions for meeting notes and decision records |
 | 🔌 **Framework Agnostic** | Run standalone or integrate with any agent framework via adapters |
+| 🖥️ **Default Web Viewer** | Best-effort real-time viewer on discussion creation; viewer failures do not block core discussions |
 | 🔔 **Real-time Notifications** | Push discussion events to Feishu, Slack, or any messaging platform |
 | 🛡️ **Error-Safe** | Generic adapter returns dict for all methods and never throws exceptions |
 | 🗂️ **SQLite Persistence** | Persist discussion records for later review and traceability |
@@ -189,7 +206,6 @@ src/roundtable/
 
 ## 🛣️ Roadmap
 
-- Publish PyPI package name: `agent-roundtable` (install with `pip install agent-roundtable`)
 - Add CLI examples and end-to-end demos
 - Improve structured summary templates
 - Add adapters for more agent frameworks

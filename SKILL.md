@@ -24,7 +24,7 @@ metadata:
 
 ## Publishing to skill hubs
 
-When preparing Roundtable for Hermes Skill Hub or OpenClaw/ClawHub, use the release checklist in `src/skills/references/skill-hub-publishing.md`. Key reminders: keep `src/skills/` self-contained and free of private team data, include both Hermes and OpenClaw metadata blocks in `SKILL.md`, check `hermes skills publish --help`, `clawhub publish --help`, and `clawhub whoami`, and gate real publishing on user confirmation of target account/repo.
+Before publishing to Hermes Skill Hub or OpenClaw/ClawHub, run the repository release preflight and keep the skill package self-contained. Do not include repository-only notes, incident writeups, private chat transcripts, or secret-handling history in the public skill bundle. Confirm the target account/repository before running a real publish.
 
 ## Overview
 
@@ -367,28 +367,17 @@ resp = requests.get('https://open.feishu.cn/open-apis/im/v1/messages',
 
 ## Web Viewer (default ON)
 
-`run_demo()` has `web: bool = True` by default (changed from `False`). This means demo discussions automatically start a web viewer at `http://localhost:8199`. The viewer uses PM2 to manage an Express subprocess, fcntl for file locking, and nanoid for token generation.
+`roundtable_init` / `create_discussion` default to `web=True`. The Web Viewer is best-effort: discussion creation should still succeed when Node.js is missing, npm dependencies cannot be installed, or the viewer port is unavailable.
 
-**Browser auto-open**: Starting a discussion with `web=True` should automatically open the browser via `subprocess.run(["open", web_url])` in the Hermes adapter's `_handle_init`. This is an **adapter-level side-effect**, not a core-level one — the core library returns the URL but leaves UX actions to the adapter. The generic adapter intentionally does NOT auto-open (headless environments). If you need to customize browser behavior (e.g., open in a specific browser), modify `_handle_init` in `adapters/hermes.py`.
+Returned fields:
 
-**⚠️ Pitfall: Browser opens at END instead of START (2026-05-23)** — Boss reported the browser doesn't open when the discussion begins; it only opens after the discussion concludes (or manually). The `_handle_init` code has the `subprocess.run(["open", web_url])` call, but it may not fire reliably in all execution paths. **Diagnosis checklist**: (1) Verify `_handle_init` actually reaches the `subprocess.run` line (add logging) (2) Check if the `web_url` variable is correctly populated from `publisher.start()` return (3) Confirm the `open` command runs in the correct subprocess context (may need `shell=False` with list args on macOS). **See also**: Bug task `t_xxxxxxxx` for the specific fix.
+- `web_status`: `ready`, `failed`, or `disabled`
+- `web_url`: viewer URL when ready, otherwise `None`
+- `web_error` and `web_help`: clear diagnostics for viewer startup failures
 
-**⚠️ Pitfall: WebViewer real-time updates broken on macOS (2026-05-23)** — Boss reported that the WebViewer doesn't show new speeches in real-time; the browser must be force-refreshed to see updates. **Root cause**: The Express server (`server.mjs`) uses `fs.watch(DISCUSSION_PATH, ...)` to detect `discussion.json` changes and broadcast via SSE. But Python's `WebPublisher` uses atomic write: `write .json.tmp → os.rename()`. On macOS, `fs.watch()` on a file loses tracking after `rename()` replaces the inode — the watcher stays on the old inode, never sees the new file's changes. **Fix**: Change `fs.watch` to watch the **directory** instead of the file, then filter by filename:
-```javascript
-// Wrong — breaks on atomic rename:
-watch(DISCUSSION_PATH, () => { ... });
+Startup order: reuse a healthy local viewer, start `node server.mjs`, optionally install local npm dependencies with `npm install --omit=dev`, then retry. PM2 is optional only. Roundtable never installs Node itself and never performs silent global npm installs.
 
-// Correct — watches directory, catches rename:
-const dir = require("path").dirname(DISCUSSION_PATH);
-const filename = require("path").basename(DISCUSSION_PATH);
-watch(dir, (eventType, changedFilename) => {
-  if (changedFilename !== filename) return;
-  // ... debounce + broadcast logic unchanged
-});
-```
-**Alternative**: Add server-side polling fallback (`setInterval` + mtime check) as defense-in-depth. **See also**: Bug task `t_xxxxxxxx` for the specific fix.
-
-*Note: Tool calls executed natively on the platform handle environment and browser integration automatically.*
+Browser opening is adapter-level UX. Core and generic APIs return the URL and status fields; headless environments should read those fields instead of assuming a browser window exists.
 
 ### Iframe Embed Mode
 
@@ -434,7 +423,7 @@ Each round is evaluated for convergence:
 
 ## Conclusion Document Format
 
-The format below works for general discussions. For **product/design/dev discussions aimed at producing a buildable specification**, use the decision-oriented format instead — see `src/skills/references/web-viewer-discussion-example.md` for the full pattern (MVP scope, tech architecture, acceptance criteria, risk assessment, design deliverables, action items).
+The format below works for general discussions. For **product/design/dev discussions aimed at producing a buildable specification**, prefer a decision-oriented format with MVP scope, technical architecture, acceptance criteria, risk assessment, design deliverables, and action items.
 
 ```markdown
 # Roundtable Conclusion: [Topic]
@@ -493,24 +482,3 @@ kanban_comment(task_id="t_xxx", body="Roundtable conclusion: {conclusion_path}")
 9. **WebViewer integration** — Setting `web=True` on `roundtable_init` automatically starts the WebViewer. It is supported across processes.
 10. **Notifications config** — Ensure you pass the `notifications` configuration parameter to `roundtable_init` if you want events to sync to messaging groups (e.g. Feishu). The adapter handles `send_fn` wiring automatically.
 11. **Developer Reference** — Maintainer-only implementation documentation exists separately and is not part of the agent execution workflow.
-
-## Test Results
-
-See `src/skills/references/test-results-2026-05-20.md` for the first functional test results, including bugs found and product acceptance report.
-
-## Open-Source Release
-
-See `src/skills/references/open-source-readiness.md` for the pre-release checklist (LICENSE, cleanup, adapter gaps, test isolation).
-
-## Working Examples
-
-- `src/skills/references/opc-experience-discussion-example.md` — 4-round, 4-participant discussion with timing data and workflow
-- `src/skills/references/notifications-example.md` — roundtable with real-time push notifications to Feishu
-- `src/skills/references/release-planning-discussion.md` — 3-round product/design/dev discussion for open-source release planning
-- `src/skills/references/ai-relay-open-source-discussion.md` — 3-round discussion with standard tool workflow, notifications, and conclusion doc → 5/29 release plan
-- `src/skills/references/web-viewer-discussion-example.md` — Decision-oriented conclusion doc pattern: MVP scope, tech architecture, acceptance criteria, risk assessment, design deliverables. Use this format when the discussion goal is to produce a buildable specification.
-- `src/skills/references/post-discussion-kanban-dispatch.md` — After discussion concludes, create kanban tasks grouped by owner, subscribe notifications, and dispatch to team via Feishu groups.
-
-## Open-Source Release Checklist
-
-See `src/skills/references/open-source-readiness-checklist.md` for the pre-release audit: missing LICENSE, Hermes-specific files to separate, build-backend fix, .gitignore, internal docs to remove, generic adapter gaps, and target package structure.

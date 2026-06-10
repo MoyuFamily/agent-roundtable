@@ -48,7 +48,7 @@ from roundtable.orchestrator import FederatedOrchestrator, ManagedOrchestrator
 from roundtable.web_publisher import WebPublisher
 from roundtable.webhook import WebhookSender
 
-__version__ = "0.4.0"
+__version__ = "2.1.0"
 
 # ---------------------------------------------------------------------------
 # Adapter registry

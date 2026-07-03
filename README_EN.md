@@ -105,20 +105,23 @@ elif result["web_status"] == "failed":
     print(result["web_error"])
     print(result["web_help"])
 
-# 2. Participants speak
+# 2. Coordinator opening statement (round 0 is reserved for coordinator)
+core.speak(disc_id, "coordinator", "Opening: let's discuss the database choice.")
+
+# 3. Participants speak
 core.speak(disc_id, "backend_architect", "PostgreSQL has stronger JSON and transaction support for complex business modeling.")
 core.speak(disc_id, "ops_engineer", "MySQL has more mature operational experience and tooling in our team.")
 core.speak(disc_id, "product_manager", "From an iteration perspective, we need room for future feature expansion.")
 
-# 3. Check discussion status with convergence score
+# 4. Check discussion status with convergence score
 status = core.status(disc_id)
 print(f"Convergence: {status['convergence_score']}")
 
-# 4. Generate structured summary
+# 5. Generate structured summary
 summary = core.summarize(disc_id, compact=True)
 print(summary["structured_summary"])
 
-# 5. End discussion
+# 6. End discussion
 core.end_discussion(disc_id, conclusion="Choose PostgreSQL for complex data modeling and long-term extensibility.")
 ```
 
@@ -199,17 +202,19 @@ src/roundtable/
 ├── models.py         # Data models (dataclass)
 ├── notify.py         # Notification dispatch
 ├── exceptions.py     # Exception definitions
-└── adapters/
-    ├── hermes.py     # Hermes Agent adapter
-    └── generic.py    # Generic Python API (error-safe)
+├── web_publisher.py  # Local Web Viewer publisher
+├── adapters/         # Hermes / generic adapters
+├── mcp/              # MCP server, tools, and cross-platform bridges
+├── web/              # Web Viewer static assets and Node server
+└── templates/        # Discussion templates
 ```
 
 ## 🛣️ Roadmap
 
-- Add CLI examples and end-to-end demos
+- Add more CLI examples and end-to-end usage docs
 - Improve structured summary templates
 - Add adapters for more agent frameworks
-- Add discussion result export
+- Continue improving Web Viewer sharing, embedding, and export flows
 
 ## 🤝 Contributing
 
@@ -223,8 +228,8 @@ src/roundtable/
 
 - Python 3.10+, use type hints
 - Zero external dependencies in the core library
-- All exceptions inherit `RoundtableError`
-- All public methods return JSON-serializable dict
+- Custom business exceptions inherit `RoundtableError`; validation and environment errors may use standard exceptions
+- High-level Core / adapter methods return JSON-serializable dict
 
 ## 👥 Team
 

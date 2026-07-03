@@ -81,7 +81,7 @@ pip install -e .
 
 ### 跨平台 MCP 模式
 
-让 Claude Code、Cursor、Windsurf、Codex、WorkBuddy 等不同平台的 agent 加入同一个圆桌：
+让 Claude Code、Cursor、Windsurf 等 MCP-capable agent 加入同一个圆桌：
 
 ```bash
 pip install "agent-roundtable[mcp]"
@@ -90,13 +90,13 @@ python3 -m roundtable.skills.mcp-roundtable.install --platform=auto
 
 安装脚本会把 MCP server 的 `command` 写成当前 Python 解释器路径，适配 venv 和没有 `python` 命令的 macOS/Linux 环境。手动配置时建议优先使用 `python3`。
 
-任意 agent 可以做协调者并通过 invitation 把其他 agent 拉进来。Codex / WorkBuddy 没有原生 MCP，推荐直接用内置 Codex 入口启动 HTTP 桥：
+任意 agent 可以做协调者并通过 invitation 把其他 agent 拉进来。Codex 等没有原生 MCP 的平台，可用内置 Codex 入口启动 HTTP 桥：
 
 ```bash
 python3 -m roundtable.codex
 ```
 
-也可以在 Python 里手动启动 `roundtable.mcp.bridges.codex.CodexBridge` 或 `roundtable.mcp.bridges.GenericBridge`。详见 [docs/architecture.md](docs/architecture.md)。
+也可以在 Python 里手动启动 `roundtable.mcp.bridges.codex.CodexBridge` 或 `roundtable.mcp.bridges.GenericBridge`，给 WorkBuddy 等 HTTP-capable 平台接入。详见 [docs/architecture.md](docs/architecture.md)。
 
 ### 基本用法
 
@@ -124,20 +124,23 @@ elif result["web_status"] == "failed":
     print(result["web_error"])
     print(result["web_help"])
 
-# 2. 参与者发言
+# 2. 协调者开场（round 0 保留给 coordinator）
+core.speak(disc_id, "coordinator", "开场：围绕数据库选型展开圆桌讨论。")
+
+# 3. 参与者发言
 core.speak(disc_id, "backend_architect", "PostgreSQL 的 JSON 和事务能力更适合复杂业务建模。")
 core.speak(disc_id, "ops_engineer", "MySQL 运维经验和工具链更成熟，团队上手成本低。")
 core.speak(disc_id, "product_manager", "从迭代速度看，我们需要优先保证未来功能扩展能力。")
 
-# 3. 查看讨论状态（含收敛度）
+# 4. 查看讨论状态（含收敛度）
 status = core.status(disc_id)
 print(f"Convergence: {status['convergence_score']}")
 
-# 4. 生成结构化总结
+# 5. 生成结构化总结
 summary = core.summarize(disc_id, compact=True)
 print(summary["structured_summary"])
 
-# 5. 结束讨论
+# 6. 结束讨论
 core.end_discussion(disc_id, conclusion="选择 PostgreSQL，优先支持复杂数据结构和长期扩展。")
 ```
 
@@ -218,9 +221,11 @@ src/roundtable/
 ├── models.py         # 数据模型（dataclass）
 ├── notify.py         # 通知分发
 ├── exceptions.py     # 异常定义
-└── adapters/
-    ├── hermes.py     # Hermes Agent 适配器
-    └── generic.py    # 通用 Python API（错误安全）
+├── web_publisher.py  # 本地 Web Viewer 发布器
+├── adapters/         # Hermes / generic 等适配器
+├── mcp/              # MCP server、tools 与跨平台 bridge
+├── web/              # Web Viewer 静态资源与 Node server
+└── templates/        # 讨论模板
 ```
 
 ### 🖼️ 嵌入分享（iframe Embed）
@@ -243,10 +248,10 @@ src/roundtable/
 
 ## 🛣️ 后续计划
 
-- 补充 CLI 示例和端到端 Demo
+- 补充更多 CLI 示例和端到端使用文档
 - 增强结构化总结模板
 - 补充更多 Agent 框架 adapter
-- 增加讨论结果导出能力
+- 持续打磨 Web Viewer 分享、嵌入和导出体验
 
 ## 🤝 贡献
 
@@ -260,8 +265,8 @@ src/roundtable/
 
 - Python 3.10+，使用 type hints
 - 核心库零外部依赖（stdlib only）
-- 所有异常继承 `RoundtableError`
-- 所有公共方法返回 JSON-serializable dict
+- 自定义业务异常继承 `RoundtableError`；校验和环境错误可能使用标准异常
+- 高层 Core / adapter 方法返回 JSON-serializable dict
 
 ## 👥 团队
 

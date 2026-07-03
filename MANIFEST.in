@@ -19,6 +19,7 @@ prune .github
 prune .hermes
 prune .venv
 prune node_modules
+prune src/roundtable/web/node_modules
 prune dist
 prune build
 

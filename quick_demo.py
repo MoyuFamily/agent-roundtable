@@ -9,9 +9,17 @@ This demonstrates the complete Roundtable workflow:
   3. Generate conclusion with consensus/disagreement summary
 """
 
-from roundtable import RoundtableCore
+import os
+import tempfile
+from pathlib import Path
 
-core = RoundtableCore()
+from roundtable import RoundtableCore, RoundtableDB
+
+db_path = os.environ.get("ROUNDTABLE_DB")
+if db_path is None:
+    db_path = str(Path(tempfile.gettempdir()) / "roundtable-demo.db")
+
+core = RoundtableCore(RoundtableDB(db_path))
 result = core.run_demo()
 
 print("\nDemo complete")

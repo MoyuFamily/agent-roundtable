@@ -121,6 +121,38 @@ pass "Build passed"
 run "Twine check" "$PYTHON_BIN" -m twine check dist/*
 
 echo ""
+echo "▶ Checking distribution hygiene..."
+if "$PYTHON_BIN" - <<'PY'
+import sys
+from pathlib import Path
+from zipfile import ZipFile
+
+wheel_paths = list(Path("dist").glob("*.whl"))
+if not wheel_paths:
+    raise SystemExit("No wheel found in dist/")
+
+bad_entries: list[str] = []
+for wheel_path in wheel_paths:
+    with ZipFile(wheel_path) as wheel:
+        bad_entries.extend(
+            name
+            for name in wheel.namelist()
+            if "/node_modules/" in name or name.endswith("/node_modules")
+        )
+
+if bad_entries:
+    print("Wheel includes node_modules entries, for example:", file=sys.stderr)
+    for name in bad_entries[:10]:
+        print(f"  {name}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+then
+  pass "Distribution hygiene check passed"
+else
+  fail "Distribution hygiene check failed"
+fi
+
+echo ""
 echo "▶ Wheel install smoke test..."
 SMOKE_DIR=$(mktemp -d)
 "$PYTHON_BIN" -m venv "$SMOKE_DIR/venv"

@@ -156,6 +156,8 @@ core.end_discussion(disc_id, conclusion="建议选择 PostgreSQL；待验证迁�
 
 Web Viewer 需要 Node.js 18+。Roundtable 会复用已在线服务、直接启动 `node server.mjs`，并在缺少本地 npm 依赖时尝试 `npm install --omit=dev`；不会自动安装 Node 本体，也不会无提示安装全局 PM2。自动安装会跳过 Puppeteer 的 Chromium 下载；Markdown 导出始终可用，PDF 导出缺浏览器时会返回清晰诊断。
 
+PDF 可通过 `PUPPETEER_EXECUTABLE_PATH` 指定已有 Chrome/Chromium；导出进程按请求隔离，正文中的 HTML 和远程图片不会执行或加载。配置和验收方式见 [技术可靠性说明](docs/TECHNICAL_RELIABILITY.md#pdf-导出)。
+
 ### 错误安全模式（推荐用于生产环境）
 
 ```python

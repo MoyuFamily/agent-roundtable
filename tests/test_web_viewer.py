@@ -11,9 +11,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import socket
 import subprocess
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -22,21 +26,19 @@ import requests
 SERVER_SCRIPT = Path(__file__).resolve().parent.parent / "src" / "roundtable" / "web" / "server.mjs"
 
 
-def _can_generate_pdf() -> bool:
-    """Check if md-to-pdf can generate a PDF (needs Chromium/Puppeteer).
-
-    CI runners have Chrome installed but Puppeteer's bundled Chromium
-    often fails due to missing system libs / sandbox.  Skip there.
-    """
-    import os
-    import shutil
-
-    if os.environ.get("CI"):
-        return False
-    return shutil.which("npx") is not None
-
-
-_has_pdf_support = _can_generate_pdf()
+@pytest.fixture
+def pdf_support():
+    """Only skip missing prerequisites; runtime export failures are test failures."""
+    result = subprocess.run(
+        ["node", str(SERVER_SCRIPT.with_name("pdf-worker.mjs")), "--check"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if result.returncode:
+        if os.environ.get("ROUNDTABLE_REQUIRE_PDF") == "1":
+            pytest.fail(f"Required PDF dependency unavailable: {result.stderr}")
+        pytest.skip(f"PDF dependency unavailable: {result.stderr.strip()}")
 
 
 def _find_free_port() -> int:
@@ -116,13 +118,14 @@ def discussion_dir(tmp_path):
 
 
 @pytest.fixture
-def server(discussion_dir):
+def server(discussion_dir, request):
     """Start the web server and yield the base URL."""
     port = _find_free_port()
     proc = subprocess.Popen(
         ["node", str(SERVER_SCRIPT), "--port", str(port), "--data-dir", str(discussion_dir)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env={**os.environ, "TMPDIR": str(discussion_dir), **getattr(request, "param", {})},
     )
     # Wait for server to start
     base = f"http://127.0.0.1:{port}"
@@ -408,24 +411,19 @@ class TestExportMarkdown:
 
 
 class TestExportPDF:
-    @pytest.mark.skipif(not _has_pdf_support, reason="md-to-pdf not available (needs Chromium)")
-    def test_export_pdf_success(self, server):
+    def test_export_pdf_success(self, server, pdf_support):
         base, _, _ = server
         resp = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=90)
-        if resp.status_code == 503:
-            pytest.skip(f"PDF export unavailable in this environment: {resp.json().get('detail')}")
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         ct = resp.headers.get("content-type", "")
         assert "pdf" in ct
         # PDF should start with %PDF
         assert resp.content[:4] == b"%PDF"
 
-    @pytest.mark.skipif(not _has_pdf_support, reason="md-to-pdf not available (needs Chromium)")
-    def test_export_pdf_filename(self, server):
+    def test_export_pdf_filename(self, server, pdf_support):
         base, _, _ = server
         resp = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=90)
-        if resp.status_code == 503:
-            pytest.skip(f"PDF export unavailable in this environment: {resp.json().get('detail')}")
+        assert resp.status_code == 200, resp.text
         cd = resp.headers.get("content-disposition", "")
         assert "Test_Discussion_Topic" in cd or "discussion" in cd
 
@@ -438,6 +436,84 @@ class TestExportPDF:
         base, _, _ = pw_server
         resp = requests.get(f"{base}/api/pw_token_456/export/pdf", timeout=5)
         assert resp.status_code == 401
+
+    def test_concurrent_exports_use_separate_files_and_cleanup(self, server, pdf_support):
+        base, _, directory = server
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(
+                executor.map(lambda _: requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=90), range(2))
+            )
+        for response in results:
+            assert response.status_code == 200, response.text
+            assert response.content.startswith(b"%PDF")
+        assert not list(directory.glob("roundtable-pdf-*"))
+        assert not list((directory / "test_disc").glob("*.tmp.*"))
+
+    def test_pdf_treats_html_and_remote_images_as_untrusted_text(self, server, pdf_support):
+        base, _, directory = server
+        hits = []
+
+        class Probe(BaseHTTPRequestHandler):
+            def do_GET(self):
+                hits.append(self.path)
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        probe = ThreadingHTTPServer(("127.0.0.1", 0), Probe)
+        thread = threading.Thread(target=probe.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{probe.server_port}/unexpected"
+            path = directory / "test_disc" / "discussion.json"
+            data = json.loads(path.read_text())
+            data["speeches"][0]["content"] = (
+                f"![remote image]({url})\n<img src='{url}'>\n"
+                f"<script>fetch('{url}')</script>\n<iframe src='{url}'></iframe>"
+            )
+            path.write_text(json.dumps(data))
+            response = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=90)
+            assert response.status_code == 200, response.text
+            assert hits == []
+        finally:
+            probe.shutdown()
+            probe.server_close()
+            thread.join(timeout=2)
+
+    @pytest.mark.parametrize("server", [{"ROUNDTABLE_PDF_TIMEOUT_MS": "1"}], indirect=True)
+    def test_pdf_timeout_cleans_worker_and_files(self, server):
+        base, _, directory = server
+        response = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=10)
+        assert response.status_code == 503
+        assert "timed out" in response.json()["detail"]
+        assert not list(directory.glob("roundtable-pdf-*"))
+        assert requests.get(f"{base}/api/test_token_abc123/export/markdown", timeout=5).status_code == 200
+
+    def test_aborted_export_cleans_temporary_directory(self, server, pdf_support):
+        base, port, directory = server
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+            client.sendall(
+                b"GET /api/test_token_abc123/export/pdf HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+            )
+            deadline = time.monotonic() + 5
+            while not list(directory.glob("roundtable-pdf-*")) and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert list(directory.glob("roundtable-pdf-*"))
+        deadline = time.monotonic() + 5
+        while list(directory.glob("roundtable-pdf-*")) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not list(directory.glob("roundtable-pdf-*"))
+        assert requests.get(f"{base}/api/test_token_abc123/export/markdown", timeout=5).status_code == 200
+
+    @pytest.mark.parametrize("server", [{"PUPPETEER_EXECUTABLE_PATH": "/missing/roundtable/chromium"}], indirect=True)
+    def test_missing_browser_reports_unavailable_without_hiding_other_failures(self, server):
+        base, _, directory = server
+        response = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=10)
+        assert response.status_code == 503
+        assert response.json()["error"] == "PDF export unavailable"
+        assert not list(directory.glob("roundtable-pdf-*"))
 
 
 # ---------------------------------------------------------------------------

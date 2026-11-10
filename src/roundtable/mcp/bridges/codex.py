@@ -6,12 +6,13 @@ import json
 import logging
 import secrets
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
 from roundtable.core import RoundtableCore
 from roundtable.db import RoundtableDB
+from roundtable.exceptions import DiscussionNotFoundError
 from roundtable.mcp.bridges.base import AgentBridge
 from roundtable.mcp.tools import handle_tool_call
 
@@ -51,7 +52,7 @@ class CodexBridge(AgentBridge):
         self._auth_token = auth_token
         self._db = RoundtableDB(db_path=db_path)
         self._core = RoundtableCore(db=self._db)
-        self._server: HTTPServer | None = None
+        self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
     @property
@@ -92,7 +93,7 @@ class CodexBridge(AgentBridge):
             conn.close()
 
         handler = _make_handler(self)
-        self._server = HTTPServer((self._host, self._port), handler)
+        self._server = ThreadingHTTPServer((self._host, self._port), handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         logger.info("Codex bridge started on http://%s:%d", self._host, self._port)
@@ -125,6 +126,8 @@ def _make_handler(bridge: CodexBridge) -> type[BaseHTTPRequestHandler]:
     class CodexBridgeHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             path = urlparse(self.path).path
+            if path != "/health" and not self._require_auth():
+                return
 
             if path == "/health":
                 conn = db.connect()
@@ -143,8 +146,6 @@ def _make_handler(bridge: CodexBridge) -> type[BaseHTTPRequestHandler]:
                     conn.close()
 
             elif path == "/inbox":
-                if not self._require_auth():
-                    return
                 conn = db.connect()
                 try:
                     db.touch_agent(conn, agent_id)
@@ -157,7 +158,12 @@ def _make_handler(bridge: CodexBridge) -> type[BaseHTTPRequestHandler]:
 
             elif path.startswith("/status/"):
                 disc_id = path[len("/status/") :]
-                self._respond(200, core.status(disc_id))
+                try:
+                    result = core.status(disc_id)
+                except DiscussionNotFoundError as exc:
+                    self._respond(404, {"error": str(exc)})
+                else:
+                    self._respond(200, result)
 
             else:
                 self._respond(404, {"error": "not found", "path": path})

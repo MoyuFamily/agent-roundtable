@@ -1171,6 +1171,44 @@ class RoundtableDB:
             "invited_at": now,
         }
 
+    def accept_invitation(self, conn: sqlite3.Connection, discussion_id: str, agent_id: str) -> dict[str, Any]:
+        """Commit acceptance and membership together, including safe retries."""
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            invitations = self.get_invitations(conn, discussion_id=discussion_id, agent_id=agent_id)
+            if not invitations or invitations[0]["status"] not in {"pending", "accepted"}:
+                conn.execute("COMMIT")
+                return {"error": "No pending or accepted invitation found"}
+            invitation = invitations[0]
+            already_responded = invitation["status"] == "accepted"
+            members = {p.participant for p in self.get_participants(conn, discussion_id)}
+            if not already_responded or agent_id not in members:
+                disc = self.get_discussion(conn, discussion_id)
+                if not disc or disc.status not in {"assembling", "active"}:
+                    raise DiscussionNotActiveError("Cannot join a closed or missing discussion")
+                conn.execute(
+                    "UPDATE invitations SET status = 'accepted', responded_at = ? WHERE id = ?",
+                    (int(time.time()), invitation["id"]),
+                )
+                self.add_participant(
+                    conn,
+                    discussion_id,
+                    agent_id,
+                    role=invitation.get("role"),
+                    perspective=invitation.get("perspective"),
+                    display_name=agent_id,
+                )
+            conn.execute("COMMIT")
+            return {
+                "discussion_id": discussion_id,
+                "agent_id": agent_id,
+                "status": "accepted",
+                "already_responded": already_responded,
+            }
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
     def respond_invitation(
         self,
         conn: sqlite3.Connection,
@@ -1724,65 +1762,87 @@ class RoundtableDB:
         *,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        summon = self.get_summon(conn, discussion_id=discussion_id, agent_id=agent_id)
-        if not summon:
-            return {"error": "No summon found"}
-        if summon["status"] in {"accepted", "declined", "timeout"}:
-            return summon
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            summon = self.get_summon(conn, discussion_id=discussion_id, agent_id=agent_id)
+            if not summon:
+                conn.execute("COMMIT")
+                return {"error": "No summon found"}
+            if summon["status"] in {"accepted", "declined", "timeout"}:
+                conn.execute("COMMIT")
+                return summon
 
-        now = int(time.time())
-        new_status = "accepted" if accept else "declined"
-        conn.execute(
-            """UPDATE summons
-               SET status = ?, responded_at = ?,
-                   metadata = COALESCE(?, metadata)
-               WHERE id = ? AND status IN ('pending', 'delivered', 'failed')""",
-            (new_status, now, json.dumps(metadata) if metadata else None, summon["id"]),
-        )
-        if accept:
-            self.add_participant(
-                conn,
-                discussion_id,
-                agent_id,
-                role=summon.get("role"),
-                perspective=summon.get("perspective"),
-                display_name=agent_id,
-            )
-        self.record_summon_event(
-            conn,
-            summon_id=summon["id"],
-            dispatch_id=summon.get("dispatch_id"),
-            agent_id=agent_id,
-            event="summon.accepted" if accept else "summon.declined",
-            payload=metadata,
-        )
-        updated = self.get_summon(conn, summon["id"])
-        return updated or {"error": "Summon response could not be persisted"}
+            now = int(time.time())
+            expired = summon.get("expires_at") is not None and summon["expires_at"] <= now
+            if expired:
+                new_status = "timeout"
+            else:
+                new_status = "accepted" if accept else "declined"
+                if accept:
+                    disc = self.get_discussion(conn, discussion_id)
+                    if not disc or disc.status not in {"assembling", "active"}:
+                        raise DiscussionNotActiveError("Cannot join a closed or missing discussion")
+                    dispatch = self.get_dispatch(conn, summon["dispatch_id"]) if summon.get("dispatch_id") else None
+                    if dispatch and dispatch["status"] not in {"pending", "active"}:
+                        raise DiscussionNotActiveError("Cannot accept a summon from a closed dispatch")
 
-    def expire_summons(self, conn: sqlite3.Connection, now: int | None = None) -> int:
-        now = int(time.time()) if now is None else int(now)
-        rows = conn.execute(
-            """SELECT * FROM summons
-               WHERE expires_at IS NOT NULL
-                 AND expires_at <= ?
-                 AND status IN ('pending', 'delivered')""",
-            (now,),
-        ).fetchall()
-        for row in rows:
-            summon = self._row_to_summon(row)
             conn.execute(
-                "UPDATE summons SET status = 'timeout', responded_at = ? WHERE id = ?",
-                (now, summon["id"]),
+                """UPDATE summons SET status = ?, responded_at = ?, metadata = COALESCE(?, metadata)
+                   WHERE id = ? AND status IN ('pending', 'delivered', 'failed')""",
+                (new_status, now, json.dumps(metadata) if metadata else None, summon["id"]),
             )
+            if new_status == "accepted":
+                self.add_participant(
+                    conn,
+                    discussion_id,
+                    agent_id,
+                    role=summon.get("role"),
+                    perspective=summon.get("perspective"),
+                    display_name=agent_id,
+                )
             self.record_summon_event(
                 conn,
                 summon_id=summon["id"],
                 dispatch_id=summon.get("dispatch_id"),
-                agent_id=summon.get("agent_id"),
-                event="summon.timeout",
-                payload={"expires_at": summon.get("expires_at"), "now": now},
+                agent_id=agent_id,
+                event=f"summon.{new_status}",
+                payload={"expires_at": summon["expires_at"], "now": now} if expired else metadata,
             )
-        return len(rows)
+            updated = self.get_summon(conn, summon["id"])
+            conn.execute("COMMIT")
+            return updated or {"error": "Summon response could not be persisted"}
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def expire_summons(self, conn: sqlite3.Connection, now: int | None = None) -> int:
+        now = int(time.time()) if now is None else int(now)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            rows = conn.execute(
+                """SELECT * FROM summons WHERE expires_at IS NOT NULL AND expires_at <= ?
+                   AND status IN ('pending', 'delivered', 'failed')""",
+                (now,),
+            ).fetchall()
+            for row in rows:
+                summon = self._row_to_summon(row)
+                conn.execute(
+                    "UPDATE summons SET status = 'timeout', responded_at = ? WHERE id = ?",
+                    (now, summon["id"]),
+                )
+                self.record_summon_event(
+                    conn,
+                    summon_id=summon["id"],
+                    dispatch_id=summon.get("dispatch_id"),
+                    agent_id=summon.get("agent_id"),
+                    event="summon.timeout",
+                    payload={"expires_at": summon.get("expires_at"), "now": now},
+                )
+            conn.execute("COMMIT")
+            return len(rows)
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
     def record_summon_event(
         self,

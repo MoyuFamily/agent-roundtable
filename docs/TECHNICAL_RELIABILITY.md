@@ -41,3 +41,19 @@ python -m pytest tests/test_agent_runtime.py tests/mcp/test_cli_runtime.py -q
 脚本会启动两个实际客户端，验证 initialize、工具/资源/提示词发现、订阅通知中的 URI、取消订阅、消息确认、读取端重启和结论恢复。stdio 模式启动两个独立服务器进程，共享临时数据库。SSE 模式连接同一服务器。固定发言仅是协议测试数据，没有调用模型。
 
 CI 和 release preflight 在 wheel 安装到干净虚拟环境后，再运行同一脚本，不传 `--source-root`。服务器以 `python -I` 从临时目录启动，避免从 checkout 或 PYTHONPATH 导入源码而掩盖安装包缺失。核心包安装与 demo 检查保留，随后安装 wheel 的 mcp extra 并验证两种协议。源码依赖版本、模型运行和外部平台集成仍需各自验收。
+
+## 加入会议与并发请求
+
+接受邀请或召集时，状态变更和成员写入在同一事务提交；成员写入失败会回滚接受状态。召集到期检查直接发生在响应路径，不依赖此前已经轮询状态。已关闭会议拒绝新成员，已成功加入的重复请求可幂等返回。接受、拒绝和过期扫描不会相互覆盖终态。
+
+HTTP Bridge 使用并发请求处理；MCP 在工作线程执行同步工具。一个客户端等待轮次时，另一个客户端仍能提交发言。`wait_seconds` 限定为0–30秒，`waited` 返回单调时钟计算的实际等待时间；到期后宿主可再次查询。
+
+配置 auth_token 的 CodexBridge/GenericBridge 对 `/agent`、`/inbox`、`/status/...` 和写入端点统一验证令牌；`/health` 保留公开探测。未配置令牌的本机模式维持原行为。不存在的会议状态返回 JSON 404。
+
+## PDF 导出
+
+Viewer 的 pdf-worker.mjs 从安装位置加载 md-to-pdf，导出时不运行 npx 或下载依赖。每个请求使用独立临时目录和渲染进程，默认60秒超时（可通过 `ROUNDTABLE_PDF_TIMEOUT_MS` 设置，最大120秒）；请求断开或超时会终止渲染并清理文件。在 POSIX 平台同时清理渲染进程组中的浏览器子进程。
+
+原始 HTML、脚本和远程图片作为文本处理，不在导出浏览器中执行或请求；代码块、表格和正文仍按 Markdown 排版。可用 `PUPPETEER_EXECUTABLE_PATH` 指定 Chrome/Chromium 可执行文件。受控 CI 环境需要关闭浏览器沙箱时显式设置 `ROUNDTABLE_PDF_NO_SANDBOX=1`，默认不关闭。
+
+PDF 测试只在预检发现依赖缺失时允许跳过，运行过程中返回503视为失败。设置 `ROUNDTABLE_REQUIRE_PDF=1` 后，缺少依赖也会失败；CI 采用该模式。验证覆盖实际渲染、并发导出、超时清理、未授权导出拒绝及阻止正文中的远程资源请求。

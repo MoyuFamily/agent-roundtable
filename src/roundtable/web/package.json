@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check server.mjs && node --check viewer.js"
+    "check": "node --check server.mjs && node --check viewer.js && node --check pdf-worker.mjs"
   },
   "engines": {
     "node": ">=18"

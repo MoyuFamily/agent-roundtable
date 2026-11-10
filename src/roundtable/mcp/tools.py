@@ -7,6 +7,7 @@ optional `mcp` SDK. The server module wraps them into `mcp.types.Tool`.
 from __future__ import annotations
 
 import json
+import math
 import time
 import urllib.error
 import urllib.request
@@ -386,6 +387,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "wait_seconds": {
                     "type": "number",
                     "default": 0,
+                    "minimum": 0,
+                    "maximum": 30,
                     "description": "Optional max seconds to poll until your turn before returning",
                 },
                 "poll_interval": {
@@ -532,20 +535,7 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
             )
 
         elif name == "roundtable_accept_invite":
-            inv = db.get_invitations(conn, agent_id=arguments["agent_id"], discussion_id=arguments["discussion_id"])
-            if inv and inv[0]["status"] == "accepted":
-                # Retry after a crash between acceptance and inbox acknowledgement.
-                resp = {
-                    "discussion_id": arguments["discussion_id"],
-                    "agent_id": arguments["agent_id"],
-                    "status": "accepted",
-                    "already_responded": True,
-                }
-            else:
-                resp = db.respond_invitation(conn, arguments["discussion_id"], arguments["agent_id"], accept=True)
-            if "error" not in resp and inv:
-                _add_participant_from_invite(db, conn, arguments["discussion_id"], arguments["agent_id"], inv[0])
-            return resp
+            return db.accept_invitation(conn, arguments["discussion_id"], arguments["agent_id"])
 
         elif name == "roundtable_decline_invite":
             return db.respond_invitation(conn, arguments["discussion_id"], arguments["agent_id"], accept=False)
@@ -965,19 +955,6 @@ def _invite_agent(
     return result
 
 
-def _add_participant_from_invite(
-    db: RoundtableDB, conn: Any, discussion_id: str, agent_id: str, invitation: dict[str, Any]
-) -> None:
-    db.add_participant(
-        conn,
-        discussion_id,
-        agent_id,
-        role=invitation.get("role"),
-        perspective=invitation.get("perspective"),
-        display_name=agent_id,
-    )
-
-
 def _deliver_http_invitation(
     db: RoundtableDB,
     conn: Any,
@@ -1117,22 +1094,30 @@ def _check_turn(
     wait_seconds: float | int = 0,
     poll_interval: float | int = 1,
 ) -> dict[str, Any]:
-    deadline = time.time() + max(0.0, float(wait_seconds or 0))
-    interval = min(max(0.1, float(poll_interval or 1)), 5.0)
+    duration = float(wait_seconds)
+    interval = float(poll_interval)
+    if not math.isfinite(duration) or not 0 <= duration <= 30:
+        raise ValueError("wait_seconds must be finite and between 0 and 30")
+    if not math.isfinite(interval) or interval <= 0:
+        raise ValueError("poll_interval must be positive and finite")
+    interval = min(max(0.1, interval), 5.0)
+    started = time.monotonic()
+    deadline = started + duration
 
     while True:
         status = core.status(discussion_id)
         if not status.get("ok"):
             return status
         next_speaker = status.get("next_speaker")
-        if next_speaker == agent_id or status.get("status") != "active" or time.time() >= deadline:
+        remaining = deadline - time.monotonic()
+        if next_speaker == agent_id or status.get("status") != "active" or remaining <= 0:
             break
-        time.sleep(interval)
+        time.sleep(min(interval, remaining))
 
     return {
         "your_turn": next_speaker == agent_id,
         "next_speaker": next_speaker,
         "current_round": status.get("current_round"),
         "status": status.get("status"),
-        "waited": wait_seconds,
+        "waited": time.monotonic() - started,
     }

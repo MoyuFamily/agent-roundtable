@@ -51,6 +51,12 @@ jobs:
       - name: Node syntax check
         run: npm run check
 
+      - name: Configure PDF test browser
+        run: |
+          echo "PUPPETEER_EXECUTABLE_PATH=$(command -v google-chrome)" >> "$GITHUB_ENV"
+          echo "ROUNDTABLE_REQUIRE_PDF=1" >> "$GITHUB_ENV"
+          echo "ROUNDTABLE_PDF_NO_SANDBOX=1" >> "$GITHUB_ENV"
+
       - name: Pytest
         run: python -m pytest -q
 
@@ -81,6 +87,7 @@ jobs:
           assert roundtable.__version__ == "2.1.0"
           assert (resources.files("roundtable") / "web" / "viewer.js").is_file()
           assert (resources.files("roundtable") / "web" / "i18n.js").is_file()
+          assert (resources.files("roundtable") / "web" / "pdf-worker.mjs").is_file()
           assert (resources.files("roundtable") / "templates" / "product-review.json").is_file()
           assert (resources.files("roundtable") / "skills" / "mcp-roundtable" / "SKILL.md").is_file()
           PY

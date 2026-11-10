@@ -80,7 +80,23 @@ async def exercise(connect):
             await reader.unsubscribe_resource(collection)
             await asyncio.sleep(0.3)
             drain(queue)
-            await call(writer, "roundtable_speak", discussion_id=did, participant="a", content="First test view")
+            waiting = asyncio.create_task(
+                call(
+                    reader,
+                    "roundtable_wait_for_turn",
+                    discussion_id=did,
+                    agent_id="b",
+                    wait_seconds=2,
+                    poll_interval=0.1,
+                )
+            )
+            try:
+                await asyncio.sleep(0.2)
+                await call(writer, "roundtable_speak", discussion_id=did, participant="a", content="First test view")
+                assert (await waiting)["your_turn"] is True
+            finally:
+                if not waiting.done():
+                    waiting.cancel()
             await updated(queue, {transcript})
             before_restart = await call(reader, "roundtable_read", discussion_id=did)
 
@@ -118,6 +134,7 @@ async def exercise(connect):
         "unsubscribe": True,
         "inbox_ack": True,
         "conclusion": True,
+        "nonblocking_turn_wait": True,
     }
 
 

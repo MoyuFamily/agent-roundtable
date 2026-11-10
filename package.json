@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/roundtable/web/server.mjs",
     "dev": "node --watch src/roundtable/web/server.mjs",
-    "check": "node --check src/roundtable/web/server.mjs && node --check src/roundtable/web/viewer.js",
+    "check": "node --check src/roundtable/web/server.mjs && node --check src/roundtable/web/viewer.js && node --check src/roundtable/web/pdf-worker.mjs",
     "release": "bash scripts/release/release.sh",
     "release:dry": "bash scripts/release/release.sh --dry-run",
     "release:patch": "bash scripts/release/release.sh --type=patch",

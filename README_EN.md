@@ -147,6 +147,8 @@ core.end_discussion(disc_id, conclusion="Recommend PostgreSQL; validate migratio
 
 The Web Viewer needs Node.js 18+. Roundtable reuses an existing healthy server, tries `node server.mjs`, and may run local `npm install --omit=dev` for missing web dependencies. It does not install Node itself or silently install global PM2. Automatic install skips Puppeteer's Chromium download; Markdown export always works, while PDF export returns a clear diagnostic when a browser is unavailable.
 
+Set `PUPPETEER_EXECUTABLE_PATH` to use an existing Chrome/Chromium installation. PDF requests use isolated rendering processes; raw HTML and remote images in discussion content are rendered as inert text. See the [reliability guide](docs/TECHNICAL_RELIABILITY.md).
+
 ### Error-Safe Mode (Recommended for Production)
 
 ```python

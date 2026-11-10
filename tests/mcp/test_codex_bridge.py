@@ -7,6 +7,7 @@ import socket
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -207,3 +208,69 @@ def test_http_review_updates_prompts_turn_notices_and_restart(review_bridge):
     )
     assert "error" in _post(bridge.port, "/tool", {"name": "roundtable_read", "arguments": []})
     assert _get(bridge.port, "/health")["status"] == "ok"
+
+
+@pytest.mark.parametrize("bridge_type", [CodexBridge, GenericBridge])
+def test_auth_protects_reads_and_missing_status_returns_json(tmp_path, bridge_type):
+    options = {"platform": "test"} if bridge_type is GenericBridge else {}
+    bridge = bridge_type(
+        agent_id="private-host",
+        port=_free_port(),
+        db_path=str(tmp_path / "private.db"),
+        auth_token="private-token",
+        **options,
+    )
+    did = bridge._core.create_discussion(
+        "Private discussion",
+        [{"profile": "a"}, {"profile": "b"}],
+        context="PRIVATE_CONTEXT",
+        web=False,
+    )["discussion_id"]
+    bridge.start()
+    try:
+        for path in ["/agent", "/inbox", f"/status/{did}"]:
+            request = urllib.request.Request(f"http://127.0.0.1:{bridge.port}{path}")
+            with pytest.raises(urllib.error.HTTPError) as failure:
+                urllib.request.urlopen(request, timeout=2)
+            assert failure.value.code == 401
+            assert b"PRIVATE_CONTEXT" not in failure.value.read()
+            request.add_header("Authorization", "Bearer private-token")
+            with urllib.request.urlopen(request, timeout=2) as response:
+                assert response.status == 200
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{bridge.port}/status/missing",
+            headers={"Authorization": "Bearer private-token"},
+        )
+        with pytest.raises(urllib.error.HTTPError) as failure:
+            urllib.request.urlopen(request, timeout=2)
+        assert failure.value.code == 404
+        assert "error" in json.loads(failure.value.read())
+        assert _get(bridge.port, "/health")["status"] == "ok"
+    finally:
+        bridge.stop()
+
+
+def test_wait_for_turn_does_not_block_the_speech_it_is_waiting_for(review_bridge):
+    bridge = review_bridge
+    did = bridge._core.create_discussion(
+        "Concurrent turn",
+        [{"profile": "a"}, {"profile": "b"}],
+        web=False,
+    )["discussion_id"]
+    bridge._core.speak(did, "coordinator", "Opening")
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        waiting = executor.submit(
+            _post,
+            bridge.port,
+            "/tool",
+            {
+                "name": "roundtable_wait_for_turn",
+                "arguments": {"discussion_id": did, "agent_id": "b", "wait_seconds": 1.5, "poll_interval": 0.1},
+            },
+        )
+        time.sleep(0.2)
+        started = time.monotonic()
+        speech = _post(bridge.port, "/speak", {"discussion_id": did, "participant": "a", "content": "Done"})
+        assert speech["next_speaker"] == "b"
+        assert time.monotonic() - started < 1.0
+        assert waiting.result(timeout=2)["your_turn"] is True

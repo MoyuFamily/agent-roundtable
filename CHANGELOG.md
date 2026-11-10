@@ -32,6 +32,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Use the subscription-capability initialization helper in both real MCP entry points. Session-scoped database watchers notify the exact subscribed URIs across processes sharing a database, coalesce writes, and clean up on disconnect.
 - Verify stdio and SSE with two actual clients, unsubscribe and reader restart. CI and release preflight also run the same checks against a clean wheel installation; the verified SDK baseline is `mcp>=1.30,<2`.
 - Bind the MCP SSE entry point to loopback by default; expose another listen address explicitly with `--host`.
+- Require configured bridge authentication for agent, inbox and discussion-status reads; missing status IDs return JSON 404 responses. Health probes remain public.
+- Commit invitation/summon acceptance together with participant membership. Reject expired summons and new joins to closed discussions; serialize competing replies and expiry sweeps to preserve a single terminal state.
+- Serve bridge requests concurrently and move blocking MCP tool work off the event loop, so turn polling cannot block the next speech. Bound waits to 30 seconds and use monotonic elapsed time.
+- Resolve PDF rendering dependencies from the installed viewer rather than the discussion directory. Isolate concurrent exports, bound rendering time, clean up workers/temp files, and render raw HTML/remote images as inert text. PDF tests now fail on runtime errors; CI requires a real browser instead of skipping every 503.
 
 ## [2.1.0] - 2026-05-31
 

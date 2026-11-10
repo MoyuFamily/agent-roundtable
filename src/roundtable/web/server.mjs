@@ -22,9 +22,13 @@ import {
   mkdirSync,
   statSync,
   unlinkSync,
+  mkdtempSync,
+  rmSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import * as readline from "node:readline";
-import { join, resolve, dirname, basename } from "node:path";
+import { join, resolve } from "node:path";
 import { createHash, createHmac, randomBytes, timingSafeEqual, pbkdf2Sync } from "node:crypto";
 
 // ---------------------------------------------------------------------------
@@ -47,7 +51,8 @@ function parseArgs() {
 
 const { port, dataDir: dataDirArg } = parseArgs();
 const DATA_DIR = resolve(dataDirArg);
-const WEB_DIR = new URL(".", import.meta.url).pathname;
+const WEB_DIR = fileURLToPath(new URL(".", import.meta.url));
+const PDF_WORKER = fileURLToPath(new URL("./pdf-worker.mjs", import.meta.url));
 const SERVER_SECRET = randomBytes(32);
 
 // ---------------------------------------------------------------------------
@@ -1163,35 +1168,56 @@ router.get("/api/:token/export/pdf", async (req, res, params) => {
   const { spawn } = await import("node:child_process");
   const md = buildMarkdown(data);
   const filename = safeFilename(data.topic || "Discussion");
-  const tmpMdPath = resolve(entry.dir, `.${filename}.tmp.md`);
-  const expectedPdfPath = tmpMdPath.replace(/\.md$/, ".pdf");
+  const temporaryDir = mkdtempSync(join(tmpdir(), 'roundtable-pdf-'));
+  const tmpMdPath = join(temporaryDir, 'review.md');
+  const expectedPdfPath = join(temporaryDir, 'review.pdf');
 
   let child = null;
   let clientClosed = false;
-  req.on("close", () => {
-    clientClosed = true;
-    if (child) {
-      try { child.kill("SIGTERM"); } catch { /* ignore */ }
-    }
-  });
+  let killTimer = null;
+  let stopping = false;
+  const killWorker = () => {
+    if (!child?.pid || child.exitCode !== null || child.signalCode !== null || stopping) return;
+    stopping = true;
+    // Puppeteer's SIGINT handler terminates its separately detached browser process group.
+    try { child.kill('SIGINT'); } catch { /* already exited */ }
+    killTimer = setTimeout(() => {
+      try {
+        if (process.platform === 'win32') child.kill('SIGKILL');
+        else process.kill(-child.pid, 'SIGKILL');
+      } catch { /* already exited */ }
+    }, 2000);
+  };
+  const onClose = () => {
+    if (!res.writableEnded) { clientClosed = true; killWorker(); }
+  };
+  res.on('close', onClose);
 
   try {
     writeFileSync(tmpMdPath, md, "utf-8");
 
     const pdfOk = await new Promise((resolveP, rejectP) => {
       let stderr = "";
-      child = spawn("npx", ["--no-install", "md-to-pdf", basename(tmpMdPath)], {
-        cwd: dirname(tmpMdPath),
+      child = spawn(process.execPath, [PDF_WORKER, tmpMdPath, expectedPdfPath], {
+        cwd: temporaryDir,
         env: { ...process.env },
-        stdio: ["pipe", "pipe", "pipe"],
+        detached: process.platform !== 'win32',
+        stdio: ["ignore", "ignore", "pipe"],
       });
-      child.stdin.end();
-      child.stderr?.on("data", (d) => { stderr += d.toString(); });
+      const configuredTimeout = Number(process.env.ROUNDTABLE_PDF_TIMEOUT_MS);
+      const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? Math.min(configuredTimeout, 120000) : 60000;
+      let timedOut = false;
+      const timer = setTimeout(() => { timedOut = true; killWorker(); }, timeoutMs);
+      child.stderr?.on("data", (d) => { stderr = (stderr + d.toString()).slice(-2000); });
       child.on("close", (code) => {
-        if (code === 0) resolveP(true);
+        clearTimeout(timer);
+        clearTimeout(killTimer);
+        if (timedOut) rejectP(new Error('PDF rendering timed out.'));
+        else if (code === 0) resolveP(true);
         else rejectP(new Error(`md-to-pdf exited with code ${code}: ${stderr.slice(0, 500)}`));
       });
-      child.on("error", rejectP);
+      child.on("error", (error) => { clearTimeout(timer); clearTimeout(killTimer); rejectP(error); });
     });
 
     if (clientClosed) return;
@@ -1230,8 +1256,9 @@ router.get("/api/:token/export/pdf", async (req, res, params) => {
       );
     }
   } finally {
-    try { unlinkSync(tmpMdPath); } catch { /* ignore */ }
-    try { unlinkSync(expectedPdfPath); } catch { /* ignore */ }
+    res.off('close', onClose);
+    killWorker();
+    rmSync(temporaryDir, { recursive: true, force: true });
   }
 });
 

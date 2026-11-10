@@ -134,7 +134,8 @@ def create_server(db_path: str | None = None) -> Server:
 
     @server.call_tool()
     async def _call_tool(name: str, arguments: dict[str, Any] | None) -> list[TextContent]:
-        result = handle_tool_call(core, db, name, arguments or {})
+        # Waiting for another participant must not block its request or subscription delivery.
+        result = await asyncio.to_thread(handle_tool_call, core, db, name, arguments or {})
         return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, default=str))]
 
     @server.list_resources()

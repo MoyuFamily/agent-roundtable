@@ -11,6 +11,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
+from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
 from typing import Any
 
 from mcp.server import Server
@@ -52,53 +55,90 @@ class SubscriptionManager:
                 del self._subs[uri]
 
     def sessions_for(self, uri: str) -> list[ServerSession]:
-        sessions = list(self._subs.get(uri, set()))
+        sessions = set(self._subs.get(uri, set()))
         # Discussion-level subscribers also receive transcript updates and vice versa.
         if uri.startswith("roundtable://discussions/") and not uri.endswith("/transcript"):
-            sessions.extend(self._subs.get(f"{uri}/transcript", set()))
+            sessions.update(self._subs.get(f"{uri}/transcript", set()))
         if uri.endswith("/transcript"):
             base = uri[: -len("/transcript")]
-            sessions.extend(self._subs.get(base, set()))
-        return sessions
+            sessions.update(self._subs.get(base, set()))
+        return list(sessions)
+
+    def uris_for(self, session: ServerSession) -> set[str]:
+        return {uri for uri, sessions in self._subs.items() if session in sessions}
+
+    def remove_session(self, session: ServerSession) -> None:
+        for uri in self.uris_for(session):
+            self.unsubscribe(uri, session)
+
+
+@dataclass
+class _SubscriptionScope:
+    session: ServerSession | None = None
+
+
+async def _watch_database(conn: sqlite3.Connection, subs: SubscriptionManager, scope: _SubscriptionScope) -> None:
+    """Coalesce shared-DB writes into invalidations of the exact subscribed URIs.
+
+    A dedicated connection's data_version observes writes from other connections,
+    including another stdio process, a bridge, or a daemon. Notifications are
+    invalidations, not an event log: clients re-read resources for current state.
+    This deliberately favors reliable delivery over per-table change filtering.
+    """
+    version = conn.execute("PRAGMA data_version").fetchone()[0]
+    while True:
+        await asyncio.sleep(0.2)
+        try:
+            current = conn.execute("PRAGMA data_version").fetchone()[0]
+        except sqlite3.Error:
+            logger.exception("Cannot inspect shared database changes; retrying")
+            continue
+        if current == version:
+            continue
+        version = current
+        session = scope.session
+        if session is None:
+            continue
+        for uri in sorted(subs.uris_for(session)):
+            if not await _safe_notify(session, uri):
+                subs.remove_session(session)
+                break
 
 
 def create_server(db_path: str | None = None) -> Server:
     """Create and configure the Roundtable MCP server."""
-    server = Server("agent-roundtable")
     db = RoundtableDB(db_path=db_path)
     subs = SubscriptionManager()
-    loop_holder: dict[str, asyncio.AbstractEventLoop] = {}
 
-    def _on_event(event_type: str, payload: dict[str, Any]) -> None:
-        discussion_id = payload.get("discussion_id")
-        if not discussion_id:
-            return
-        uri = f"roundtable://discussions/{discussion_id}"
-        sessions = subs.sessions_for(uri) + subs.sessions_for("roundtable://discussions")
-        if not sessions:
-            return
-        loop = loop_holder.get("loop")
-        if loop is None:
-            return
-        for session in sessions:
-            asyncio.run_coroutine_threadsafe(_safe_notify(session, uri), loop)
+    @asynccontextmanager
+    async def lifespan(_server):
+        conn = db.connect()
+        scope = _SubscriptionScope()
+        watcher = asyncio.create_task(_watch_database(conn, subs, scope))
+        try:
+            yield scope
+        finally:
+            watcher.cancel()
+            with suppress(asyncio.CancelledError):
+                await watcher
+            if scope.session is not None:
+                subs.remove_session(scope.session)
+            conn.close()
 
-    core = RoundtableCore(db=db, on_event=_on_event)
+    server = Server("agent-roundtable", lifespan=lifespan)
+    core = RoundtableCore(db=db)
 
     @server.list_tools()
     async def _list_tools() -> list[Tool]:
-        loop_holder["loop"] = asyncio.get_running_loop()
         return [Tool(**schema) for schema in TOOL_SCHEMAS]
 
     @server.call_tool()
     async def _call_tool(name: str, arguments: dict[str, Any] | None) -> list[TextContent]:
-        loop_holder["loop"] = asyncio.get_running_loop()
         result = handle_tool_call(core, db, name, arguments or {})
         return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, default=str))]
 
     @server.list_resources()
     async def _list_resources() -> list[Resource]:
-        loop_holder["loop"] = asyncio.get_running_loop()
         return [
             Resource(
                 uri=spec["uri"],
@@ -116,8 +156,8 @@ def create_server(db_path: str | None = None) -> Server:
 
     @server.subscribe_resource()
     async def _subscribe(uri: Any) -> None:
-        loop_holder["loop"] = asyncio.get_running_loop()
         session = server.request_context.session
+        server.request_context.lifespan_context.session = session
         subs.subscribe(str(uri), session)
 
     @server.unsubscribe_resource()
@@ -145,17 +185,18 @@ def create_server(db_path: str | None = None) -> Server:
         )
 
     server._roundtable_subs = subs
-    server._roundtable_emit = _on_event
     return server
 
 
-async def _safe_notify(session: ServerSession, uri: str) -> None:
+async def _safe_notify(session: ServerSession, uri: str) -> bool:
     try:
         from pydantic import AnyUrl
 
-        await session.send_resource_updated(AnyUrl(uri))
+        await asyncio.wait_for(session.send_resource_updated(AnyUrl(uri)), timeout=5)
+        return True
     except Exception as e:
         logger.debug("Failed to notify session for %s: %s", uri, e)
+        return False
 
 
 def build_initialization_options(server: Server) -> Any:

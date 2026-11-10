@@ -27,6 +27,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Include speech IDs, explicit excerpt markers and annotation sources in summaries; distinguish an unrecorded conclusion from an ended meeting.
 - Route CodexBridge and GenericBridge `/speak` through the same handler as `/tool`, preserving next-turn notices and structured errors; close sockets on shutdown for restart.
 - Bound the MCP extra to the supported SDK 1.x API and install it in CI so MCP integration tests run.
+- Keep daemon-owned invitation/summon processing separate from host-owned turn messages. Failed and manual messages remain unread; accepted invitation retries recover after a crash before acknowledgement.
+- Add scoped, idempotent `roundtable_ack_inbox` and inbox type filters for read/process/ack consumers while retaining legacy read-and-mark behavior.
+- Use the subscription-capability initialization helper in both real MCP entry points. Session-scoped database watchers notify the exact subscribed URIs across processes sharing a database, coalesce writes, and clean up on disconnect.
+- Verify stdio and SSE with two actual clients, unsubscribe and reader restart. CI and release preflight also run the same checks against a clean wheel installation; the verified SDK baseline is `mcp>=1.30,<2`.
+- Bind the MCP SSE entry point to loopback by default; expose another listen address explicitly with `--host`.
 
 ## [2.1.0] - 2026-05-31
 

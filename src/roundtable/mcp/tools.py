@@ -236,15 +236,29 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "roundtable_inbox",
-        "description": "Read your inbox messages (invitations, turn notices, etc). Marks messages as read.",
+        "description": "Read inbox. For reliable delivery: mark_read=false, process, then roundtable_ack_inbox.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "agent_id": {"type": "string"},
                 "unread_only": {"type": "boolean", "default": True},
                 "mark_read": {"type": "boolean", "default": True},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
+                "message_types": {"type": "array", "minItems": 1, "items": {"type": "string"}},
             },
             "required": ["agent_id"],
+        },
+    },
+    {
+        "name": "roundtable_ack_inbox",
+        "description": "Acknowledge processed messages belonging to this agent. Repeated acknowledgements are safe.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "string"},
+                "message_ids": {"type": "array", "maxItems": 500, "items": {"type": "integer", "minimum": 1}},
+            },
+            "required": ["agent_id", "message_ids"],
         },
     },
     {
@@ -519,7 +533,16 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
 
         elif name == "roundtable_accept_invite":
             inv = db.get_invitations(conn, agent_id=arguments["agent_id"], discussion_id=arguments["discussion_id"])
-            resp = db.respond_invitation(conn, arguments["discussion_id"], arguments["agent_id"], accept=True)
+            if inv and inv[0]["status"] == "accepted":
+                # Retry after a crash between acceptance and inbox acknowledgement.
+                resp = {
+                    "discussion_id": arguments["discussion_id"],
+                    "agent_id": arguments["agent_id"],
+                    "status": "accepted",
+                    "already_responded": True,
+                }
+            else:
+                resp = db.respond_invitation(conn, arguments["discussion_id"], arguments["agent_id"], accept=True)
             if "error" not in resp and inv:
                 _add_participant_from_invite(db, conn, arguments["discussion_id"], arguments["agent_id"], inv[0])
             return resp
@@ -530,10 +553,20 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
         elif name == "roundtable_inbox":
             agent_id = arguments["agent_id"]
             db.touch_agent(conn, agent_id)
-            messages = db.read_inbox(conn, agent_id, unread_only=arguments.get("unread_only", True))
+            messages = db.read_inbox(
+                conn,
+                agent_id,
+                unread_only=arguments.get("unread_only", True),
+                limit=arguments.get("limit", 50),
+                message_types=arguments.get("message_types"),
+            )
             if arguments.get("mark_read", True) and messages:
                 db.mark_inbox_read(conn, [m["id"] for m in messages])
             return {"messages": messages}
+
+        elif name == "roundtable_ack_inbox":
+            count = db.acknowledge_inbox(conn, arguments["agent_id"], arguments["message_ids"])
+            return {"ok": True, "agent_id": arguments["agent_id"], "acknowledged": count}
 
         elif name == "roundtable_speak":
             result = core.speak(

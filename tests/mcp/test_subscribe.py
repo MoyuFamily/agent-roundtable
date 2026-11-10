@@ -94,3 +94,19 @@ def test_create_server_registers_subscribe_handler(tmp_path):
     opts = build_initialization_options(server)
     assert opts.capabilities.resources is not None
     assert opts.capabilities.resources.subscribe is True
+
+
+def test_subscription_cleanup_and_deduplicated_sessions():
+    subs = SubscriptionManager()
+    session = MagicMock()
+    other = MagicMock()
+    base = "roundtable://discussions/rt_abc"
+    transcript = base + "/transcript"
+    subs.subscribe(base, session)
+    subs.subscribe(transcript, session)
+    subs.subscribe(base, other)
+    assert len(subs.sessions_for(base)) == 2
+    assert subs.uris_for(session) == {base, transcript}
+    subs.remove_session(session)
+    assert subs.uris_for(session) == set()
+    assert subs.sessions_for(base) == [other]

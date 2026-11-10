@@ -86,8 +86,11 @@ python3 -m roundtable.codex
 The bridge's /tool endpoint and /speak shortcut share speech handling and
 next-turn notices. Retrieve review prompts with roundtable_get_prompt. Verify
 resource subscriptions across the actual clients before relying on push alone;
-status/inbox polling remains the baseline. Avoid running another inbox consumer
-that acknowledges messages before the host processes them.
+status/inbox polling remains a fallback. For reliable processing, call
+roundtable_inbox with mark_read=false, handle the returned message, then call
+roundtable_ack_inbox with your agent_id and processed message_ids. Failed work
+remains unread. The daemon only handles summon/invitation messages and leaves
+turns for the host. Avoid multiple consumers executing the same task.
 
 ## Decision review workflow
 
@@ -230,7 +233,10 @@ reviewer time, and cost. Comment count or majority opinion is not review quality
 | Registry/invite | Host-managed delegation | roundtable_register_agent / roundtable_list_agents / roundtable_invite |
 | Join/turn | Host-managed scheduling | roundtable_accept_invite / roundtable_inbox / roundtable_wait_for_turn |
 
-MCP also exposes heartbeat, summon, dispatch status, retry, and decline tools.
+MCP also exposes heartbeat, summon, dispatch status, retry, decline, and explicit
+inbox acknowledgement tools. Inbox message_types filters let different consumers
+read only their own kinds of work. Legacy read-and-mark remains the default;
+request mark_read=false when using process-then-ack.
 Use the actual advertised schema rather than assuming parameters exist.
 
 Findings are supplied externally. The engine calculates consensus divided by

@@ -40,10 +40,10 @@ jobs:
           npm ci
 
       - name: Ruff check
-        run: python -m ruff check src tests
+        run: python -m ruff check src tests scripts/check_mcp_runtime.py
 
       - name: Ruff format
-        run: python -m ruff format --check src tests
+        run: python -m ruff format --check src tests scripts/check_mcp_runtime.py
 
       - name: Mypy
         run: python -m mypy src
@@ -85,3 +85,8 @@ jobs:
           assert (resources.files("roundtable") / "skills" / "mcp-roundtable" / "SKILL.md").is_file()
           PY
           /tmp/roundtable-smoke/bin/python -m roundtable.demo --no-web --rounds 1
+          for wheel_artifact in dist/*.whl; do
+            /tmp/roundtable-smoke/bin/python -m pip install "${wheel_artifact}[mcp]"
+          done
+          /tmp/roundtable-smoke/bin/python scripts/check_mcp_runtime.py --transport stdio
+          /tmp/roundtable-smoke/bin/python scripts/check_mcp_runtime.py --transport sse

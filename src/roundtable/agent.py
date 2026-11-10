@@ -87,10 +87,36 @@ class AgentDaemon:
             self.core,
             self.db,
             "roundtable_inbox",
-            {"agent_id": self.agent_id, "unread_only": True, "mark_read": True},
+            {
+                "agent_id": self.agent_id,
+                "unread_only": True,
+                "mark_read": False,
+                "message_types": ["summon", "invitation"],
+            },
         )
         messages = inbox.get("messages", [])
-        handled = [self._handle_message(message) for message in messages]
+        handled = []
+        for message in messages:
+            try:
+                outcome = self._handle_message(message)
+                result = outcome.get("result", {})
+                resolved = "error" not in result and result.get("status") in {"accepted", "declined", "timeout"}
+                if resolved:
+                    ack = handle_tool_call(
+                        self.core,
+                        self.db,
+                        "roundtable_ack_inbox",
+                        {"agent_id": self.agent_id, "message_ids": [message["id"]]},
+                    )
+                    outcome["acknowledged"] = ack.get("ok", False)
+                    if "error" in ack:
+                        outcome["ack_error"] = ack["error"]
+                else:
+                    outcome["acknowledged"] = False
+            except Exception as exc:
+                logger.exception("Inbox message %s failed; leaving it unread", message.get("id"))
+                outcome = {"message_id": message.get("id"), "status": "error", "error": str(exc), "acknowledged": False}
+            handled.append(outcome)
         return {"agent_id": self.agent_id, "messages": messages, "handled": handled}
 
     def run_forever(self) -> None:

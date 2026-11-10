@@ -1069,21 +1069,28 @@ class RoundtableDB:
         *,
         unread_only: bool = True,
         limit: int = 50,
+        message_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        if type(limit) is not int or not 1 <= limit <= 500:
+            raise ValueError("limit must be an integer from 1 to 500")
+        query = "SELECT * FROM agent_inbox WHERE agent_id = ?"
+        params: list[Any] = [agent_id]
         if unread_only:
-            rows = conn.execute(
-                """SELECT * FROM agent_inbox
-                   WHERE agent_id = ? AND read_at IS NULL
-                   ORDER BY created_at ASC LIMIT ?""",
-                (agent_id, limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """SELECT * FROM agent_inbox
-                   WHERE agent_id = ?
-                   ORDER BY created_at DESC LIMIT ?""",
-                (agent_id, limit),
-            ).fetchall()
+            query += " AND read_at IS NULL"
+        if message_types is not None:
+            if (
+                not isinstance(message_types, list)
+                or not message_types
+                or any(not isinstance(item, str) or not item for item in message_types)
+            ):
+                raise ValueError("message_types must be a non-empty list of strings")
+            placeholders = ",".join("?" for _ in message_types)
+            query += f" AND type IN ({placeholders})"
+            params.extend(message_types)
+        query += (
+            " ORDER BY created_at ASC, id ASC LIMIT ?" if unread_only else " ORDER BY created_at DESC, id DESC LIMIT ?"
+        )
+        rows = conn.execute(query, [*params, limit]).fetchall()
         return [
             {
                 "id": r["id"],
@@ -1107,6 +1114,34 @@ class RoundtableDB:
             [now, *message_ids],
         )
         return cur.rowcount
+
+    def acknowledge_inbox(self, conn: sqlite3.Connection, agent_id: str, message_ids: list[int]) -> int:
+        """Acknowledge only this agent's messages; reject mixed-owner batches atomically."""
+        if not isinstance(agent_id, str) or not agent_id:
+            raise ValueError("agent_id is required")
+        if (
+            not isinstance(message_ids, list)
+            or len(message_ids) > 500
+            or any(type(mid) is not int or mid <= 0 for mid in message_ids)
+        ):
+            raise ValueError("message_ids must be a list of at most 500 positive integers")
+        ids = sorted(set(message_ids))
+        if not ids:
+            return 0
+        placeholders = ",".join("?" for _ in ids)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            found = conn.execute(
+                f"SELECT id FROM agent_inbox WHERE agent_id = ? AND id IN ({placeholders})", [agent_id, *ids]
+            ).fetchall()
+            if len(found) != len(ids):
+                raise ValueError("Every message ID must belong to the specified agent")
+            count = self.mark_inbox_read(conn, ids)
+            conn.execute("COMMIT")
+            return count
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
     # ------------------------------------------------------------------
     # Invitations

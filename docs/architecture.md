@@ -20,7 +20,7 @@
 │  ┌───────────────────────────────────────────────────────┐            │        │
 │  │              MCP Server (roundtable.mcp)               │            │        │
 │  │                                                       │            │        │
-│  │  Tools (24) │ Resources (4) │ Prompts (3)             │◄───────────┘        │
+│  │  Tools (25) │ Resources (4) │ Prompts (3)             │◄───────────┘        │
 │  │                                                       │  HTTP Bridge         │
 │  └───────────────────────────┬───────────────────────────┘  (port 8201)        │
 │                              │                                                  │
@@ -30,7 +30,7 @@
 │  │                                                                           │  │
 │  │  core.py ─── db.py ─── schema.py ─── models.py ─── exceptions.py         │  │
 │  │     │                                                                     │  │
-│  │     ├── on_event callback ──► MCP resource update notifications           │  │
+│  │     ├── shared DB watcher ──► MCP resource update notifications           │  │
 │  │     └── notify.py (platform push)                                         │  │
 │  │                                                                           │  │
 │  │  SQLite (WAL mode) ─── agents │ agent_inbox │ invitations │ discussions   │  │
@@ -175,7 +175,7 @@
 │  │              │  · @list_tools / @call_tool                        │
 │  │              │  · @list_resources / @read_resource                │
 │  │              │  · @list_prompts / @get_prompt                     │
-│  │              │  · on_event ──► send_resource_updated()            │
+│  │              │  · DB watch ──► send_resource_updated()            │
 │  └──┬─────┬──┬──┘                                                    │
 │     │     │  │                                                       │
 │  ┌──▼──┐ ┌▼─┐ ┌▼──────┐                                              │
@@ -199,7 +199,7 @@
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-### MCP Tools (24 个)
+### MCP Tools (25 个)
 
 | 类别       | Tool                          | 用途                                      |
 |------------|-------------------------------|-------------------------------------------|
@@ -217,6 +217,7 @@
 | Invitation | `roundtable_accept_invite`    | 接受传统邀请并加入参与者                  |
 | Invitation | `roundtable_decline_invite`   | 拒绝传统邀请                              |
 | Inbox      | `roundtable_inbox`            | 读取自己的消息（召集 / 邀请 / 轮次提示）  |
+| Inbox      | `roundtable_ack_inbox` | 确认成功处理且属于当前 Agent 的消息，支持重试 |
 | Speech     | `roundtable_speak`            | 记录发言                                  |
 | Speech     | `roundtable_read`             | 读取讨论历史                              |
 | Speech     | `roundtable_wait_for_turn`    | 检查是否轮到自己                          |
@@ -392,7 +393,7 @@ read、status、summarize 返回 conclusion；read 与 summarize 还提供 conte
      │                      │── INSERT speech ──────►│
      │                      │── check round_complete │
      │                      │── calc convergence ───►│
-     │                      │── on_event(speech) ──► MCP resource_updated
+     │                      │── DB commit/watch ──► MCP resource_updated
      │◄── {speech_id,round}─│                       │
      │                      │                       │
      │── read(id) ─────────►│── SELECT speeches ────►│
@@ -403,7 +404,7 @@ read、status、summarize 返回 conclusion；read 与 summarize 还提供 conte
      │◄── {summary} ────────│                       │
      │                      │                       │
      │── end_disc(id) ─────►│── UPDATE status ──────►│
-     │                      │── on_event(end) ─────► MCP resource_updated
+     │                      │── DB commit/watch ──► MCP resource_updated
      │◄── {action} ─────────│                       │
      │                      │                       │
      │                      │── Notifier ──────────►│  send_fn(platform,chat,msg)
@@ -433,3 +434,10 @@ read、status、summarize 返回 conclusion；read 与 summarize 还提供 conte
 | mcp/tools.py          | —      | —      | tested via tests/mcp/test_tools.py (7 cases) |
 | mcp/* (inbox/invite)  | —      | —      | tested via tests/mcp/test_inbox.py (7 cases) |
 | **总计**              | **932**| **131**| **86%**|
+
+
+### MCP 运行时可靠性
+
+stdio 与 SSE 入口统一使用包含订阅能力的初始化选项。每个会话的独立 SQLite 连接检查 data_version，将其他进程的写入合并为订阅资源的失效通知；通知使用实际订阅 URI。会话退出时取消观察任务并清理订阅。Core 的 on_event 仍可供其他宿主集成，但不再是 MCP 跨进程通知的唯一来源。
+
+Daemon 只消费召集/邀请，读取时不标记已读，成功处理后再确认。宿主处理轮次消息时采用相同的读取—处理—确认流程。旧版读取即确认行为保留兼容。协议测试使用实际 stdio/SSE 客户端及干净 wheel 环境，具体语义和限制见 [技术可靠性说明](TECHNICAL_RELIABILITY.md)。

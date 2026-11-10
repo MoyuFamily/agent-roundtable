@@ -73,11 +73,11 @@ fi
 echo ""
 echo "▶ Installing release check tools..."
 "$PYTHON_BIN" -m pip install --upgrade pip build twine >/dev/null
-"$PYTHON_BIN" -m pip install -e ".[dev]" >/dev/null
+"$PYTHON_BIN" -m pip install -e ".[dev,mcp]" >/dev/null
 pass "Release tools installed"
 
-run "Ruff lint" "$PYTHON_BIN" -m ruff check src tests
-run "Ruff format" "$PYTHON_BIN" -m ruff format --check src tests
+run "Ruff lint" "$PYTHON_BIN" -m ruff check src tests scripts/check_mcp_runtime.py
+run "Ruff format" "$PYTHON_BIN" -m ruff format --check src tests scripts/check_mcp_runtime.py
 run "Mypy" "$PYTHON_BIN" -m mypy src
 
 if [ -f "package.json" ]; then
@@ -173,6 +173,11 @@ assert (resources.files("roundtable") / "skills" / "mcp-roundtable" / "SKILL.md"
 print("wheel smoke ok")
 PY
 "$SMOKE_DIR/venv/bin/python" -m roundtable.demo --no-web --rounds 1 >/dev/null
+for wheel_artifact in dist/*.whl; do
+  "$SMOKE_DIR/venv/bin/python" -m pip install "${wheel_artifact}[mcp]" >/dev/null
+done
+"$SMOKE_DIR/venv/bin/python" scripts/check_mcp_runtime.py --transport stdio
+"$SMOKE_DIR/venv/bin/python" scripts/check_mcp_runtime.py --transport sse
 rm -rf "$SMOKE_DIR"
 pass "Wheel install smoke test passed"
 

@@ -2,7 +2,9 @@
 
 import pytest
 
+from roundtable.core import RoundtableCore
 from roundtable.db import RoundtableDB
+from roundtable.mcp.tools import handle_tool_call
 
 
 @pytest.fixture
@@ -129,5 +131,27 @@ def test_list_agents_online_filter(db):
         online = db.list_agents(conn, online_only=True)
         assert len(online) == 1
         assert online[0]["agent_id"] == "online-agent"
+    finally:
+        conn.close()
+
+
+def test_explicit_ack_is_scoped_atomic_and_idempotent(db):
+    conn = db.connect()
+    core = RoundtableCore(db=db)
+    try:
+        db.upsert_agent(conn, "a", "test")
+        db.upsert_agent(conn, "b", "test")
+        a = db.push_inbox(conn, "a", "turn", {})
+        b = db.push_inbox(conn, "b", "turn", {})
+        result = handle_tool_call(core, db, "roundtable_ack_inbox", {"agent_id": "a", "message_ids": [a, b]})
+        assert "error" in result
+        assert len(db.read_inbox(conn, "a")) == len(db.read_inbox(conn, "b")) == 1
+        result = handle_tool_call(core, db, "roundtable_ack_inbox", {"agent_id": "a", "message_ids": [a, a]})
+        assert result["acknowledged"] == 1
+        assert db.acknowledge_inbox(conn, "a", [a]) == 0
+        assert len(db.read_inbox(conn, "b")) == 1
+        for invalid in [[True], ["1"], [0], list(range(1, 502))]:
+            with pytest.raises(ValueError):
+                db.acknowledge_inbox(conn, "a", invalid)
     finally:
         conn.close()

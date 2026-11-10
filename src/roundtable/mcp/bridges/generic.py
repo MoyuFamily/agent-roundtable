@@ -123,7 +123,11 @@ class GenericBridge(AgentBridge):
     def stop(self) -> None:
         if self._server:
             self._server.shutdown()
+            self._server.server_close()
             self._server = None
+            if self._thread:
+                self._thread.join(timeout=2)
+                self._thread = None
             logger.info("GenericBridge[%s] stopped", self._platform)
 
     async def on_invitation(self, invitation: dict[str, Any]) -> bool:
@@ -217,12 +221,18 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
             except json.JSONDecodeError:
                 self._respond(400, {"error": "invalid JSON"})
                 return
+            if not isinstance(body, dict):
+                self._respond(400, {"error": "JSON body must be an object"})
+                return
 
             if path == "/tool":
                 tool_name = body.get("name", "")
                 arguments = body.get("arguments", {})
                 if not tool_name:
                     self._respond(400, {"error": "name required"})
+                    return
+                if not isinstance(arguments, dict):
+                    self._respond(400, {"error": "arguments must be an object"})
                     return
                 result = handle_tool_call(core, db, tool_name, arguments)
                 self._respond(200, result)
@@ -274,11 +284,16 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
                 if not disc_id or not content:
                     self._respond(400, {"error": "discussion_id and content required"})
                     return
-                result = core.speak(
-                    discussion_id=disc_id,
-                    participant=participant,
-                    content=content,
-                    reply_to=body.get("reply_to"),
+                result = handle_tool_call(
+                    core,
+                    db,
+                    "roundtable_speak",
+                    {
+                        "discussion_id": disc_id,
+                        "participant": participant,
+                        "content": content,
+                        "reply_to": body.get("reply_to"),
+                    },
                 )
                 self._respond(200, result)
 

@@ -1,5 +1,7 @@
 # Roundtable 架构图
 
+> 当前定位与路线图见 [产品方向](product/DIRECTION.md)。本页描述已有记录、接入与展示基础设施；角色选择、Agent 执行、模型配置和专业综合由宿主及协调者负责。自动组队、模型路由和决策数据模型仍待验证与实现。
+
 ## 系统总览
 
 ```
@@ -18,7 +20,7 @@
 │  ┌───────────────────────────────────────────────────────┐            │        │
 │  │              MCP Server (roundtable.mcp)               │            │        │
 │  │                                                       │            │        │
-│  │  Tools (21) │ Resources (4) │ Prompts (3)             │◄───────────┘        │
+│  │  Tools (24) │ Resources (4) │ Prompts (3)             │◄───────────┘        │
 │  │                                                       │  HTTP Bridge         │
 │  └───────────────────────────┬───────────────────────────┘  (port 8201)        │
 │                              │                                                  │
@@ -197,7 +199,7 @@
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-### MCP Tools (21 个)
+### MCP Tools (24 个)
 
 | 类别       | Tool                          | 用途                                      |
 |------------|-------------------------------|-------------------------------------------|
@@ -222,6 +224,9 @@
 | Round      | `roundtable_status`           | 获取讨论状态、收敛度与 dispatch 状态      |
 | Conclude   | `roundtable_summarize`        | 获取结构化总结                            |
 | Conclude   | `roundtable_end`              | 结束讨论                                  |
+| Context    | `roundtable_update_context`   | 完整简报修订、来源、版本冲突检查及历史保留 |
+| Findings   | `roundtable_record_finding`   | 记录关联原始发言的共识、分歧或新议题标注 |
+| Prompts    | `roundtable_get_prompt`       | 工具及 HTTP 客户端读取同一套阶段提示词 |
 
 ### MCP Resources
 
@@ -339,7 +344,7 @@ Web Viewer 的 `discussion.json` schema v3 额外包含 `dispatches` 与 `dispat
 
 两种模式共享同一套 `discussions`、`participants`、`dispatches`、`summons` 状态模型。Managed Mode 不依赖 agent registry 选人；Federated Mode 通过 skill、availability、online heartbeat 做发现和召集。
 
-## 数据库 Schema (v4)
+## 数据库 Schema (v5)
 
 ```
 discussions ──┬─► participants
@@ -368,6 +373,12 @@ discussions ──┬─► participants
 
 迁移由 `PRAGMA user_version` + `_MIGRATIONS` 列表管理；新增迁移仅需 append 函数。
 v4 在 v3 召集表基础上新增查询索引：`idx_dispatches_coordinator`、`idx_summons_timeout`、`idx_inbox_discussion`，用于协调者过滤、过期 summon 扫描和 discussion 维度 inbox 同步。
+
+v5 增加 `context_revisions`，以 `(discussion_id, revision)` 为主键，保存 context、source、reason、created_at。旧会议在首次修订时保留 v0 背景；更新在事务中核对 expected_revision，随后追加版本并更新 discussions.context。读取和提示词使用一致的数据库快照。已结束会议不修改背景，需通过后续会议重新评审。
+
+read、status、summarize 返回 conclusion；read 与 summarize 还提供 context_history。摘要和 transcript 导出保留完整结论。`current_round` 是引擎游标，`total_rounds` 与 `completed_rounds` 从实际参与者发言计算，不计开场和空轮。结论补写、背景修订和观点标注会发出资源更新事件。
+
+观点标注是主持人/参与者的显式记录，必须引用当前会议内存在的发言，相同内容与引用的重试去重。接口不自动执行语义归纳或证据验证。模型运行仍由宿主负责；HTTP 的 roundtable_get_prompt 只返回提示词。CodexBridge 与 GenericBridge 的 `/speak` 和 `/tool` 发言共用工具处理器，保持下一位通知一致。
 
 ## 数据流
 

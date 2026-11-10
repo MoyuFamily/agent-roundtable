@@ -386,11 +386,28 @@ def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _migrate_v4_to_v5(conn: sqlite3.Connection) -> None:
+    """Keep an append-only history when a coordinator updates the shared brief."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS context_revisions (
+            discussion_id TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            context TEXT,
+            source TEXT NOT NULL,
+            reason TEXT,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (discussion_id, revision),
+            FOREIGN KEY (discussion_id) REFERENCES discussions(id) ON DELETE CASCADE
+        )
+    """)
+
+
 _MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migrate_v0_to_v1,
     _migrate_v1_to_v2,
     _migrate_v2_to_v3,
     _migrate_v3_to_v4,
+    _migrate_v4_to_v5,
 ]
 
 CURRENT_SCHEMA_VERSION = len(_MIGRATIONS)

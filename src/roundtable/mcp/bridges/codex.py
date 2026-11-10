@@ -23,8 +23,10 @@ class CodexBridge(AgentBridge):
 
     Runs a local HTTP server that:
     1. Receives webhook invitations from the MCP server
-    2. Spawns Codex CLI with roundtable function schemas
-    3. Translates Codex function calls to RoundtableCore operations
+    2. Exposes discussion tools and prompts to a host-managed agent
+    3. Records returned speeches and queues next-turn notices
+
+    The host starts model execution; this bridge does not spawn a CLI or model.
     """
 
     def __init__(
@@ -98,6 +100,11 @@ class CodexBridge(AgentBridge):
     def stop(self) -> None:
         if self._server:
             self._server.shutdown()
+            self._server.server_close()
+            self._server = None
+            if self._thread:
+                self._thread.join(timeout=2)
+                self._thread = None
             logger.info("Codex bridge stopped")
 
     async def on_invitation(self, invitation: dict[str, Any]) -> bool:
@@ -165,6 +172,9 @@ def _make_handler(bridge: CodexBridge) -> type[BaseHTTPRequestHandler]:
             except json.JSONDecodeError:
                 self._respond(400, {"error": "invalid JSON"})
                 return
+            if not isinstance(body, dict):
+                self._respond(400, {"error": "JSON body must be an object"})
+                return
 
             if path == "/invite":
                 discussion_id = body.get("discussion_id")
@@ -206,6 +216,9 @@ def _make_handler(bridge: CodexBridge) -> type[BaseHTTPRequestHandler]:
                 if not tool_name:
                     self._respond(400, {"error": "name required"})
                     return
+                if not isinstance(arguments, dict):
+                    self._respond(400, {"error": "arguments must be an object"})
+                    return
                 result = handle_tool_call(core, db, tool_name, arguments)
                 self._respond(200, result)
 
@@ -219,11 +232,16 @@ def _make_handler(bridge: CodexBridge) -> type[BaseHTTPRequestHandler]:
                 if not disc_id or not content:
                     self._respond(400, {"error": "discussion_id and content required"})
                     return
-                result = core.speak(
-                    discussion_id=disc_id,
-                    participant=participant,
-                    content=content,
-                    reply_to=body.get("reply_to"),
+                result = handle_tool_call(
+                    core,
+                    db,
+                    "roundtable_speak",
+                    {
+                        "discussion_id": disc_id,
+                        "participant": participant,
+                        "content": content,
+                        "reply_to": body.get("reply_to"),
+                    },
                 )
                 self._respond(200, result)
 

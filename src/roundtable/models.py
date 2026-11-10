@@ -67,3 +67,16 @@ class ConvergenceRecord:
     consensus_count: int
     disagreement_count: int
     new_point_count: int
+
+
+def review_round_counts(discussion: Discussion, speeches: list[Speech]) -> dict[str, int]:
+    """Count actual review rounds, excluding opening, empty and coordinator-only rounds.
+
+    A manually ended partial round is included in total_rounds but not completed_rounds.
+    current_round remains the engine cursor and may be max_rounds + 1 after completion.
+    """
+    rounds = {s.round for s in speeches if s.round > 0 and s.participant != "coordinator"}
+    return {
+        "total_rounds": len(rounds),
+        "completed_rounds": sum(r < discussion.current_round for r in rounds),
+    }

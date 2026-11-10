@@ -1,9 +1,9 @@
 """Base adapter interface for Roundtable.
 
 Defines the ``RoundtableAdapter`` abstract base class that all agent
-framework adapters must implement.  The lifecycle is managed by
-``RoundtableCore`` — adapters only need to implement ``get_persona``,
-``speak``, and ``listen``.
+framework adapters must implement. The host manages the lifecycle and records
+returned speeches through ``RoundtableCore`` or platform tools. Registering an
+adapter does not connect it to an automatic Core execution loop.
 
 Usage::
 
@@ -32,16 +32,15 @@ class RoundtableAdapter(ABC):
     Each adapter wraps one agent framework (Hermes, LangChain, custom, etc.)
     and exposes a uniform interface for the roundtable discussion engine.
 
-    Lifecycle (managed by RoundtableCore):
+    Lifecycle (implemented by the host):
         1. ``__init__`` — adapter is instantiated once per discussion
         2. ``get_persona`` — called before first turn to get agent metadata
         3. ``speak`` / ``listen`` — called per turn in round-robin order
 
-    Error handling:
-        - If ``speak`` raises, the agent is marked as error and skipped
-          for this round; the discussion continues.
-        - If ``listen`` raises, the reaction is silently dropped.
-        - Timeouts are enforced by RoundtableCore (default 60s per speak).
+    Error handling is a host responsibility:
+        - Handle failed speech/reaction calls and choose retry, replacement, or stop.
+        - Apply the review's time and cost budget.
+        - Core does not enforce adapter timeouts or automatically skip participants.
     """
 
     @abstractmethod

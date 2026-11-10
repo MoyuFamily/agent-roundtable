@@ -2,7 +2,7 @@
 
 > **Version**: 0.2.0 | **Date**: 2026-05-26
 
-Roundtable adapters let you plug any agent framework into the roundtable discussion engine. Implement three methods, register, done.
+Roundtable defines an adapter interface for host integrations. The current Core does not execute registered adapters: the host calls speak/listen, manages timeouts, and records returned speeches. The lifecycle below is a host implementation contract, not a built-in runner. See [decision workflow](DECISION_WORKFLOW.md).
 
 ## Quick Start (10 lines)
 
@@ -18,7 +18,7 @@ adapter = SimpleAdapter(
 )
 ```
 
-That's it. Pass the adapter to `RoundtableCore` and it handles the rest.
+The host invokes the adapter and records the returned text through the Core or platform tools. Creating or registering an adapter alone does not start a discussion.
 
 ## Interface
 
@@ -111,7 +111,7 @@ class MyLangChainAdapter(RoundtableAdapter):
 # Register
 roundtable.register_adapter("langchain", MyLangChainAdapter)
 
-# Use via CLI: roundtable run --adapter langchain ...
+# The host looks up the adapter and implements its execution loop.
 ```
 
 Query registered adapters:
@@ -128,14 +128,14 @@ roundtable.get_adapter("langchain")  # <class MyLangChainAdapter>
 | `SimpleAdapter` | `roundtable.adapters.simple` | Callable-based, zero deps |
 | Hermes adapter | `roundtable.adapters.hermes` | Integrated with Hermes Agent (auto-registered) |
 
-## Error Handling
+## Host Error Handling Contract
 
 | Scenario | Behavior |
 |----------|----------|
-| `speak()` raises | Agent marked `error`, skipped this round, discussion continues |
-| `listen()` raises | Reaction silently dropped |
-| `speak()` exceeds 60s | Timeout enforced by core, agent skipped |
-| Mixed adapters | Same discussion can use different adapters per participant |
+| `speak()` raises | Host handles failure and explicitly chooses retry, replacement, or stop |
+| `listen()` raises | Host reports or handles a failed reaction |
+| `speak()` times out | Host enforces its configured budget; Core does not enforce adapter timeouts |
+| Mixed adapters | Host can use different adapters/models when recording participant contributions |
 
 ## Persona Fields
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -47,10 +48,10 @@ class OutputBuilder:
         disagreement_pts = [f.content for f in findings if f.type == "disagreement"]
         new_points = [f.content for f in findings if f.type == "new_point"]
         final_score = disc.convergence_score
-        if not final_score and conv_history:
+        if final_score is None and conv_history:
             final_score = conv_history[-1].score
 
-        return self.build_structured_summary(
+        return build_structured_summary(
             disc,
             participants,
             speeches,
@@ -60,6 +61,8 @@ class OutputBuilder:
             new_points,
             final_score,
             conv_history,
+            context_history=self.db.get_context_history(conn, disc.id),
+            findings=findings,
         )
 
     def build_output_markdown(
@@ -69,11 +72,9 @@ class OutputBuilder:
         *,
         conclusion_override: str | None = None,
     ) -> str:
-        conclusion = conclusion_override if conclusion_override is not None else disc.conclusion
-        summary = self.build_summary_markdown(conn, disc)
-        if not conclusion:
-            return summary
-        return f"{summary}\n\n## 最终结论\n\n{conclusion.strip()}"
+        if conclusion_override is not None:
+            disc = replace(disc, conclusion=conclusion_override)
+        return self.build_summary_markdown(conn, disc)
 
     def notify_concluded(self, conn: sqlite3.Connection, disc: Discussion, notifier: Notifier) -> None:
         findings = self.db.get_findings(conn, disc.id)

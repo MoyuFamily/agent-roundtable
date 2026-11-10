@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-roundtable"
 version = "2.1.0"
-description = "Multi-Agent Roundtable Discussion Engine / 多 Agent 圆桌讨论引擎"
+description = "Professional role-based decision reviews with AI agents / 多角色协作决策与评审"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -50,7 +50,7 @@ web = [
     "nanoid>=2.0",  # Token generation (falls back to secrets.token_urlsafe)
 ]
 mcp = [
-    "mcp>=1.0",
+    "mcp>=1.0,<2",  # Server integration targets the MCP SDK 1.x API
     "httpx>=0.27",
 ]
 dev = [
@@ -110,6 +110,10 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["roundtable"]
+
+[tool.ruff.format]
+# Keep Python format gates independent of Markdown code-example formatting.
+exclude = ["*.md"]
 
 [tool.mypy]
 python_version = "3.10"

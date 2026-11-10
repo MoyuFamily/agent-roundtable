@@ -177,6 +177,75 @@ class RoundtableDB:
             return None
         return self._row_to_discussion(row)
 
+    def get_context_history(self, conn: sqlite3.Connection, discussion_id: str) -> list[dict[str, Any]]:
+        rows = conn.execute(
+            "SELECT * FROM context_revisions WHERE discussion_id = ? ORDER BY revision",
+            (discussion_id,),
+        ).fetchall()
+        if rows:
+            return [dict(row) for row in rows]
+        disc = self.get_discussion(conn, discussion_id)
+        if not disc:
+            raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
+        return [
+            {
+                "discussion_id": disc.id,
+                "revision": 0,
+                "context": disc.context,
+                "source": disc.created_by,
+                "reason": "Initial brief",
+                "created_at": disc.created_at,
+            }
+        ]
+
+    def update_context(
+        self,
+        conn: sqlite3.Connection,
+        discussion_id: str,
+        context: str,
+        *,
+        source: str,
+        expected_revision: int,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically replace the current brief while preserving every revision."""
+        if not isinstance(context, str) or not context.strip():
+            raise ValueError("context must be a non-empty complete brief")
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError("source is required")
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValueError("expected_revision must be a non-negative integer")
+        if reason is not None and not isinstance(reason, str):
+            raise ValueError("reason must be a string")
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            disc = self.get_discussion(conn, discussion_id)
+            if not disc:
+                raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
+            if disc.status not in {"active", "assembling"}:
+                raise DiscussionNotActiveError("Cannot revise a concluded or cancelled review; create a follow-up")
+            history = self.get_context_history(conn, discussion_id)
+            if history[-1]["revision"] != expected_revision:
+                raise ValueError("Context revision conflict; read the current brief before updating")
+            initial = history[0]
+            conn.execute(
+                """INSERT OR IGNORE INTO context_revisions
+                   (discussion_id, revision, context, source, reason, created_at) VALUES (?, 0, ?, ?, ?, ?)""",
+                (discussion_id, initial["context"], initial["source"], initial["reason"], initial["created_at"]),
+            )
+            revision = expected_revision + 1
+            conn.execute(
+                """INSERT INTO context_revisions
+                   (discussion_id, revision, context, source, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)""",
+                (discussion_id, revision, context, source.strip(), reason, int(time.time())),
+            )
+            conn.execute("UPDATE discussions SET context = ? WHERE id = ?", (context, discussion_id))
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        return {"context": context, "context_revision": revision, "source": source.strip()}
+
     def activate_discussion(self, conn: sqlite3.Connection, discussion_id: str) -> bool:
         """Move an assembling discussion into the active speaking lifecycle."""
         cur = conn.execute(

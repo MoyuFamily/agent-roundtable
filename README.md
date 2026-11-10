@@ -5,7 +5,7 @@
 <h1 align="center">Roundtable</h1>
 
 <p align="center">
-  <strong>agent-roundtable 是面向 AI Agent 团队的多智能体圆桌讨论引擎：让多个 Agent 围绕同一问题顺序发言、追踪共识分歧，并自动生成结构化会议记录与结论。</strong>
+  <strong>Roundtable 为重要决策组织合适的专业角色，由不同 Agent 和模型承担分析，帮助你完成跨专业取舍。</strong>
 </p>
 
 <p align="center">
@@ -25,39 +25,40 @@
 
 ---
 
-## ⚡ 10 秒速览
+## 🧭 产品方向
 
-```bash
-pip install agent-roundtable
-```
+重要决策往往需要同时考虑用户价值、技术可行性、体验与落地成本。Roundtable 的目标是帮助你组织合适的专业团队，让各角色提供具体分析，再形成可供取舍的方案。
 
-`agent-roundtable` 是一个可嵌入任意 AI Agent 系统的 Python 包。你只管选人、定话题，它负责管理多 Agent 圆桌讨论、顺序发言、共识/分歧追踪，并沉淀结构化会议记录与结论。
+**角色定义职责，Agent 提供上下文与工具，模型承担具体分析任务。** 三者可以分别配置；不预设某个模型永远对应某个职位，也不要求每次评审都使用更多角色或模型。
 
-| 你想快速确认的事 | Roundtable 的答案 |
+| 你需要的帮助 | 评审流程 |
 |---|---|
-| 它解决什么问题？ | 让多个 Agent 像开会一样围绕同一议题发言、记录和收敛 |
-| 包名和导入名是什么？ | 安装 `agent-roundtable`，代码里 `import roundtable` |
-| 能不能独立使用？ | 可以，核心库只依赖 Python 标准库和 SQLite |
-| 能不能接 Agent 框架？ | 可以，通过 adapter 接入 Hermes Agent 或任意 Agent 系统 |
-| Web Viewer 会不会影响首跑？ | 默认会尽力启动 Web Viewer；失败不阻断讨论，可看 `web_status` / `web_error` |
-| 输出是什么？ | 讨论状态、convergence score、共识/分歧、结构化 summary 与结论 |
+| 分析不够全面 | 检查专业角色覆盖，为各角色明确问题、资料和交付物 |
+| 不同意见难以比较 | 各自分析后，围绕影响选择的冲突交换依据和替代方案 |
+| 最后仍不知道如何取舍 | 比较方案收益、成本、适用条件，保留分歧和待验证事项 |
+| 决策依据容易丢失 | 记录发言与引用，区分协调者建议和用户最终选择 |
 
-## 🧭 什么时候用它？
+## 当前能做什么
 
-当你已经有多个 Agent / 角色，但缺少一个“会议协议层”时，就适合引入 Roundtable：
+当前 Python 核心提供会议状态、发言顺序、引用、SQLite 记录、格式化摘要及 Web Viewer。配套 Skill 和 MCP 提示词指导宿主组织评审，`decision-support` 与 `code-review` 模板提供可修改的角色职责。
 
-1. **创建会议**：定义 topic、participants 和 max_rounds。
-2. **顺序发言**：记录每个 Agent 在每一轮的观点。
-3. **观察收敛**：查看状态、共识度、共识点和分歧点。
-4. **沉淀结论**：生成 summary，结束讨论并留下可追溯决策。
+**用户或协调者选角色，宿主运行 Agent 并选择模型，用户作出最终决定。** 自动组队、模型路由、语义观点提取和证据验证尚未实现。`convergence_score` 由外部写入的共识/分歧标注计算，可能为 `None`，不代表答案正确率；`summarize()` 整理记录，不替代专业综合判断。
+
+当前源码还支持带来源和历史版本的简报更新、关联发言的观点标注，以及通过 HTTP 工具获取角色提示词。结论可从读取、摘要和导出中完整取回；轮次显示区分实际评审与引擎游标。接口与使用顺序见 [使用指南](docs/DECISION_WORKFLOW.md)。
+
+完整方向和验收标准见 [产品方向](docs/product/DIRECTION.md)，模板与当前流程见 [决策评审指南](docs/DECISION_WORKFLOW.md)。这些改动位于源码；安装发布包前请核对其版本与能力，不能据此假定已同步发布。
 
 ## 🧩 适合场景
 
-- **技术方案评审**：让架构师、后端、运维、安全角色分别发言，沉淀决策依据
-- **产品决策讨论**：让产品、设计、开发、增长角色讨论 MVP 边界和优先级
-- **代码 Review 辩论**：让不同 Agent 从质量、安全、性能角度审查实现方案
-- **需求澄清**：让多个专家角色围绕模糊需求追问、反驳和收敛
-- **多 Agent 工作流**：作为 coordinator 的讨论协议层，记录过程和结论
+- **项目去留与方向**：继续维护、调整或停止，明确投入边界。
+- **产品范围与优先级**：服务谁、先做什么、哪些需求暂缓。
+- **技术路线**：自研或采购、架构选型、迁移与维护的取舍。
+- **发布与实施**：上线条件、实施路径、阻塞项与回滚条件。
+- **资源与商业模式**：预算和人力如何分配，免费、订阅或按量收费如何取舍。
+- **工作流程与工具选择**：是否引入工具，比较收益与迁移、培训、维护成本。
+- **Code Review**：围绕具体改动检查正确性、架构、安全与可靠性，输出可操作的问题和合并建议。
+
+这七类场景都在产品范围内，实际验证可分批开展。它们共用评审流程，按场景调整角色、材料和交付物；当前并非已有七套独立自动化实现。详见 [场景清单](docs/product/DIRECTION.md#场景清单)。普通事实查询或容易撤销的小选择，可以直接由单个助手处理。
 
 ## 🚀 快速开始
 
@@ -84,13 +85,14 @@ pip install -e .
 让 Claude Code、Cursor、Windsurf 等 MCP-capable agent 加入同一个圆桌：
 
 ```bash
-pip install "agent-roundtable[mcp]"
+# 在上面克隆的源码目录执行；当前服务接口按 MCP 1.x 验证
+pip install -e ".[mcp]" "mcp>=1,<2"
 python3 -m roundtable.skills.mcp-roundtable.install --platform=auto
 ```
 
 安装脚本会把 MCP server 的 `command` 写成当前 Python 解释器路径，适配 venv 和没有 `python` 命令的 macOS/Linux 环境。手动配置时建议优先使用 `python3`。
 
-任意 agent 可以做协调者并通过 invitation 把其他 agent 拉进来。Codex 等没有原生 MCP 的平台，可用内置 Codex 入口启动 HTTP 桥：
+已接入的 Agent 可以做协调者，并通过 invitation 邀请参与者。需要 HTTP 接入的宿主可使用桥接入口：
 
 ```bash
 python3 -m roundtable.codex
@@ -100,7 +102,7 @@ python3 -m roundtable.codex
 
 ### 基本用法
 
-例如：让后端架构师、运维工程师、产品经理三个 Agent 讨论数据库选型，Roundtable 负责管理轮次、记录观点、追踪收敛并生成结论。
+下面演示记录流程：调用者提供发言和结论，Roundtable 管理轮次与持久化。实际评审由宿主运行各角色 Agent；此示例不会调用模型。
 
 ```python
 from roundtable import RoundtableCore
@@ -132,16 +134,16 @@ core.speak(disc_id, "backend_architect", "PostgreSQL 的 JSON 和事务能力更
 core.speak(disc_id, "ops_engineer", "MySQL 运维经验和工具链更成熟，团队上手成本低。")
 core.speak(disc_id, "product_manager", "从迭代速度看，我们需要优先保证未来功能扩展能力。")
 
-# 4. 查看讨论状态（含收敛度）
+# 4. 查看讨论状态（没有外部 findings 标注时，收敛度为 None）
 status = core.status(disc_id)
 print(f"Convergence: {status['convergence_score']}")
 
-# 5. 生成结构化总结
+# 5. 获取格式化摘要，供协调者核对与综合
 summary = core.summarize(disc_id, compact=True)
 print(summary["structured_summary"])
 
-# 6. 结束讨论
-core.end_discussion(disc_id, conclusion="选择 PostgreSQL，优先支持复杂数据结构和长期扩展。")
+# 6. 记录建议，区分建议与用户已确认的决定
+core.end_discussion(disc_id, conclusion="建议选择 PostgreSQL；待验证迁移成本与运维条件，等待用户确认。")
 ```
 
 ### 默认 Web Viewer
@@ -190,9 +192,9 @@ result = rt.init(
 | 特性 | 说明 |
 |------|------|
 | 🧑‍⚖️ **圆桌讨论模型** | 用 topic、participants、rounds 管理多 Agent 讨论流程 |
-| 📊 **收敛追踪** | 自动计算每轮共识度（convergence score），量化讨论进展 |
-| 🧾 **结构化总结** | 输出共识、分歧、决策建议和结论，适合沉淀会议记录与决策文档 |
-| 🔌 **框架无关** | 独立运行，或通过 adapter 接入任何 Agent 框架 |
+| 📊 **标注比例** | 根据已有共识/分歧标注计算比例；不自动提取，也不作为质量指标 |
+| 🧾 **决策材料** | 汇集记录与格式化摘要，由协调者比较方案、保留分歧并记录建议 |
+| 🔌 **宿主集成** | 通过 Python API、工具或桥接记录评审；Agent 执行与模型选择由宿主负责 |
 | 🖥️ **默认 Web Viewer** | 创建讨论时默认尽力启动实时 Viewer，失败不阻断核心讨论 |
 | 🔔 **实时通知** | 讨论事件推送到飞书、Slack 或任意消息平台 |
 | 🛡️ **错误安全** | Generic adapter 所有方法返回 dict，永不抛异常 |
@@ -248,10 +250,11 @@ src/roundtable/
 
 ## 🛣️ 后续计划
 
-- 补充更多 CLI 示例和端到端使用文档
-- 增强结构化总结模板
-- 补充更多 Agent 框架 adapter
-- 持续打磨 Web Viewer 分享、嵌入和导出体验
+1. **可靠完成一次真实评审**：修复 MCP 兼容、通知与消息确认，验证双客户端流程及发布包。
+2. **验证专业协作的增益**：检查角色覆盖、分析深度和方案取舍，对比单助手及独立多角色汇总。
+3. **按真实使用增加自动化**：反复出现组织负担时，再投入角色建议、模型匹配与结构化证据管理。
+
+先用真实决策验证价值，再决定保持轻量 Skill、继续独立维护或收缩范围。详见 [产品方向](docs/product/DIRECTION.md)。
 
 ## 🤝 贡献
 

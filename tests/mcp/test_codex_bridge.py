@@ -11,7 +11,7 @@ import urllib.request
 import pytest
 
 from roundtable.codex import build_parser
-from roundtable.mcp.bridges import CodexBridge
+from roundtable.mcp.bridges import CodexBridge, GenericBridge
 
 
 def _free_port() -> int:
@@ -129,3 +129,81 @@ def test_codex_parser_accepts_bridge_options():
     assert args.display_name == "Codex Product"
     assert args.db == "/tmp/roundtable.db"
     assert args.auth_token == "codex-secret"
+
+
+@pytest.fixture(params=[CodexBridge, GenericBridge])
+def review_bridge(request, tmp_path):
+    options = {"platform": "test"} if request.param is GenericBridge else {}
+    bridge = request.param(
+        agent_id="review-host", port=_free_port(), db_path=str(tmp_path / "review-http.db"), **options
+    )
+    bridge.start()
+    _wait_ready(bridge.port)
+    yield bridge
+    bridge.stop()
+
+
+def test_http_review_updates_prompts_turn_notices_and_restart(review_bridge):
+    bridge = review_bridge
+
+    def tool(name, **arguments):
+        result = _post(bridge.port, "/tool", {"name": name, "arguments": arguments})
+        assert "error" not in result, result
+        return result
+
+    for agent_id in ["a", "b"]:
+        tool("roundtable_register_agent", agent_id=agent_id, platform="test")
+    did = tool(
+        "roundtable_create",
+        topic="HTTP acceptance fixture",
+        participants=[{"profile": "a"}, {"profile": "b"}],
+        max_rounds=1,
+        web=False,
+        context="Old assumption",
+    )["discussion_id"]
+    tool("roundtable_speak", discussion_id=did, participant="coordinator", content="Opening")
+    first = _post(bridge.port, "/speak", {"discussion_id": did, "participant": "a", "content": "FIRST_VIEW"})
+    assert first["next_speaker"] == "b"
+    assert first["turn_notice"]["inbox_message_id"]
+    messages = tool("roundtable_inbox", agent_id="b", mark_read=False)["messages"]
+    assert len([m for m in messages if m["type"] == "turn" and m["discussion_id"] == did]) == 1
+    tool(
+        "roundtable_update_context",
+        discussion_id=did,
+        context="User confirmed a new constraint",
+        source="user",
+        expected_revision=0,
+    )
+    prompt = _post(
+        bridge.port,
+        "/tool",
+        {
+            "name": "roundtable_get_prompt",
+            "arguments": {"name": "participant_turn", "arguments": {"discussion_id": did, "phase": "independent"}},
+        },
+    )
+    assert "new constraint" in prompt["text"]
+    assert "Old assumption" not in prompt["text"]
+    assert "FIRST_VIEW" not in prompt["text"]
+    final = _post(bridge.port, "/speak", {"discussion_id": did, "participant": "b", "content": "SECOND_VIEW"})
+    assert final["discussion_complete"]
+    tool("roundtable_end", discussion_id=did, conclusion="Complete recommendation with limits")
+    before = tool("roundtable_read", discussion_id=did)
+    bridge.stop()
+    bridge.start()
+    _wait_ready(bridge.port)
+    after = tool("roundtable_read", discussion_id=did)
+    assert after == before
+    assert after["conclusion"] == "Complete recommendation with limits"
+    assert after["completed_rounds"] == after["total_rounds"] == 1
+    assert "error" in _post(
+        bridge.port,
+        "/speak",
+        {
+            "discussion_id": did,
+            "participant": "unknown",
+            "content": "Invalid speech",
+        },
+    )
+    assert "error" in _post(bridge.port, "/tool", {"name": "roundtable_read", "arguments": []})
+    assert _get(bridge.port, "/health")["status"] == "ok"

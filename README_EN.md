@@ -5,7 +5,7 @@
 <h1 align="center">Roundtable</h1>
 
 <p align="center">
-  <strong>agent-roundtable is a multi-agent roundtable discussion engine for AI agent teams: let multiple agents speak in order, track consensus and disagreements, and generate structured meeting notes and conclusions.</strong>
+  <strong>Roundtable helps you organize professional roles for important decisions, use agents and models for their analysis, and work through trade-offs across disciplines.</strong>
 </p>
 
 <p align="center">
@@ -25,28 +25,40 @@
 
 ---
 
-## ⚡ Understand Roundtable in 30 Seconds
+## Product Direction
 
-When you let multiple AI agents discuss a complex problem, the hard part is not making them speak — it is managing the discussion:
+Important decisions involve user value, technical feasibility, experience, and operating costs. Roundtable aims to help you assemble relevant professional perspectives, obtain concrete analyses, and compare feasible choices.
 
-| What you care about | Roundtable's answer |
+**Roles define responsibilities; agents bring context and tools; models perform analysis.** These are separate choices. There is no fixed mapping from a model brand to a job title, and more participants are not automatically better.
+
+| Need | Review workflow |
 |---|---|
-| How do multiple agents collaborate? | Use a roundtable meeting model to manage participants, rounds, and ordered speaking |
-| Is the discussion converging? | Automatically track convergence score, consensus points, and disagreement points |
-| How are conclusions captured? | Generate structured summaries for meeting notes, PRDs, architecture reviews, and decision records |
-| Can it integrate with existing agent systems? | Framework-agnostic; integrate via adapters with Hermes Agent or any agent framework |
-| What about the Web Viewer? | It starts by default on a best-effort path; failures do not block discussion creation |
-| Is it heavy to run? | The core library has zero external dependencies and uses only Python stdlib + SQLite |
+| Broader coverage | Identify missing perspectives and assign questions, materials, and deliverables |
+| Deeper analysis | Ask each role for evidence, options, costs, and constraints |
+| Useful trade-offs | Discuss consequential conflicts and compare alternatives, retaining dissent |
+| Traceability | Preserve speeches and references, distinguishing recommendations from user decisions |
 
-**In one sentence: `agent-roundtable` is a Python package embeddable in any AI agent system; you pick the participants and define the topic, and it manages multi-agent roundtable discussions, ordered speaking, consensus/disagreement tracking, and structured meeting notes.**
+## Current Capabilities
+
+The Python core manages discussions, speaking order, references, SQLite records, formatted summaries, and a Web Viewer. Skills and MCP prompts guide the host through the review. The `decision-support` and `code-review` templates supply editable role responsibilities.
+
+The user or coordinator selects roles; the host runs agents and selects models; the user makes the decision. Automatic team selection, model routing, semantic finding extraction, and evidence verification are not implemented. `convergence_score` is a ratio of externally supplied annotations and may be `None`; it is not answer accuracy. `summarize()` formats recorded material rather than performing professional synthesis.
+
+The current source also supports versioned brief updates, speech-linked annotations, and prompt retrieval through HTTP tools. Reads, summaries, and exports retain full conclusions; actual review rounds are distinct from the engine cursor. See the [workflow guide](docs/DECISION_WORKFLOW.md).
+
+See the [product direction and acceptance criteria](docs/product/DIRECTION.md) and [decision workflow guide](docs/DECISION_WORKFLOW.md) (Chinese). These changes describe the source tree; check a published package's version and capabilities before assuming it includes them.
 
 ## 🧩 Use Cases
 
-- **Technical architecture review**: Let architect, backend, ops, and security agents debate and preserve decision rationale
-- **Product decision discussion**: Let product, design, engineering, and growth roles align on MVP scope and priorities
-- **Code review debate**: Let agents review a solution from quality, security, and performance perspectives
-- **Requirement clarification**: Let expert roles question, challenge, and converge on ambiguous requirements
-- **Multi-agent workflows**: Act as the coordinator's discussion protocol layer with a durable record and conclusion
+- **Project direction**: continue, change, defer, or stop; define investment boundaries.
+- **Product scope and priorities**: choose users, MVP boundaries, and deferred needs.
+- **Technical choices**: build or buy, architecture, migrations, and maintenance costs.
+- **Release and implementation**: identify launch conditions, blockers, rollout steps, and rollback conditions.
+- **Resources and business models**: allocate budget and people; compare free, subscription, and usage-based pricing.
+- **Workflows and tool selection**: compare benefits with migration, training, maintenance, and exit costs.
+- **Code Review**: inspect concrete changes from correctness, design, security, and reliability perspectives; deliver actionable findings and a merge recommendation.
+
+All seven scenarios are in scope; validation can proceed in batches. They share a review workflow with scenario-specific roles, materials, and deliverables, rather than seven completed automation products. See the [scenario catalog](docs/product/DIRECTION.md#场景清单). Simple facts and easily reversible choices may only need one assistant.
 
 ## 🚀 Quick Start
 
@@ -70,10 +82,10 @@ pip install -e .
 
 ### Codex Bridge
 
-Codex does not expose native MCP tools in every environment. Start the built-in HTTP bridge first, then let Codex call Roundtable through the local endpoints:
+For a host that needs HTTP access, start the built-in bridge. From the source checkout above (the current server interface is validated against MCP 1.x):
 
 ```bash
-pip install "agent-roundtable[mcp]"
+pip install -e ".[mcp]" "mcp>=1,<2"
 python -m roundtable.codex
 ```
 
@@ -81,7 +93,7 @@ The bridge registers a local Codex agent and exposes `/health`, `/agent`, `/inbo
 
 ### Basic Usage
 
-Example: let a backend architect, ops engineer, and product manager discuss database selection. Roundtable manages rounds, records viewpoints, tracks convergence, and generates a conclusion.
+This example records supplied speeches and a recommendation. Roundtable manages rounds and storage; the host runs the actual role agents. This example does not call a model.
 
 ```python
 from roundtable import RoundtableCore
@@ -113,16 +125,16 @@ core.speak(disc_id, "backend_architect", "PostgreSQL has stronger JSON and trans
 core.speak(disc_id, "ops_engineer", "MySQL has more mature operational experience and tooling in our team.")
 core.speak(disc_id, "product_manager", "From an iteration perspective, we need room for future feature expansion.")
 
-# 4. Check discussion status with convergence score
+# 4. Check status (convergence is None without externally supplied findings)
 status = core.status(disc_id)
 print(f"Convergence: {status['convergence_score']}")
 
-# 5. Generate structured summary
+# 5. Get a formatted summary for the coordinator to verify and synthesize
 summary = core.summarize(disc_id, compact=True)
 print(summary["structured_summary"])
 
-# 6. End discussion
-core.end_discussion(disc_id, conclusion="Choose PostgreSQL for complex data modeling and long-term extensibility.")
+# 6. Record a recommendation separately from a user-approved decision
+core.end_discussion(disc_id, conclusion="Recommend PostgreSQL; validate migration cost and ops readiness. Pending user decision.")
 ```
 
 ### Default Web Viewer
@@ -171,9 +183,9 @@ result = rt.init(
 | Feature | Description |
 |---------|-------------|
 | 🧑‍⚖️ **Roundtable Discussion Model** | Manage multi-agent discussions with topic, participants, and rounds |
-| 📊 **Convergence Tracking** | Auto-calculate consensus score per round to quantify discussion progress |
-| 🧾 **Structured Summaries** | Output consensus, disagreements, recommendations, and conclusions for meeting notes and decision records |
-| 🔌 **Framework Agnostic** | Run standalone or integrate with any agent framework via adapters |
+| 📊 **Annotation Ratio** | Calculate a ratio from supplied findings; no automatic extraction or quality assessment |
+| 🧾 **Decision Materials** | Format records for the coordinator to compare options, retain dissent, and record a recommendation |
+| 🔌 **Host Integration** | Record reviews via Python, tools, or bridges; hosts execute agents and select models |
 | 🖥️ **Default Web Viewer** | Best-effort real-time viewer on discussion creation; viewer failures do not block core discussions |
 | 🔔 **Real-time Notifications** | Push discussion events to Feishu, Slack, or any messaging platform |
 | 🛡️ **Error-Safe** | Generic adapter returns dict for all methods and never throws exceptions |
@@ -211,10 +223,11 @@ src/roundtable/
 
 ## 🛣️ Roadmap
 
-- Add more CLI examples and end-to-end usage docs
-- Improve structured summary templates
-- Add adapters for more agent frameworks
-- Continue improving Web Viewer sharing, embedding, and export flows
+1. Complete a reliable review: MCP compatibility, notifications, message acknowledgement, two-client flows, and package verification.
+2. Validate professional contribution: coverage, depth, and trade-offs compared with a single assistant and independent role summaries. Include Code Review with actionable findings and false-positive checks.
+3. Automate repeated burdens only after observing them: role suggestions, model matching, and structured evidence management.
+
+Real usage will determine whether to maintain a standalone product, keep a lightweight skill, or reduce scope. See [product direction](docs/product/DIRECTION.md).
 
 ## 🤝 Contributing
 

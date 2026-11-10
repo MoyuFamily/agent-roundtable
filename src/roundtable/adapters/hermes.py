@@ -340,7 +340,7 @@ ROUNDTABLE_SUMMARIZE_SCHEMA = {
     "name": "roundtable_summarize",
     "description": (
         "Generate summary data for a conclusion document. Returns structured_summary "
-        "(compact Markdown, <5KB) plus metadata. Use compact=true to omit raw speech data."
+        "(speech excerpts and full saved conclusion) plus metadata. Use compact=true to omit raw speech data."
     ),
     "parameters": {
         "type": "object",

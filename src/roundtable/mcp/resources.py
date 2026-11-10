@@ -59,11 +59,23 @@ def _build_transcript(core: RoundtableCore, discussion_id: str) -> dict[str, Any
         return result
     speeches = result.get("speeches", [])
     lines = [f"# Discussion: {result.get('topic', discussion_id)}\n"]
+    lines.append(f"\n## Current brief (v{result['context_revision']})\n\n{result['context'] or '(Not supplied)'}\n")
+    lines.append(
+        f"\n## Conclusion\n\n{result['conclusion'] if result['conclusion'] is not None else '(Not recorded)'}\n"
+    )
+    lines.append(
+        f"\nReview rounds: {result['total_rounds']}; completed: {result['completed_rounds']} (opening excluded).\n"
+    )
     current_round = -1
     for s in speeches:
         if s["round"] != current_round:
             current_round = s["round"]
             lines.append(f"\n## Round {current_round}\n")
         display = s.get("display_name") or s["participant"]
-        lines.append(f"**{display}** ({s.get('role', '')}): {s['content']}\n")
-    return {"transcript": "\n".join(lines), "discussion_id": discussion_id}
+        lines.append(f"[#{s['id']}] **{display}**: {s['content']}\n")
+    return {
+        "transcript": "\n".join(lines),
+        "discussion_id": discussion_id,
+        "conclusion": result["conclusion"],
+        "context_history": result["context_history"],
+    }

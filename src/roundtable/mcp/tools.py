@@ -262,8 +262,52 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "roundtable_update_context",
+        "description": "Replace the current shared brief with a complete updated version, preserving revision history.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "discussion_id": {"type": "string"},
+                "context": {"type": "string", "description": "Complete current brief, not just the new facts"},
+                "source": {"type": "string", "description": "Actual source of the update, e.g. user or a document"},
+                "reason": {"type": "string"},
+                "expected_revision": {"type": "integer", "minimum": 0},
+            },
+            "required": ["discussion_id", "context", "source", "expected_revision"],
+        },
+    },
+    {
+        "name": "roundtable_record_finding",
+        "description": "Record an evidence-linked consensus, disagreement or new point. Does not infer or verify it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "discussion_id": {"type": "string"},
+                "finding_type": {"type": "string", "enum": ["consensus", "disagreement", "new_point"]},
+                "content": {"type": "string"},
+                "related_speeches": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}},
+            },
+            "required": ["discussion_id", "finding_type", "content", "related_speeches"],
+        },
+    },
+    {
+        "name": "roundtable_get_prompt",
+        "description": "Get the same review prompts through MCP tools or HTTP /tool. Does not run an agent.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "enum": ["coordinator_kickoff", "participant_turn", "coordinator_summarize"],
+                },
+                "arguments": {"type": "object", "additionalProperties": {"type": "string"}},
+            },
+            "required": ["name"],
+        },
+    },
+    {
         "name": "roundtable_read",
-        "description": "Read discussion history.",
+        "description": "Read full speeches, current brief and revision history, conclusion and actual round counts.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -294,7 +338,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "roundtable_summarize",
-        "description": "Get structured summary data for the discussion.",
+        "description": "Format recorded evidence and the full saved conclusion; no semantic synthesis.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -517,6 +561,34 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
                 since_round=arguments.get("since_round"),
                 participant=arguments.get("participant"),
             )
+
+        elif name == "roundtable_update_context":
+            return core.update_context(
+                arguments["discussion_id"],
+                arguments["context"],
+                source=arguments["source"],
+                expected_revision=arguments["expected_revision"],
+                reason=arguments.get("reason"),
+            )
+
+        elif name == "roundtable_record_finding":
+            return core.record_finding(
+                arguments["discussion_id"],
+                arguments["finding_type"],
+                arguments["content"],
+                arguments["related_speeches"],
+            )
+
+        elif name == "roundtable_get_prompt":
+            from roundtable.mcp.prompts import PROMPT_SCHEMAS, handle_prompt_call
+
+            prompt_name = arguments["name"]
+            if prompt_name not in {prompt["name"] for prompt in PROMPT_SCHEMAS}:
+                raise ValueError(f"Unknown prompt: {prompt_name}")
+            prompt_args = arguments.get("arguments", {})
+            if not isinstance(prompt_args, dict) or any(not isinstance(v, str) for v in prompt_args.values()):
+                raise ValueError("Prompt arguments must be an object of strings")
+            return handle_prompt_call(core, db, prompt_name, prompt_args)
 
         elif name == "roundtable_status":
             return core.status(arguments["discussion_id"])

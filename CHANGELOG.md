@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Changed
+
+- Reorient Roundtable around professional coverage, substantive analysis, and cross-role trade-offs for important decisions, including Code Review. Document roles, agents, models, coordinator, and user responsibilities separately from planned automation.
+- Align Chinese/English README, landing copy, and bundled skills with the decision workflow and current capability limits. Replace consensus-threshold stopping guidance with coverage, information gain, and budget.
+- Update MCP prompts to prepare decision briefs, preserve evidence and dissent, and distinguish recommendations from user-approved decisions.
+
+### Added
+
+- Editable `decision-support` and `code-review` templates and a source-level workflow guide.
+- Independent participant prompts that omit peer speeches, with an explicit response phase for cross-role discussion. Host context separation remains required for actual isolation.
+- Versioned shared briefs via `roundtable_update_context`, with source/reason, optimistic concurrency and schema-v5 history preserved across restarts. Updated briefs reach participant prompts without consuming a turn.
+- Evidence-linked annotations via `roundtable_record_finding`; validated speech references and retry deduplication. Annotation ratios are not decision-quality scores.
+- `roundtable_get_prompt` exposes the existing prompts through tools, including HTTP `/tool`, without executing models.
+
+### Fixed
+
+- Return full saved conclusions from read/status/summary and transcript resources. Re-exporting summaries no longer drops the conclusion; post-round conclusion updates emit resource events.
+- Report actual review rounds separately from the engine cursor; exclude opening and empty rounds and label partial rounds accurately.
+- Include speech IDs, explicit excerpt markers and annotation sources in summaries; distinguish an unrecorded conclusion from an ended meeting.
+- Route CodexBridge and GenericBridge `/speak` through the same handler as `/tool`, preserving next-turn notices and structured errors; close sockets on shutdown for restart.
+- Bound the MCP extra to the supported SDK 1.x API and install it in CI so MCP integration tests run.
+
 ## [2.1.0] - 2026-05-31
 
 ### Added

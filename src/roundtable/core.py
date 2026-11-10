@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from collections.abc import Callable
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -23,7 +24,7 @@ from roundtable.exceptions import (
     DiscussionNotActiveError,
     DiscussionNotFoundError,
 )
-from roundtable.models import ConvergenceRecord, Discussion, Participant, Speech
+from roundtable.models import ConvergenceRecord, Discussion, Participant, Speech, review_round_counts
 from roundtable.notify import Notifier, validate_notification_config
 from roundtable.output import OutputBuilder
 from roundtable.template import get_template
@@ -415,6 +416,91 @@ class RoundtableCore:
         finally:
             conn.close()
 
+    def update_context(
+        self,
+        discussion_id: str,
+        context: str,
+        *,
+        source: str,
+        expected_revision: int,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Update shared facts without consuming a turn or overwriting their history."""
+        conn = self.db.connect()
+        try:
+            result = self.db.update_context(
+                conn, discussion_id, context, source=source, expected_revision=expected_revision, reason=reason
+            )
+            self._emit("context_updated", discussion_id=discussion_id, revision=result["context_revision"])
+            return {"ok": True, "discussion_id": discussion_id, **result}
+        finally:
+            conn.close()
+
+    def record_finding(
+        self, discussion_id: str, finding_type: str, content: str, related_speeches: list[int]
+    ) -> dict[str, Any]:
+        """Record a host's evidence-linked annotation, not an automatically inferred verdict."""
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("content is required")
+        if (
+            not isinstance(related_speeches, list)
+            or not related_speeches
+            or any(type(ref) is not int or ref <= 0 for ref in related_speeches)
+        ):
+            raise ValueError("related_speeches must contain positive speech IDs")
+        refs = sorted(set(related_speeches))
+        conn = self.db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            disc = self.db.get_discussion(conn, discussion_id)
+            if not disc:
+                raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
+            if disc.status not in {"active", "concluded"}:
+                raise DiscussionNotActiveError(f"Cannot annotate a {disc.status} discussion")
+            speeches = {s.id: s for s in self.db.get_speeches(conn, discussion_id)}
+            if any(ref not in speeches for ref in refs):
+                raise ValueError("Every related speech must belong to this discussion")
+            round_num = max(speeches[ref].round for ref in refs)
+            existing = next(
+                (
+                    f
+                    for f in self.db.get_findings(conn, discussion_id)
+                    if f.type == finding_type and f.content == content.strip() and f.related_speeches == refs
+                ),
+                None,
+            )
+            finding_id = (
+                existing.id
+                if existing
+                else self.db.add_finding(conn, discussion_id, finding_type, content.strip(), round_num, refs)
+            )
+            self.db.calculate_convergence(conn, discussion_id, round_num)
+            history = self.db.get_convergence_history(conn, discussion_id)
+            if history:
+                conn.execute(
+                    "UPDATE discussions SET convergence_score = ? WHERE id = ?",
+                    (history[-1].score, discussion_id),
+                )
+            conn.execute("COMMIT")
+            self._sync_web_discussion_state(discussion_id, conn)
+            self._emit("finding_recorded", discussion_id=discussion_id, finding_id=finding_id)
+            return {
+                "ok": True,
+                "discussion_id": discussion_id,
+                "finding_id": finding_id,
+                "type": finding_type,
+                "round": round_num,
+                "related_speeches": refs,
+                "created": existing is None,
+                "basis": "recorded_annotation",
+            }
+        except Exception:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
+
     def read(
         self,
         discussion_id: str,
@@ -434,6 +520,8 @@ class RoundtableCore:
 
         conn = self.db.connect()
         try:
+            # Keep context and its revision consistent if another host updates the brief.
+            conn.execute("BEGIN")
             disc = self.db.get_discussion(conn, discussion_id)
             if not disc:
                 raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
@@ -445,6 +533,10 @@ class RoundtableCore:
                 participant=participant,
             )
             participants = self.db.get_participants(conn, discussion_id)
+            context_history = self.db.get_context_history(conn, discussion_id)
+            all_speeches = (
+                self.db.get_speeches(conn, discussion_id) if since_round is not None or participant else speeches
+            )
             p_map = {
                 p.participant: {
                     "role": p.role,
@@ -458,6 +550,11 @@ class RoundtableCore:
                 "ok": True,
                 "discussion_id": disc.id,
                 "topic": disc.topic,
+                "context": disc.context,
+                "context_revision": context_history[-1]["revision"],
+                "context_history": context_history,
+                "conclusion": disc.conclusion,
+                **review_round_counts(disc, all_speeches),
                 "current_round": disc.current_round,
                 "max_rounds": disc.max_rounds,
                 "status": disc.status,
@@ -503,13 +600,15 @@ class RoundtableCore:
                         "discussion_activated": readiness_result.get("discussion_activated", False),
                     }
                 )
-            if any(item.get("discussion_activated") for item in dispatch_status):
-                refreshed = self.db.get_discussion(conn, discussion_id)
-                if refreshed:
-                    disc = refreshed
+            # Readiness may write state; start a read snapshot only after it has finished.
+            conn.execute("BEGIN")
+            refreshed = self.db.get_discussion(conn, discussion_id)
+            if refreshed:
+                disc = refreshed
 
             participants = self.db.get_participants(conn, discussion_id)
             speech_count = self.db.get_speech_count(conn, discussion_id)
+            context_history = self.db.get_context_history(conn, discussion_id)
             findings = self.db.get_findings(conn, discussion_id)
             conv_history = self.db.get_convergence_history(conn, discussion_id)
 
@@ -536,6 +635,10 @@ class RoundtableCore:
                 "discussion_id": disc.id,
                 "topic": disc.topic,
                 "status": disc.status,
+                "context": disc.context,
+                "context_revision": context_history[-1]["revision"],
+                "conclusion": disc.conclusion,
+                **review_round_counts(disc, self.db.get_speeches(conn, discussion_id)),
                 "current_round": disc.current_round,
                 "max_rounds": disc.max_rounds,
                 "speech_order": disc.speech_order,
@@ -543,6 +646,8 @@ class RoundtableCore:
                 "consensus_points": consensus_pts,
                 "disagreement_points": disagreement_pts,
                 "new_points": new_points,
+                "findings": [asdict(f) for f in findings],
+                "findings_basis": "recorded_annotations; not automatic synthesis or decision quality",
                 "speech_count": speech_count,
                 "participant_count": len(participants),
                 "next_speaker": next_speaker,
@@ -567,13 +672,15 @@ class RoundtableCore:
         Args:
             discussion_id: The discussion to summarize.
             compact: If True, omit raw rounds data and formatted_history
-                to keep output small (<5KB). Use structured_summary instead.
+                to avoid duplicating full speeches. The brief and conclusion
+                remain complete, so this is not a fixed response-size limit.
         """
         if not discussion_id:
             raise ValueError("discussion_id is required")
 
         conn = self.db.connect()
         try:
+            conn.execute("BEGIN")
             disc = self.db.get_discussion(conn, discussion_id)
             if not disc:
                 raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
@@ -610,30 +717,24 @@ class RoundtableCore:
                 )
 
             final_score = disc.convergence_score
-            if not final_score and conv_history:
+            if final_score is None and conv_history:
                 final_score = conv_history[-1].score
 
-            # Build a structured summary — compact enough for LLM context,
-            # rich enough to write a conclusion without re-reading raw speeches.
-            structured_summary = self._build_structured_summary(
-                disc,
-                participants,
-                speeches,
-                p_map,
-                consensus_pts,
-                disagreement_pts,
-                new_points,
-                final_score,
-                conv_history,
-            )
+            # Format recorded evidence. Consequential claims still need full-speech review.
+            structured_summary = self._output.build_summary_markdown(conn, disc)
+            context_history = self.db.get_context_history(conn, discussion_id)
 
             result = {
                 "ok": True,
                 "discussion_id": disc.id,
                 "topic": disc.topic,
                 "context": disc.context,
+                "context_revision": context_history[-1]["revision"],
+                "context_history": context_history,
+                "conclusion": disc.conclusion,
                 "status": disc.status,
-                "total_rounds": disc.current_round,
+                "current_round": disc.current_round,
+                **review_round_counts(disc, speeches),
                 "max_rounds": disc.max_rounds,
                 "final_convergence_score": final_score,
                 "participants": [
@@ -648,6 +749,8 @@ class RoundtableCore:
                 "consensus_points": consensus_pts,
                 "disagreement_points": disagreement_pts,
                 "new_points": new_points,
+                "findings": [asdict(f) for f in findings],
+                "findings_basis": "recorded_annotations; not automatic synthesis or decision quality",
                 "speech_count": len(speeches),
                 "convergence_history": [
                     {
@@ -745,8 +848,10 @@ class RoundtableCore:
                         "action": "concluded",
                         "success": True,
                         "web_retained": web_retained,
+                        "conclusion": conclusion,
                     }
                     result.update(conclusion_output_result)
+                    self._emit("conclusion_updated", discussion_id=discussion_id)
                     return result
                 raise DiscussionNotActiveError(f"Discussion {discussion_id} is already {disc.status}")
 
@@ -808,6 +913,7 @@ class RoundtableCore:
                 "action": action,
                 "success": ok,
                 "web_retained": web_retained,
+                "conclusion": disc_after.conclusion if disc_after else None,
             }
             result.update(output_result)
             self._emit("discussion_ended", discussion_id=discussion_id, action=action)

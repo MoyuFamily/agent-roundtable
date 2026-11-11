@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, codex/windows-validation]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -13,11 +13,16 @@ concurrency:
 jobs:
   quality:
     name: Quality Gates
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.10", "3.11", "3.12"]
+        include:
+          - os: windows-2025
+            python-version: "3.12"
 
     steps:
       - uses: actions/checkout@v4
@@ -52,10 +57,20 @@ jobs:
         run: npm run check
 
       - name: Configure PDF test browser
+        if: runner.os == 'Linux'
         run: |
           echo "PUPPETEER_EXECUTABLE_PATH=$(command -v google-chrome)" >> "$GITHUB_ENV"
           echo "ROUNDTABLE_REQUIRE_PDF=1" >> "$GITHUB_ENV"
           echo "ROUNDTABLE_PDF_NO_SANDBOX=1" >> "$GITHUB_ENV"
+
+      - name: Configure Windows PDF test browser
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $chrome = Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'
+          if (!(Test-Path $chrome)) { throw 'Chrome is not installed' }
+          "PUPPETEER_EXECUTABLE_PATH=$chrome" >> $env:GITHUB_ENV
+          "ROUNDTABLE_REQUIRE_PDF=1" >> $env:GITHUB_ENV
 
       - name: Pytest
         run: python -m pytest -q

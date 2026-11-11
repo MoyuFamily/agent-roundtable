@@ -11,6 +11,7 @@
  */
 
 import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 import {
   readFileSync,
   watch,
@@ -1155,25 +1156,14 @@ router.get("/api/:token/export/markdown", async (req, res, params) => {
   res.end(md);
 });
 
-router.get("/api/:token/export/pdf", async (req, res, params) => {
-  const entry = entryForToken(params.token);
-  if (!entry || !isTokenValid(params.token)) return send403(res);
-  if (entry.passwordHash) {
-    if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
-  }
-
-  const data = readDiscussionFor(entry);
-  if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
-
-  const { spawn } = await import("node:child_process");
-  const md = buildMarkdown(data);
-  const filename = safeFilename(data.topic || "Discussion");
+// The caller receives a buffer or an error only after the worker and files are released.
+async function renderPdf(md, signal) {
+  if (signal.aborted) throw new Error('PDF export cancelled.');
   const temporaryDir = mkdtempSync(join(tmpdir(), 'roundtable-pdf-'));
   const tmpMdPath = join(temporaryDir, 'review.md');
   const expectedPdfPath = join(temporaryDir, 'review.pdf');
 
   let child = null;
-  let clientClosed = false;
   let killTimer = null;
   let stopping = false;
   const killWorker = () => {
@@ -1188,16 +1178,14 @@ router.get("/api/:token/export/pdf", async (req, res, params) => {
       } catch { /* already exited */ }
     }, 2000);
   };
-  const onClose = () => {
-    if (!res.writableEnded) { clientClosed = true; killWorker(); }
-  };
-  res.on('close', onClose);
+  signal.addEventListener('abort', killWorker, { once: true });
 
   try {
     writeFileSync(tmpMdPath, md, "utf-8");
 
-    const pdfOk = await new Promise((resolveP, rejectP) => {
+    await new Promise((resolveP, rejectP) => {
       let stderr = "";
+      let spawnError = null;
       child = spawn(process.execPath, [PDF_WORKER, tmpMdPath, expectedPdfPath], {
         cwd: temporaryDir,
         env: { ...process.env },
@@ -1213,37 +1201,53 @@ router.get("/api/:token/export/pdf", async (req, res, params) => {
       child.on("close", (code) => {
         clearTimeout(timer);
         clearTimeout(killTimer);
-        if (timedOut) rejectP(new Error('PDF rendering timed out.'));
-        else if (code === 0) resolveP(true);
+        if (signal.aborted) rejectP(new Error('PDF export cancelled.'));
+        else if (timedOut) rejectP(new Error('PDF rendering timed out.'));
+        else if (spawnError) rejectP(spawnError);
+        else if (code === 0) resolveP();
         else rejectP(new Error(`md-to-pdf exited with code ${code}: ${stderr.slice(0, 500)}`));
       });
-      child.on("error", (error) => { clearTimeout(timer); clearTimeout(killTimer); rejectP(error); });
+      // Even a failed spawn emits close; wait for it before removing the working directory.
+      child.on("error", (error) => { spawnError = error; });
     });
 
-    if (clientClosed) return;
-
-    if (pdfOk && existsSync(expectedPdfPath)) {
-      const pdfBuffer = readFileSync(expectedPdfPath);
-      res.writeHead(200, {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}.pdf"`,
-        "Content-Length": pdfBuffer.length,
-        "Access-Control-Allow-Origin": "*",
-      });
-      res.end(pdfBuffer);
-    } else {
-      sendJSON(
-        res,
-        {
-          error: "PDF export unavailable",
-          detail: "md-to-pdf completed but did not produce a PDF file.",
-          help: "Markdown export is still available. Install web dependencies and Chromium/Puppeteer support to enable PDF export.",
-        },
-        503
-      );
+    if (!existsSync(expectedPdfPath)) {
+      throw new Error('md-to-pdf completed but did not produce a PDF file.');
     }
+    return readFileSync(expectedPdfPath);
+  } finally {
+    signal.removeEventListener('abort', killWorker);
+    rmSync(temporaryDir, { recursive: true, force: true });
+  }
+}
+
+router.get("/api/:token/export/pdf", async (req, res, params) => {
+  const entry = entryForToken(params.token);
+  if (!entry || !isTokenValid(params.token)) return send403(res);
+  if (entry.passwordHash) {
+    if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
+  }
+
+  const data = readDiscussionFor(entry);
+  if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
+  if (res.destroyed) return;
+
+  const controller = new AbortController();
+  const onClose = () => controller.abort();
+  res.once('close', onClose);
+  try {
+    const pdfBuffer = await renderPdf(buildMarkdown(data), controller.signal);
+    if (res.destroyed) return;
+    const filename = safeFilename(data.topic || "Discussion");
+    res.writeHead(200, {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${filename}.pdf"`,
+      "Content-Length": pdfBuffer.length,
+      "Access-Control-Allow-Origin": "*",
+    });
+    res.end(pdfBuffer);
   } catch (err) {
-    if (!clientClosed) {
+    if (!res.destroyed) {
       console.error("[export/pdf] Error:", err.message);
       sendJSON(
         res,
@@ -1257,8 +1261,6 @@ router.get("/api/:token/export/pdf", async (req, res, params) => {
     }
   } finally {
     res.off('close', onClose);
-    killWorker();
-    rmSync(temporaryDir, { recursive: true, force: true });
   }
 });
 

@@ -411,22 +411,6 @@ class TestExportMarkdown:
 
 
 class TestExportPDF:
-    def test_export_pdf_success(self, server, pdf_support):
-        base, _, _ = server
-        resp = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=90)
-        assert resp.status_code == 200, resp.text
-        ct = resp.headers.get("content-type", "")
-        assert "pdf" in ct
-        # PDF should start with %PDF
-        assert resp.content[:4] == b"%PDF"
-
-    def test_export_pdf_filename(self, server, pdf_support):
-        base, _, _ = server
-        resp = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=90)
-        assert resp.status_code == 200, resp.text
-        cd = resp.headers.get("content-disposition", "")
-        assert "Test_Discussion_Topic" in cd or "discussion" in cd
-
     def test_export_pdf_invalid_token(self, server):
         base, _, _ = server
         resp = requests.get(f"{base}/api/bad_token/export/pdf", timeout=5)
@@ -445,6 +429,9 @@ class TestExportPDF:
             )
         for response in results:
             assert response.status_code == 200, response.text
+            assert response.headers["content-type"] == "application/pdf"
+            assert response.headers["content-disposition"] == 'attachment; filename="Test_Discussion_Topic.pdf"'
+            assert int(response.headers["content-length"]) == len(response.content)
             assert response.content.startswith(b"%PDF")
         assert not list(directory.glob("roundtable-pdf-*"))
         assert not list((directory / "test_disc").glob("*.tmp.*"))

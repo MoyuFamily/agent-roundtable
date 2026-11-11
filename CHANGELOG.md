@@ -36,6 +36,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Commit invitation/summon acceptance together with participant membership. Reject expired summons and new joins to closed discussions; serialize competing replies and expiry sweeps to preserve a single terminal state.
 - Serve bridge requests concurrently and move blocking MCP tool work off the event loop, so turn polling cannot block the next speech. Bound waits to 30 seconds and use monotonic elapsed time.
 - Resolve PDF rendering dependencies from the installed viewer rather than the discussion directory. Isolate concurrent exports, bound rendering time, clean up workers/temp files, and render raw HTML/remote images as inert text. PDF tests now fail on runtime errors; CI requires a real browser instead of skipping every 503.
+- Complete PDF worker and temporary-file cleanup before returning success or failure responses, removing a Linux-observed response/cleanup race. Consolidate successful export checks into the concurrent export scenario.
 
 ## [2.1.0] - 2026-05-31
 

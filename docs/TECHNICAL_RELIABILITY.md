@@ -52,7 +52,7 @@ HTTP Bridge 使用并发请求处理；MCP 在工作线程执行同步工具。�
 
 ## PDF 导出
 
-Viewer 的 pdf-worker.mjs 从安装位置加载 md-to-pdf，导出时不运行 npx 或下载依赖。每个请求使用独立临时目录和渲染进程，默认60秒超时（可通过 `ROUNDTABLE_PDF_TIMEOUT_MS` 设置，最大120秒）；请求断开或超时会终止渲染并清理文件。在 POSIX 平台同时清理渲染进程组中的浏览器子进程。
+Viewer 的 pdf-worker.mjs 从安装位置加载 md-to-pdf，导出时不运行 npx 或下载依赖。每个请求使用独立临时目录和渲染进程，默认60秒超时（可通过 `ROUNDTABLE_PDF_TIMEOUT_MS` 设置，最大120秒）；请求断开或超时会终止渲染并清理文件。渲染函数等 worker 关闭后清理目录，再返回 PDF 内容或错误，因此正常与失败 HTTP 响应都在清理完成后发送。在 POSIX 平台通过 Puppeteer 的信号处理器终止它独立创建的浏览器进程组，worker 未按时退出时再强制终止 worker 进程组。
 
 原始 HTML、脚本和远程图片作为文本处理，不在导出浏览器中执行或请求；代码块、表格和正文仍按 Markdown 排版。可用 `PUPPETEER_EXECUTABLE_PATH` 指定 Chrome/Chromium 可执行文件。受控 CI 环境需要关闭浏览器沙箱时显式设置 `ROUNDTABLE_PDF_NO_SANDBOX=1`，默认不关闭。
 

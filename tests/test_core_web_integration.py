@@ -3,7 +3,7 @@
 Tests that create_discussion, speak, and end_discussion correctly
 hook into WebPublisher when web=True is passed.
 
-WebPublisher is mocked to avoid real PM2 subprocess calls.
+WebPublisher is mocked here; tests/test_web_viewer.py exercises the real Node server.
 """
 
 from __future__ import annotations
@@ -308,24 +308,12 @@ class TestSchemaWebFields:
         assert props["web_port"]["type"] == "integer"
         assert props["web_port"]["default"] == 8199
 
-    def test_web_defaults_to_true(self):
-        """Verify that the un-patched RoundtableCore methods default web parameter to True."""
-        import inspect
-        import sys
-
-        # Reload the module so this test sees the class definitions before conftest monkeypatches them.
-        # Save patched references
-        original_modules = sys.modules.copy()
-        # Reload roundtable.core in a clean way
-        try:
-            if "roundtable.core" in sys.modules:
-                del sys.modules["roundtable.core"]
-            import roundtable.core
-
-            sig = inspect.signature(roundtable.core.RoundtableCore.create_discussion)
-            assert sig.parameters["web"].default is True
-            sig_demo = inspect.signature(roundtable.core.RoundtableCore.run_demo)
-            assert sig_demo.parameters["web"].default is True
-        finally:
-            # Restore
-            sys.modules.update(original_modules)
+    @pytest.mark.web_defaults
+    def test_viewer_default_is_used_by_core_and_demo(self, core):
+        mock_pub = _mock_publisher()
+        with patch("roundtable.web_publisher.WebPublisher", return_value=mock_pub):
+            discussion = core.create_discussion("Default viewer", _make_participants())
+            demo = core.run_demo(max_rounds=1, verbose=False)
+        for result in (discussion, demo):
+            assert result["web_status"] == "ready"
+            assert result["web_url"] == mock_pub.start.return_value

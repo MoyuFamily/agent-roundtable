@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
 
 
 class AgentBridge(ABC):
@@ -11,8 +10,10 @@ class AgentBridge(ABC):
 
     A bridge runs as a local process that:
     1. Registers itself as an agent
-    2. Listens for invitations (via inbox polling or webhook)
-    3. Translates roundtable tool calls into platform-native API calls
+    2. Receives invitations and tool calls from a host
+    3. Records host-generated speeches in the shared discussion
+
+    Model execution and inbox consumption belong to the host.
     """
 
     @abstractmethod
@@ -22,14 +23,6 @@ class AgentBridge(ABC):
     @abstractmethod
     def stop(self) -> None:
         """Stop the bridge gracefully."""
-
-    @abstractmethod
-    async def on_invitation(self, invitation: dict[str, Any]) -> bool:
-        """Handle an incoming invitation. Return True to accept, False to decline."""
-
-    @abstractmethod
-    async def generate_speech(self, context: dict[str, Any]) -> str:
-        """Generate a speech given discussion context. Platform-specific implementation."""
 
     @property
     @abstractmethod

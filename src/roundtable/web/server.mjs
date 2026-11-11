@@ -340,16 +340,11 @@ function _parseCookies(cookieHeader) {
   return cookies;
 }
 
-function isAuthenticated(req, entry, token = "") {
+function isAuthenticated(req, entry) {
   if (!entry.passwordHash) return true;
   const cookies = _parseCookies(req.headers.cookie);
   const expected = _signSession(entry.tokenHash);
-  const sig = cookies[`rt_pw_${entry.tokenHash}`];
-  if (sig === expected) return true;
-
-  // Backward compatibility for clients/tests that stored rt_pw_<raw token>.
-  const legacySig = token ? cookies[`rt_pw_${token}`] : null;
-  return legacySig === expected;
+  return cookies[`rt_pw_${entry.tokenHash}`] === expected;
 }
 
 // ---------------------------------------------------------------------------
@@ -919,7 +914,7 @@ router.get("/r/:token", async (req, res, params) => {
   if (!entry || !isTokenValid(params.token)) return send403(res);
 
   if (entry.passwordHash) {
-    if (!isAuthenticated(req, entry, params.token)) return sendPasswordPage(res);
+    if (!isAuthenticated(req, entry)) return sendPasswordPage(res);
   }
 
   renderViewer(req, res, entry, params.token, { templateName: "index.html", embed: false });
@@ -934,7 +929,7 @@ router.get("/embed/:token", async (req, res, params) => {
   // no good way to surface a password prompt and it leaks UX onto the host page.
   // Surface a clean "open in new tab" hint instead.
   if (entry.passwordHash) {
-    if (!isAuthenticated(req, entry, params.token)) {
+    if (!isAuthenticated(req, entry)) {
       const url = `/r/${encodeURIComponent(params.token)}`;
       const html = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -979,7 +974,7 @@ router.get("/api/:token/data", async (req, res, params) => {
   const entry = entryForToken(params.token);
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
-    if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
+    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
   const data = readDiscussionFor(entry);
@@ -991,7 +986,7 @@ router.get("/api/:token/events", async (req, res, params) => {
   const entry = entryForToken(params.token);
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
-    if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
+    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
   res.writeHead(200, {
@@ -1034,7 +1029,7 @@ router.get("/api/:token/poll", async (req, res, params) => {
   const entry = entryForToken(params.token);
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
-    if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
+    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -1113,10 +1108,7 @@ router.post("/api/:token/validate-password", async (req, res, params) => {
     if (match) {
       const sig = _signSession(entry.tokenHash);
       const cookieAttrs = `Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}`;
-      res.setHeader("Set-Cookie", [
-        `rt_pw_${entry.tokenHash}=${sig}; ${cookieAttrs}`,
-        `rt_pw_${params.token}=${sig}; ${cookieAttrs}`,
-      ]);
+      res.setHeader("Set-Cookie", `rt_pw_${entry.tokenHash}=${sig}; ${cookieAttrs}`);
       return sendJSON(res, { ok: true });
     }
     return sendJSON(res, { ok: false, error: "Incorrect password" }, 401);
@@ -1140,7 +1132,7 @@ router.get("/api/:token/export/markdown", async (req, res, params) => {
   const entry = entryForToken(params.token);
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
-    if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
+    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
   const data = readDiscussionFor(entry);
@@ -1225,7 +1217,7 @@ router.get("/api/:token/export/pdf", async (req, res, params) => {
   const entry = entryForToken(params.token);
   if (!entry || !isTokenValid(params.token)) return send403(res);
   if (entry.passwordHash) {
-    if (!isAuthenticated(req, entry, params.token)) return sendJSON(res, { error: "Password required" }, 401);
+    if (!isAuthenticated(req, entry)) return sendJSON(res, { error: "Password required" }, 401);
   }
 
   const data = readDiscussionFor(entry);
@@ -1537,10 +1529,18 @@ function bridge(app) {
       const params = route.path.includes(":")
         ? router._matchPath(route.path, req.path) ?? {}
         : {};
-      route.handlers[0](req, res, params);
+      return route.handlers[0](req, res, params);
     };
     app[route.method.toLowerCase()](route.path, handler);
   }
+}
+
+function handleRequestError(err, _req, res) {
+  console.error('[Roundtable Web] Request failed:', err.message);
+  if (res.destroyed) return;
+  if (res.headersSent) { res.destroy(); return; }
+  const status = err instanceof URIError ? 400 : 500;
+  sendJSON(res, { error: status === 400 ? 'Invalid request path' : 'Request failed' }, status);
 }
 
 async function main() {
@@ -1551,20 +1551,22 @@ async function main() {
 
   if (app) {
     bridge(app);
+    app.use((err, req, res, _next) => handleRequestError(err, req, res));
     app.listen(port, "0.0.0.0", () => {
       console.log(`[Roundtable Web] Listening on http://0.0.0.0:${port} (data-dir=${DATA_DIR})`);
       console.log(`[Roundtable Web] Discovered ${byDiscussionId.size} existing discussion(s)`);
       startDataDirWatcher();
     });
   } else {
-    const server = createServer((req, res) => {
-      const url = new URL(req.url, `http://${req.headers.host}`);
-      const method = req.method.toUpperCase();
-      const match = router.match(method, url.pathname);
-      if (match) {
-        match.route.handlers[0](req, res, match.params);
-      } else {
-        send404(res);
+    const server = createServer(async (req, res) => {
+      try {
+        const url = new URL(req.url, 'http://localhost');
+        const method = req.method.toUpperCase();
+        const match = router.match(method, url.pathname);
+        if (match) await match.route.handlers[0](req, res, match.params);
+        else send404(res);
+      } catch (err) {
+        handleRequestError(err, req, res);
       }
     });
 

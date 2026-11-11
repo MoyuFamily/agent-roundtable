@@ -1,7 +1,4 @@
-"""Additional tests to push core.py coverage from 65% to ≥80%.
-
-Covers: validation errors, not-found paths, demo, structured summary branches.
-"""
+"""Core input errors, summaries, demo results and notification behavior."""
 
 from __future__ import annotations
 
@@ -136,7 +133,7 @@ def test_summarize_discussion_not_found(core):
 
 
 def test_summarize_with_findings_and_convergence(core):
-    """Summarize with findings and convergence — covers structured summary branches."""
+    """A summary preserves the recorded findings and recommendation."""
     d = core.create_discussion(
         topic="T",
         participants=_p(),
@@ -171,16 +168,12 @@ def test_summarize_with_findings_and_convergence(core):
 
     result = core.summarize(did)
     assert result["ok"] is True
-    assert len(result["consensus_points"]) == 1
-    assert len(result["disagreement_points"]) == 1
-    assert len(result["new_points"]) == 1
-    assert result["final_convergence_score"] is not None
-    assert "structured_summary" in result
-    ss = result["structured_summary"]
-    assert "共识点" in ss
-    assert "分歧点" in ss
-    assert "新议题" in ss
-    assert "收敛度" in ss
+    assert result["consensus_points"] == ["We agree on X"]
+    assert result["disagreement_points"] == ["We disagree on Y"]
+    assert result["new_points"] == ["New idea Z"]
+    assert result["conclusion"] == "We chose X"
+    for text in ("We agree on X", "We disagree on Y", "New idea Z", "We chose X"):
+        assert text in result["structured_summary"]
 
 
 def test_summarize_convergence_from_history(core):
@@ -276,41 +269,24 @@ def test_calculate_convergence_empty_id(core):
 # ---------------------------------------------------------------------------
 
 
-def test_run_demo_default(core, capsys):
-    """run_demo with verbose=True exercises the demo formatters."""
-    result = core.run_demo(verbose=True)
+@pytest.mark.parametrize("verbose", [False, True])
+def test_demo_preserves_requested_topic_participants_and_results(core, capsys, verbose):
+    participants = _p()
+    result = core.run_demo(topic="Custom review", participants=participants, max_rounds=1, verbose=verbose)
     assert result["ok"] is True
-    assert result["rounds_completed"] == 3
-    assert "conclusion" in result
-    assert "summary" in result
-    assert result["convergence_score"] is not None
-    # Verify output was printed
-    captured = capsys.readouterr()
-    assert "Roundtable Demo" in captured.out or "Round" in captured.out
-
-
-def test_run_demo_quiet(core):
-    """run_demo with verbose=False still works."""
-    result = core.run_demo(verbose=False)
-    assert result["ok"] is True
-    assert result["topic"] == RoundtableCore._DEMO_TOPIC
-
-
-def test_run_demo_custom_topic(core):
-    result = core.run_demo(topic="Custom Topic", max_rounds=1, verbose=False)
-    assert result["ok"] is True
-    assert result["topic"] == "Custom Topic"
-    assert result["rounds_completed"] == 1
-
-
-def test_run_demo_custom_participants(core):
-    custom_p = [
-        {"profile": "x", "role": "R1", "display_name": "X", "perspective": "P1"},
-        {"profile": "y", "role": "R2", "display_name": "Y", "perspective": "P2"},
-        {"profile": "z", "role": "R3", "display_name": "Z", "perspective": "P3"},
-    ]
-    result = core.run_demo(participants=custom_p, max_rounds=1, verbose=False)
-    assert result["ok"] is True
+    saved = core.read(result["discussion_id"])
+    assert saved["topic"] == result["topic"] == "Custom review"
+    assert saved["completed_rounds"] == result["rounds_completed"] == 1
+    assert saved["conclusion"] == result["conclusion"]
+    assert result["conclusion"]
+    assert {s["participant"] for s in saved["speeches"] if s["participant"] != "coordinator"} == {
+        p["profile"] for p in participants
+    }
+    output = capsys.readouterr().out
+    if verbose:
+        assert "Custom review" in output
+    else:
+        assert output == ""
 
 
 # ---------------------------------------------------------------------------

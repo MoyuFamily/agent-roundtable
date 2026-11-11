@@ -23,6 +23,7 @@ from roundtable.mcp.bridges.base import AgentBridge
 from roundtable.mcp.tools import handle_tool_call
 
 logger = logging.getLogger(__name__)
+MAX_REQUEST_BYTES = 1024 * 1024
 
 
 class GenericBridge(AgentBridge):
@@ -32,15 +33,19 @@ class GenericBridge(AgentBridge):
         GET  /health            — liveness check
         GET  /inbox             — read unread messages (marks them read)
         POST /tool              — dispatch any roundtable tool
+        POST /invite            — receive an invitation
         POST /summon            — accept a dispatch summon and join
+        POST /turn              — forward a turn notice to the optional webhook
         POST /speak             — shorthand for roundtable_speak
         GET  /status/{disc_id}  — discussion status
         GET  /agent             — this bridge's agent metadata
 
-    If `webhook_url` is set, the bridge POSTs to it whenever a new
-    invitation lands in the agent's inbox (called by external poll loop
-    or by setting on_event in the embedding process).
+    If `webhook_url` is set, the bridge forwards incoming invite/summon/turn
+    requests and events from its own core. It does not watch the shared inbox
+    or execute a model. The host owns speech generation and inbox consumption.
     """
+
+    _summon_source = "generic_bridge"
 
     def __init__(
         self,
@@ -88,31 +93,42 @@ class GenericBridge(AgentBridge):
     def port(self) -> int:
         return self._port
 
-    def start(self) -> None:
-        conn = self._db.connect()
-        try:
-            self._db.upsert_agent(
-                conn,
-                agent_id=self._agent_id,
-                platform=self._platform,
-                display_name=self._display_name,
-                transport="http",
-                endpoint=f"http://{self._host}:{self._port}",
-                capabilities=self._capabilities,
-                metadata={
-                    **self._metadata,
-                    "skills": self._skills,
-                    "availability": self._availability,
-                    "accept_policy": self._accept_policy,
-                    **({"_bridge_auth_token": self._auth_token} if self._auth_token else {}),
-                },
-            )
-        finally:
-            conn.close()
+    @property
+    def host(self) -> str:
+        return self._host
 
-        handler = _make_handler(self)
-        self._server = ThreadingHTTPServer((self._host, self._port), handler)
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+    def start(self) -> None:
+        if self._server is not None:
+            return
+        server = ThreadingHTTPServer((self._host, self._port), _make_handler(self))
+        port = server.server_port
+        try:
+            conn = self._db.connect()
+            try:
+                self._db.upsert_agent(
+                    conn,
+                    agent_id=self._agent_id,
+                    platform=self._platform,
+                    display_name=self._display_name,
+                    transport="http",
+                    endpoint=f"http://{self._host}:{port}",
+                    capabilities=self._capabilities,
+                    metadata={
+                        **self._metadata,
+                        "skills": self._skills,
+                        "availability": self._availability,
+                        "accept_policy": self._accept_policy,
+                        "_bridge_auth_token": self._auth_token,
+                    },
+                )
+            finally:
+                conn.close()
+        except Exception:
+            server.server_close()
+            raise
+        self._port = port
+        self._server = server
+        self._thread = threading.Thread(target=server.serve_forever, daemon=True)
         self._thread.start()
         logger.info(
             "GenericBridge[%s] started on http://%s:%d",
@@ -131,15 +147,6 @@ class GenericBridge(AgentBridge):
                 self._thread = None
             logger.info("GenericBridge[%s] stopped", self._platform)
 
-    async def on_invitation(self, invitation: dict[str, Any]) -> bool:
-        return True
-
-    async def generate_speech(self, context: dict[str, Any]) -> str:
-        raise NotImplementedError(
-            "Speech generation is delegated to the platform. "
-            "Receive the turn notice via /inbox or webhook, then POST to /speak."
-        )
-
     def _on_core_event(self, event_type: str, payload: dict[str, Any]) -> None:
         self._post_webhook(event_type, payload)
 
@@ -154,8 +161,9 @@ class GenericBridge(AgentBridge):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            urllib.request.urlopen(req, timeout=2)
-        except Exception as e:
+            with urllib.request.urlopen(req, timeout=2):
+                pass
+        except (OSError, ValueError) as e:
             logger.warning("Webhook delivery failed: %s", e)
 
 
@@ -207,6 +215,9 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
 
             elif path.startswith("/status/"):
                 disc_id = path[len("/status/") :]
+                if not disc_id:
+                    self._respond(400, {"error": "discussion_id required"})
+                    return
                 try:
                     result = core.status(disc_id)
                 except DiscussionNotFoundError as exc:
@@ -221,11 +232,27 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
             path = urlparse(self.path).path
             if not self._require_auth():
                 return
-            length = int(self.headers.get("Content-Length", 0))
+            if self.headers.get("Transfer-Encoding") or len(self.headers.get_all("Content-Length", [])) > 1:
+                self._respond(400, {"error": "unsupported request framing"})
+                return
             try:
+                length = int(self.headers.get("Content-Length", 0))
+                if length < 0:
+                    raise ValueError
+            except ValueError:
+                self._respond(400, {"error": "invalid Content-Length"})
+                return
+            if length > MAX_REQUEST_BYTES:
+                self._respond(413, {"error": "JSON body exceeds 1 MiB"})
+                return
+            try:
+                self.connection.settimeout(10)
                 body = json.loads(self.rfile.read(length)) if length else {}
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 self._respond(400, {"error": "invalid JSON"})
+                return
+            except TimeoutError:
+                self._respond(408, {"error": "request body timed out"})
                 return
             if not isinstance(body, dict):
                 self._respond(400, {"error": "JSON body must be an object"})
@@ -234,8 +261,8 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
             if path == "/tool":
                 tool_name = body.get("name", "")
                 arguments = body.get("arguments", {})
-                if not tool_name:
-                    self._respond(400, {"error": "name required"})
+                if not isinstance(tool_name, str) or not tool_name.strip():
+                    self._respond(400, {"error": "name must be a non-empty string"})
                     return
                 if not isinstance(arguments, dict):
                     self._respond(400, {"error": "arguments must be an object"})
@@ -248,14 +275,17 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
                 if not discussion_id:
                     self._respond(400, {"error": "discussion_id required"})
                     return
-                result = handle_tool_call(
-                    core,
-                    db,
-                    "roundtable_accept_invite",
-                    {"discussion_id": discussion_id, "agent_id": agent_id},
-                )
+                if bridge._accept_policy == "auto":
+                    result = handle_tool_call(
+                        core,
+                        db,
+                        "roundtable_accept_invite",
+                        {"discussion_id": discussion_id, "agent_id": agent_id},
+                    )
+                else:
+                    result = {"status": "pending", "reason": "manual_accept_required"}
                 bridge._post_webhook("invitation", {"request": body, "result": result})
-                self._respond(200, {"accepted": "error" not in result, "result": result})
+                self._respond(200, {"accepted": result.get("status") == "accepted", "result": result})
 
             elif path == "/summon":
                 discussion_id = body.get("discussion_id")
@@ -271,13 +301,13 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
                         {
                             "discussion_id": discussion_id,
                             "agent_id": agent_id,
-                            "metadata": {"source": "generic_bridge", "summon_id": body.get("summon_id")},
+                            "metadata": {"source": bridge._summon_source, "summon_id": body.get("summon_id")},
                         },
                     )
                 else:
                     result = {"status": "pending", "reason": "manual_accept_required"}
                 bridge._post_webhook("summon", {"request": body, "result": result})
-                self._respond(200, {"accepted": auto_accept and "error" not in result, "result": result})
+                self._respond(200, {"accepted": result.get("status") == "accepted", "result": result})
 
             elif path == "/turn":
                 bridge._post_webhook("turn", body)

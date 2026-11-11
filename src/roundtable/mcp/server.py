@@ -54,16 +54,6 @@ class SubscriptionManager:
             if not self._subs[uri]:
                 del self._subs[uri]
 
-    def sessions_for(self, uri: str) -> list[ServerSession]:
-        sessions = set(self._subs.get(uri, set()))
-        # Discussion-level subscribers also receive transcript updates and vice versa.
-        if uri.startswith("roundtable://discussions/") and not uri.endswith("/transcript"):
-            sessions.update(self._subs.get(f"{uri}/transcript", set()))
-        if uri.endswith("/transcript"):
-            base = uri[: -len("/transcript")]
-            sessions.update(self._subs.get(base, set()))
-        return list(sessions)
-
     def uris_for(self, session: ServerSession) -> set[str]:
         return {uri for uri, sessions in self._subs.items() if session in sessions}
 
@@ -185,7 +175,6 @@ def create_server(db_path: str | None = None) -> Server:
             messages=[PromptMessage(role="user", content=TextContent(type="text", text=result["text"]))],
         )
 
-    server._roundtable_subs = subs
     return server
 
 

@@ -1,8 +1,4 @@
-"""Tests for RoundtableCore — the business logic layer.
-
-Replaces tests/tools/test_roundtable_tools.py — same 17 test cases,
-now testing via RoundtableCore instead of raw handler functions.
-"""
+"""Discussion behavior through the public RoundtableCore API."""
 
 from __future__ import annotations
 
@@ -35,13 +31,6 @@ def _open_discussion(core, disc_id):
 # ---------------------------------------------------------------------------
 # Module import
 # ---------------------------------------------------------------------------
-
-
-def test_core_module_imports():
-    """Verify the roundtable core module imports cleanly."""
-    from roundtable import core
-
-    assert core is not None
 
 
 def test_schema_constants_available():

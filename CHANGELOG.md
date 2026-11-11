@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- Replace repeated login and demo checks with complete behavior scenarios. Verify viewer defaults through real core calls instead of rewriting Python's module cache or only inspecting signatures.
+
+- Share the HTTP implementation between GenericBridge and the Codex preset. Consolidate their behavior tests and remove the unused standalone HTTP server and unimplemented model-execution hooks.
+- Remove obsolete subscription lookup code and tests; retain real stdio/SSE delivery checks and session cleanup coverage.
+
 - Reorient Roundtable around professional coverage, substantive analysis, and cross-role trade-offs for important decisions, including Code Review. Document roles, agents, models, coordinator, and user responsibilities separately from planned automation.
 - Align Chinese/English README, landing copy, and bundled skills with the decision workflow and current capability limits. Replace consensus-threshold stopping guidance with coverage, information gain, and budget.
 - Update MCP prompts to prepare decision briefs, preserve evidence and dissent, and distinguish recommendations from user-approved decisions.
@@ -21,6 +26,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `roundtable_get_prompt` exposes the existing prompts through tools, including HTTP `/tool`, without executing models.
 
 ### Fixed
+
+- Stop issuing duplicate authentication cookies containing raw viewer tokens. The login flow now verifies access and the exact cookie set together.
+- Handle asynchronous viewer route failures in both Express and the dependency-free server so a bad request does not terminate the process.
+
+- Honor manual acceptance for HTTP invitations, report expired summons as unaccepted, and register bridges only after a successful port bind. Failed registration releases the listener; ephemeral ports are recorded correctly.
+- Return bounded JSON errors for malformed HTTP framing, invalid UTF-8 and oversized request bodies. Close outbound webhook responses after delivery.
 
 - Return full saved conclusions from read/status/summary and transcript resources. Re-exporting summaries no longer drops the conclusion; post-round conclusion updates emit resource events.
 - Report actual review rounds separately from the engine cursor; exclude opening and empty rounds and label partial rounds accurately.

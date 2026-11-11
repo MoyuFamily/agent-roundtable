@@ -50,6 +50,17 @@ HTTP Bridge 使用并发请求处理；MCP 在工作线程执行同步工具。�
 
 配置 auth_token 的 CodexBridge/GenericBridge 对 `/agent`、`/inbox`、`/status/...` 和写入端点统一验证令牌；`/health` 保留公开探测。未配置令牌的本机模式维持原行为。不存在的会议状态返回 JSON 404。
 
+两种 Bridge 共用 GenericBridge 的服务实现。/invite 和 /summon 都遵守接受策略；只有数据库响应 status=accepted 时才返回 accepted=true。端口绑定成功后才注册 Agent，注册失败则关闭监听；重复 start 不创建第二个服务，stop 后可以重启。
+
+HTTP 请求体限制为1 MiB，读取空闲超时为10秒。不支持 chunked 编码，拒绝重复、无效或负数 Content-Length；无效 JSON/UTF-8 返回 JSON 400，超长请求返回413。请求帧错误不会直接断开而不返回结果。
+
+
+## Viewer 会话与请求错误
+
+密码验证只签发以 token 哈希命名的会话 Cookie，不再重复签发带原始 token 的旧格式。会话密钥仍在每次服务启动时生成，重启后需重新输入密码；历史讨论文件的格式迁移保留。
+
+Express 与无依赖的内置 HTTP 路径都会处理异步路由异常，返回 JSON 错误并保持进程运行。内置路径用于尚未安装 Node 依赖时读取讨论，是仍在使用的降级能力；PDF 和旧 bcrypt 密码校验仍需要对应依赖。回归通过无依赖目录中的实际进程验证该路径。
+
 ## PDF 导出
 
 Viewer 的 pdf-worker.mjs 从安装位置加载 md-to-pdf，导出时不运行 npx 或下载依赖。每个请求使用独立临时目录和渲染进程，默认60秒超时（可通过 `ROUNDTABLE_PDF_TIMEOUT_MS` 设置，最大120秒）；请求断开或超时会终止渲染并清理文件。渲染函数等 worker 关闭后清理目录，再返回 PDF 内容或错误，因此正常与失败 HTTP 响应都在清理完成后发送。在 POSIX 平台通过 Puppeteer 的信号处理器终止它独立创建的浏览器进程组，worker 未按时退出时再强制终止 worker 进程组。

@@ -185,7 +185,8 @@
 │     │     │                                                          │
 │  ┌──▼─────▼──┐    ┌─────────────────┐                                │
 │  │  bridges/ │───►│  base.py        │  AgentBridge ABC                │
-│  │           │    │  codex.py       │  HTTP server :8201              │
+│  │           │    │  generic.py     │  Shared HTTP implementation      │
+│  │           │    │  codex.py       │  Codex defaults, port :8201     │
 │  └───────────┘    └─────────────────┘                                │
 │                                                                      │
 │  ┌──────────────────────────────────────────────┐                    │
@@ -300,37 +301,18 @@
 
 ## Bridge 架构（非 MCP 平台接入）
 
-```
-┌────────────────────────────────────────────────────────────────────┐
-│                  AgentBridge (abstract base)                        │
-│                                                                    │
-│   start() / stop() / on_invitation() / generate_speech()           │
-└────────────────────────┬───────────────────────────────────────────┘
-                         │
-              ┌──────────┴──────────┐
-              ▼                     ▼
-   ┌──────────────────┐   ┌──────────────────┐
-   │  CodexBridge     │   │  (future)        │
-   │  HTTP :8201      │   │  WorkBuddy/...   │
-   │                  │   │                  │
-   │  POST /invite    │   │                  │
-   │  POST /summon    │   │                  │
-   │  POST /tool      │   │                  │
-   └─────┬────────────┘   └──────────────────┘
-         │
-         ▼
-   ┌──────────────────────────────────┐
-   │  在 Codex CLI 进程中调用本地 API │
-   │  共享 SQLite DB, 通过 inbox 协调 │
-   └──────────────────────────────────┘
-```
+Bridge 生命周期接口为 AgentBridge.start/stop。GenericBridge 实现共同的 HTTP 服务、注册、鉴权、邀请策略和可选 webhook；CodexBridge 继承它，只设置 Codex 的平台名称、默认端口和显示名。两者使用同一请求处理器。
 
 Bridge 模式的设计要点：
-- **共享状态总线**：所有平台都通过同一个 SQLite DB 协调，不需要中间消息队列
-- **三种传输模式**：stdio（原生 MCP）/ HTTP（远程或非 MCP 平台）/ in-process（Hermes adapter）
-- **解耦召集与执行**：召集/邀请都进 inbox；HTTP bridge 也可通过 `/summon` 自动接受
-- **运行时注册**：`GenericBridge`、`CodexBridge` 和 `AgentDaemon` 启动时注册 `agent-roundtable` skill，并通过 heartbeat 刷新在线状态
-- **可选桥接鉴权**：HTTP bridge 可配置 bearer token；MCP 投递 `/invite`、`/summon`、`/turn` 时会自动携带本地私有 token，公开 agent 列表会过滤该字段
+
+- **共享状态**：平台通过同一个 SQLite 数据库协调，HTTP Bridge 不执行模型。宿主消费 inbox、运行角色任务并提交发言。
+- **传输入口**：原生 MCP 使用 stdio 或 HTTP/SSE；非 MCP 宿主使用 GenericBridge/CodexBridge 的 HTTP 接口；进程内集成可调用 Core 或 adapter。
+- **接受策略**：/invite 和 /summon 都只在 accept_policy=auto 时自动接受；其他策略保持待处理，由宿主显式响应。HTTP accepted=true 只表示数据库中的接受状态，过期召集不会标为已接受。
+- **可靠启动**：先绑定端口，再登记实际端点；端口冲突不产生新 Agent 记录，登记失败释放监听。port=0 支持系统分配端口，启动后从 bridge.port 读取。
+- **心跳**：AgentDaemon 主动刷新；HTTP Bridge 在 health/inbox 请求中刷新。Bridge 自身没有后台心跳或 inbox 监视循环。
+- **鉴权与 webhook**：配置的令牌保护读写接口，health 保留公开探测。投递请求携带本地私有令牌，公开 Agent 信息过滤凭据。GenericBridge 的 webhook 转发本实例收到的通知和本实例 Core 产生的事件，不代表监视所有进程的事件。
+
+旧的独立 RoundtableHTTPServer 没有入口或调用者，已移除。AgentBridge 上从未接入执行路径的 on_invitation/generate_speech 占位接口也已移除；自定义模型执行应放在宿主或 adapter 中。
 
 ## Web Viewer 状态
 

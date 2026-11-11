@@ -1,34 +1,17 @@
-"""Codex CLI bridge — connects OpenAI Codex to Roundtable via HTTP."""
+"""Codex defaults for the shared host-managed HTTP bridge."""
 
 from __future__ import annotations
 
-import json
-import logging
-import secrets
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
-from urllib.parse import urlparse
-
-from roundtable.core import RoundtableCore
-from roundtable.db import RoundtableDB
-from roundtable.exceptions import DiscussionNotFoundError
-from roundtable.mcp.bridges.base import AgentBridge
-from roundtable.mcp.tools import handle_tool_call
-
-logger = logging.getLogger(__name__)
+from roundtable.mcp.bridges.generic import GenericBridge
 
 
-class CodexBridge(AgentBridge):
-    """Bridge that allows OpenAI Codex CLI to participate in Roundtable discussions.
-
-    Runs a local HTTP server that:
-    1. Receives webhook invitations from the MCP server
-    2. Exposes discussion tools and prompts to a host-managed agent
-    3. Records returned speeches and queues next-turn notices
+class CodexBridge(GenericBridge):
+    """Use the common bridge with Codex's platform name and default endpoint.
 
     The host starts model execution; this bridge does not spawn a CLI or model.
     """
+
+    _summon_source = "codex_bridge"
 
     def __init__(
         self,
@@ -42,240 +25,15 @@ class CodexBridge(AgentBridge):
         accept_policy: str = "auto",
         auth_token: str | None = None,
     ):
-        self._agent_id = agent_id
-        self._port = port
-        self._host = host
-        self._display_name = display_name
-        self._skills = skills or ["agent-roundtable"]
-        self._availability = availability
-        self._accept_policy = accept_policy
-        self._auth_token = auth_token
-        self._db = RoundtableDB(db_path=db_path)
-        self._core = RoundtableCore(db=self._db)
-        self._server: ThreadingHTTPServer | None = None
-        self._thread: threading.Thread | None = None
-
-    @property
-    def agent_id(self) -> str:
-        return self._agent_id
-
-    @property
-    def platform(self) -> str:
-        return "codex"
-
-    @property
-    def port(self) -> int:
-        return self._port
-
-    @property
-    def host(self) -> str:
-        return self._host
-
-    def start(self) -> None:
-        conn = self._db.connect()
-        try:
-            self._db.upsert_agent(
-                conn,
-                agent_id=self._agent_id,
-                platform="codex",
-                display_name=self._display_name,
-                transport="http",
-                endpoint=f"http://{self._host}:{self._port}",
-                capabilities=["speak", "listen"],
-                metadata={
-                    "skills": self._skills,
-                    "availability": self._availability,
-                    "accept_policy": self._accept_policy,
-                    **({"_bridge_auth_token": self._auth_token} if self._auth_token else {}),
-                },
-            )
-        finally:
-            conn.close()
-
-        handler = _make_handler(self)
-        self._server = ThreadingHTTPServer((self._host, self._port), handler)
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-        self._thread.start()
-        logger.info("Codex bridge started on http://%s:%d", self._host, self._port)
-
-    def stop(self) -> None:
-        if self._server:
-            self._server.shutdown()
-            self._server.server_close()
-            self._server = None
-            if self._thread:
-                self._thread.join(timeout=2)
-                self._thread = None
-            logger.info("Codex bridge stopped")
-
-    async def on_invitation(self, invitation: dict[str, Any]) -> bool:
-        return True
-
-    async def generate_speech(self, context: dict[str, Any]) -> str:
-        raise NotImplementedError("Codex generates speech via its own CLI process")
-
-
-def _make_handler(bridge: CodexBridge) -> type[BaseHTTPRequestHandler]:
-    """Create an HTTP request handler class with access to core/db."""
-
-    core = bridge._core
-    db = bridge._db
-    agent_id = bridge.agent_id
-    auth_token = bridge._auth_token
-
-    class CodexBridgeHandler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            path = urlparse(self.path).path
-            if path != "/health" and not self._require_auth():
-                return
-
-            if path == "/health":
-                conn = db.connect()
-                try:
-                    db.touch_agent(conn, agent_id, availability=bridge._availability)
-                finally:
-                    conn.close()
-                self._respond(200, {"status": "ok", "agent_id": agent_id, "platform": "codex"})
-
-            elif path == "/agent":
-                conn = db.connect()
-                try:
-                    agent = db.get_agent(conn, agent_id)
-                    self._respond(200, agent or {"error": "not registered"})
-                finally:
-                    conn.close()
-
-            elif path == "/inbox":
-                conn = db.connect()
-                try:
-                    db.touch_agent(conn, agent_id)
-                    messages = db.read_inbox(conn, agent_id, unread_only=True)
-                    if messages:
-                        db.mark_inbox_read(conn, [m["id"] for m in messages])
-                    self._respond(200, {"messages": messages})
-                finally:
-                    conn.close()
-
-            elif path.startswith("/status/"):
-                disc_id = path[len("/status/") :]
-                try:
-                    result = core.status(disc_id)
-                except DiscussionNotFoundError as exc:
-                    self._respond(404, {"error": str(exc)})
-                else:
-                    self._respond(200, result)
-
-            else:
-                self._respond(404, {"error": "not found", "path": path})
-
-        def do_POST(self) -> None:
-            path = urlparse(self.path).path
-            if not self._require_auth():
-                return
-            content_length = int(self.headers.get("Content-Length", 0))
-            try:
-                body = json.loads(self.rfile.read(content_length)) if content_length else {}
-            except json.JSONDecodeError:
-                self._respond(400, {"error": "invalid JSON"})
-                return
-            if not isinstance(body, dict):
-                self._respond(400, {"error": "JSON body must be an object"})
-                return
-
-            if path == "/invite":
-                discussion_id = body.get("discussion_id")
-                if not discussion_id:
-                    self._respond(400, {"error": "discussion_id required"})
-                    return
-                result = handle_tool_call(
-                    core,
-                    db,
-                    "roundtable_accept_invite",
-                    {"discussion_id": discussion_id, "agent_id": agent_id},
-                )
-                self._respond(200, {"accepted": "error" not in result, "result": result})
-
-            elif path == "/summon":
-                discussion_id = body.get("discussion_id")
-                if not discussion_id:
-                    self._respond(400, {"error": "discussion_id required"})
-                    return
-                auto_accept = bridge._accept_policy == "auto"
-                if auto_accept:
-                    result = handle_tool_call(
-                        core,
-                        db,
-                        "roundtable_accept_summon",
-                        {
-                            "discussion_id": discussion_id,
-                            "agent_id": agent_id,
-                            "metadata": {"source": "codex_bridge", "summon_id": body.get("summon_id")},
-                        },
-                    )
-                else:
-                    result = {"status": "pending", "reason": "manual_accept_required"}
-                self._respond(200, {"accepted": auto_accept and "error" not in result, "result": result})
-
-            elif path == "/tool":
-                tool_name = body.get("name", "")
-                arguments = body.get("arguments", {})
-                if not tool_name:
-                    self._respond(400, {"error": "name required"})
-                    return
-                if not isinstance(arguments, dict):
-                    self._respond(400, {"error": "arguments must be an object"})
-                    return
-                result = handle_tool_call(core, db, tool_name, arguments)
-                self._respond(200, result)
-
-            elif path == "/turn":
-                self._respond(200, {"received": True, "payload": body})
-
-            elif path == "/speak":
-                disc_id = body.get("discussion_id")
-                content = body.get("content", "")
-                participant = body.get("participant", agent_id)
-                if not disc_id or not content:
-                    self._respond(400, {"error": "discussion_id and content required"})
-                    return
-                result = handle_tool_call(
-                    core,
-                    db,
-                    "roundtable_speak",
-                    {
-                        "discussion_id": disc_id,
-                        "participant": participant,
-                        "content": content,
-                        "reply_to": body.get("reply_to"),
-                    },
-                )
-                self._respond(200, result)
-
-            else:
-                self._respond(404, {"error": "not found", "path": path})
-
-        def _require_auth(self) -> bool:
-            if not auth_token:
-                return True
-            bearer = self.headers.get("Authorization", "")
-            token = ""
-            if bearer.startswith("Bearer "):
-                token = bearer[len("Bearer ") :].strip()
-            token = token or self.headers.get("X-Roundtable-Token", "")
-            if secrets.compare_digest(token, auth_token):
-                return True
-            self._respond(401, {"error": "unauthorized"})
-            return False
-
-        def _respond(self, status: int, data: dict[str, Any]) -> None:
-            payload = json.dumps(data, ensure_ascii=False, default=str).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-
-        def log_message(self, format: str, *args: Any) -> None:
-            logger.debug(format, *args)
-
-    return CodexBridgeHandler
+        super().__init__(
+            agent_id=agent_id,
+            platform="codex",
+            port=port,
+            host=host,
+            display_name=display_name,
+            db_path=db_path,
+            skills=skills,
+            availability=availability,
+            accept_policy=accept_policy,
+            auth_token=auth_token,
+        )

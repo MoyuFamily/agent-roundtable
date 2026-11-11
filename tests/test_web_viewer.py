@@ -120,12 +120,17 @@ def discussion_dir(tmp_path):
 @pytest.fixture
 def server(discussion_dir, request):
     """Start the web server and yield the base URL."""
+    options = dict(getattr(request, "param", {}))
+    script = SERVER_SCRIPT
+    if options.pop("without_dependencies", False):
+        script = discussion_dir / "server.mjs"
+        script.write_bytes(SERVER_SCRIPT.read_bytes())
     port = _find_free_port()
     proc = subprocess.Popen(
-        ["node", str(SERVER_SCRIPT), "--port", str(port), "--data-dir", str(discussion_dir)],
+        ["node", str(script), "--port", str(port), "--data-dir", str(discussion_dir)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env={**os.environ, "TMPDIR": str(discussion_dir), **getattr(request, "param", {})},
+        env={**os.environ, "TMPDIR": str(discussion_dir), **options},
     )
     # Wait for server to start
     base = f"http://127.0.0.1:{port}"
@@ -272,87 +277,53 @@ class TestServerLifecycle:
 
 
 class TestPasswordProtection:
-    def test_no_password_allows_access(self, server):
-        """Server started without password_hash in JSON should allow free access."""
-        base, _, _ = server
-        resp = requests.get(f"{base}/r/test_token_abc123", timeout=5)
-        assert resp.status_code == 200
-        assert "html" in resp.headers.get("content-type", "").lower()
-
-    def test_password_page_shown(self, pw_server):
-        """Server with password should show the password verification page."""
+    def test_login_protects_content_and_issues_only_hashed_token_cookie(self, pw_server):
         base, _, _ = pw_server
-        resp = requests.get(f"{base}/r/pw_token_456", timeout=5)
-        assert resp.status_code == 200
-        text = resp.text
-        # Should contain the password form, not the discussion
-        assert "Access Verification" in text
-        assert "password" in text.lower()
-
-    def test_wrong_password_returns_401(self, pw_server):
-        base, _, _ = pw_server
-        resp = requests.post(
-            f"{base}/api/pw_token_456/validate-password",
-            json={"password": "wrong_password"},
-            timeout=5,
-        )
-        assert resp.status_code == 401
-        data = resp.json()
-        assert data["ok"] is False
-
-    def test_correct_password_sets_cookie(self, pw_server):
-        base, _, _ = pw_server
-        resp = requests.post(
-            f"{base}/api/pw_token_456/validate-password",
-            json={"password": "testpassword123"},
-            timeout=5,
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
-        # Should set rt_pw_<token_hash> cookie without exposing the raw token.
+        session = requests.Session()
+        page = session.get(f"{base}/r/pw_token_456", timeout=5)
+        assert "Access Verification" in page.text
+        assert session.get(f"{base}/api/pw_token_456/data", timeout=5).status_code == 401
+        login = f"{base}/api/pw_token_456/validate-password"
+        wrong = session.post(login, json={"password": "wrong"}, timeout=5)
+        assert wrong.status_code == 401
+        assert not session.cookies
+        response = session.post(login, json={"password": "testpassword123"}, timeout=5)
+        assert response.status_code == 200
         token_hash = hashlib.sha256(b"pw_token_456").hexdigest()
-        assert f"rt_pw_{token_hash}" in resp.cookies
+        assert set(session.cookies.keys()) == {f"rt_pw_{token_hash}"}
+        assert "pw_token_456" not in response.headers["Set-Cookie"]
+        page = session.get(f"{base}/r/pw_token_456", timeout=5)
+        assert page.status_code == 200
+        assert "__RT_CONFIG__" in page.text
+        data = session.get(f"{base}/api/pw_token_456/data", timeout=5)
+        assert data.status_code == 200
+        assert data.json()["topic"] == "Secret Discussion"
+        markdown = session.get(f"{base}/api/pw_token_456/export/markdown", timeout=5)
+        assert markdown.status_code == 200
+        assert "secret speech" in markdown.text
 
-    def test_password_cookie_grants_access(self, pw_server):
-        """After authenticating, the cookie should allow direct access."""
-        base, _, _ = pw_server
-        session = requests.Session()
-        # First, authenticate
-        resp = session.post(
-            f"{base}/api/pw_token_456/validate-password",
-            json={"password": "testpassword123"},
-            timeout=5,
-        )
-        assert resp.status_code == 200
-        # Now access the SPA — should get the viewer, not the password page
-        resp = session.get(f"{base}/r/pw_token_456", timeout=5)
-        assert resp.status_code == 200
-        # The viewer page should contain __RT_CONFIG__, not "Access Verification"
-        assert "__RT_CONFIG__" in resp.text
 
-    def test_password_protected_api_requires_auth(self, pw_server):
-        base, _, _ = pw_server
-        # Without cookie, API should return 401
-        resp = requests.get(f"{base}/api/pw_token_456/data", timeout=5)
-        assert resp.status_code == 401
-        data = resp.json()
-        assert "Password required" in data.get("error", "")
-
-    def test_password_protected_api_with_cookie(self, pw_server):
-        base, _, _ = pw_server
-        session = requests.Session()
-        # Authenticate
-        session.post(
-            f"{base}/api/pw_token_456/validate-password",
-            json={"password": "testpassword123"},
-            timeout=5,
-        )
-        # Access API with cookie
-        resp = session.get(f"{base}/api/pw_token_456/data", timeout=5)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["topic"] == "Secret Discussion"
+@pytest.mark.parametrize("server", [{}, {"without_dependencies": True}], indirect=True, ids=["express", "builtin"])
+def test_route_failures_return_errors_and_leave_server_running(server):
+    base, _, directory = server
+    response = requests.get(f"{base}/api/%FF/data", timeout=5)
+    assert response.status_code == 400
+    assert "error" in response.json()
+    if (directory / "server.mjs").exists():
+        assert "X-Powered-By" not in response.headers
+    path = directory / "test_disc" / "discussion.json"
+    data = json.loads(path.read_text())
+    data["topic"] = 123  # A malformed imported snapshot fails inside an async export route.
+    path.write_text(json.dumps(data))
+    response = requests.get(f"{base}/api/test_token_abc123/export/markdown", timeout=5)
+    assert response.status_code == 500
+    assert response.json() == {"error": "Request failed"}
+    assert requests.get(f"{base}/healthz", timeout=5).status_code == 200
+    data["topic"] = "Recovered discussion"
+    path.write_text(json.dumps(data))
+    response = requests.get(f"{base}/api/test_token_abc123/export/markdown", timeout=5)
+    assert response.status_code == 200
+    assert "Recovered discussion" in response.text
 
 
 # ---------------------------------------------------------------------------
@@ -389,25 +360,6 @@ class TestExportMarkdown:
         base, _, _ = server
         resp = requests.get(f"{base}/api/bad_token/export/markdown", timeout=5)
         assert resp.status_code == 403
-
-    def test_export_markdown_password_protected(self, pw_server):
-        base, _, _ = pw_server
-        # Without auth, should get 401
-        resp = requests.get(f"{base}/api/pw_token_456/export/markdown", timeout=5)
-        assert resp.status_code == 401
-
-    def test_export_markdown_with_password_auth(self, pw_server):
-        base, _, _ = pw_server
-        session = requests.Session()
-        session.post(
-            f"{base}/api/pw_token_456/validate-password",
-            json={"password": "testpassword123"},
-            timeout=5,
-        )
-        resp = session.get(f"{base}/api/pw_token_456/export/markdown", timeout=10)
-        assert resp.status_code == 200
-        md = resp.text
-        assert "Secret Discussion" in md
 
 
 class TestExportPDF:

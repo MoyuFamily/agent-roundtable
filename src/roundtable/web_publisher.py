@@ -23,6 +23,7 @@ from typing import Any
 from urllib import error as url_error
 from urllib import request as url_request
 
+from roundtable.file_io import append_jsonl, file_lock, write_json_atomic
 from roundtable.web_helpers import (
     get_avatar_for_participant,
     get_display_name_for_participant,
@@ -39,38 +40,6 @@ WEB_HELP = (
     "Install Node.js 18+ and run `npm install --omit=dev` in the project if automatic setup failed."
 )
 _DIRECT_SERVER_PROCESSES: list[Any] = []
-
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - exercised on Windows
-    fcntl = None  # type: ignore[assignment]
-
-
-class _FileLock:
-    """Best-effort advisory file lock with a no-op fallback on platforms without fcntl."""
-
-    def __init__(self, file_obj: Any, mode: int) -> None:
-        self._file_obj = file_obj
-        self._mode = mode
-
-    def __enter__(self) -> None:
-        if fcntl is not None:
-            fcntl.flock(self._file_obj.fileno(), self._mode)
-
-    def __exit__(self, *_exc: object) -> None:
-        if fcntl is not None:
-            fcntl.flock(self._file_obj.fileno(), fcntl.LOCK_UN)
-
-
-def _lock_ex(file_obj: Any) -> _FileLock:
-    mode = fcntl.LOCK_EX if fcntl is not None else 0
-    return _FileLock(file_obj, mode)
-
-
-def _lock_sh(file_obj: Any) -> _FileLock:
-    mode = fcntl.LOCK_SH if fcntl is not None else 0
-    return _FileLock(file_obj, mode)
-
 
 # ---------------------------------------------------------------------------
 # Token generation
@@ -415,6 +384,7 @@ class WebPublisher:
             for fname in (
                 "discussion.json",
                 "token_stream.jsonl",
+                "token_stream.jsonl.lock",
                 "discussion.json.lock",
                 "discussion.json.tmp",
             ):
@@ -768,19 +738,14 @@ class WebPublisher:
     def _append_token_stream_jsonl(self, event: dict[str, Any]) -> None:
         """Append one event to token_stream.jsonl for SSE tailing/replay."""
         target = self._discussion_dir / "token_stream.jsonl"
-        with open(target, "a") as f, _lock_ex(f):
-            f.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
+        append_jsonl(target, event)
 
     def _write_discussion_json_raw(self, data: dict[str, Any]) -> None:
-        """Atomic write: flock lock file → read/merge existing disk state → write .tmp → fsync → rename."""
+        """Merge the current snapshot under a process lock, then atomically replace it."""
         target = self._discussion_dir / "discussion.json"
         lock_path = target.with_suffix(".json.lock")
-        tmp = target.with_suffix(".json.tmp")
 
-        with open(lock_path, "a") as lock_file, _lock_ex(lock_file):
+        with file_lock(lock_path):
             # Read existing data to merge and prevent overwriting cross-process changes
             existing = None
             if target.exists():
@@ -955,11 +920,7 @@ class WebPublisher:
                     data["participants"] = list(participant_map.values())
                     self._participants = data["participants"]
 
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            os.rename(str(tmp), str(target))
+            write_json_atomic(target, data)
 
     def _read_discussion_json(self) -> dict[str, Any] | None:
         """Read discussion.json with shared lock on lock file."""
@@ -968,9 +929,9 @@ class WebPublisher:
             return None
 
         lock_path = target.with_suffix(".json.lock")
-        with open(lock_path, "a") as lock_file, _lock_sh(lock_file):
+        with file_lock(lock_path, shared=True):
             try:
-                with open(target) as f:
+                with open(target, encoding="utf-8") as f:
                     result: dict[str, Any] | None = json.load(f)
                     return result
             except (json.JSONDecodeError, FileNotFoundError):

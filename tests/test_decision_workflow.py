@@ -98,7 +98,7 @@ def test_end_to_end_revision_findings_conclusion_and_restart(review, tmp_path):
     assert summary["findings"][0]["related_speeches"] == [a1, b1]
     assert summary["final_convergence_score"] == 0.0
     assert summary["context_history"][0]["context"] == "Location UNKNOWN; available time UNKNOWN."
-    assert conclusion in (tmp_path / "report.md").read_text()
+    assert conclusion in (tmp_path / "report.md").read_text(encoding="utf-8")
     exported = handle_resource_read(core, db, f"roundtable://discussions/{did}/transcript")
     assert exported["conclusion"] == conclusion
     assert conclusion in exported["transcript"]

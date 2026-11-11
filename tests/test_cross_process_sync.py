@@ -19,7 +19,7 @@ def _worker_write_event(web_dir_path_str: str, worker_id: int, write_count: int)
     core = RoundtableCore(db)
     web_dir = Path(web_dir_path_str)
     for i in range(write_count):
-        event = {"worker": worker_id, "index": i, "data": "x" * 100}
+        event = {"worker": worker_id, "index": i, "data": "跨进程观点 🌱 " * 1000}
         core._append_token_stream_jsonl_fallback(web_dir, event)
 
 
@@ -78,7 +78,7 @@ def test_cross_process_sync_flow(tmp_path, monkeypatch):
 
     # Read discussion.json and verify speeches
     disc_json_path = disc_web_dir / "discussion.json"
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert len(data["speeches"]) == 1
     assert data["speeches"][0]["participant"] == "coordinator"
 
@@ -88,7 +88,7 @@ def test_cross_process_sync_flow(tmp_path, monkeypatch):
 
     # Round 1 completes! But wait, findings are NOT added yet.
     # In fallback mode, round_summaries should be created but empty if no findings exist yet.
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert data["status"] == "active"
 
     # 3. Add findings for Round 1 to database directly (simulating demo/runner behavior)
@@ -105,7 +105,7 @@ def test_cross_process_sync_flow(tmp_path, monkeypatch):
     core.speak(disc_id, "alice", "Alice round 2")
 
     # Check discussion.json
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert len(data["round_summaries"]) == 1
     assert data["round_summaries"][0]["round"] == 1
     assert len(data["round_summaries"][0]["consensus"]) == 1
@@ -115,7 +115,7 @@ def test_cross_process_sync_flow(tmp_path, monkeypatch):
 
     # Check token_stream.jsonl
     jsonl_path = disc_web_dir / "token_stream.jsonl"
-    events = [json.loads(line) for line in jsonl_path.read_text().splitlines()]
+    events = [json.loads(line) for line in jsonl_path.read_text(encoding="utf-8").splitlines()]
 
     # We should have a round_summary event for round 1
     rs_events = [e for e in events if e.get("type") == "round_summary"]
@@ -140,7 +140,7 @@ def test_cross_process_sync_flow(tmp_path, monkeypatch):
     core.end_discussion(disc_id, conclusion=conclusion)
 
     # Verify final_summary is synchronized and not locked out by empty verdict
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert data["status"] == "concluded"
     assert data["conclusion"] == conclusion
     assert data["final_summary"] is not None
@@ -150,7 +150,7 @@ def test_cross_process_sync_flow(tmp_path, monkeypatch):
     assert len(data["final_summary"]["disagreement"]) == 1
 
     # Check final events in token_stream.jsonl
-    events = [json.loads(line) for line in jsonl_path.read_text().splitlines()]
+    events = [json.loads(line) for line in jsonl_path.read_text(encoding="utf-8").splitlines()]
     fs_events = [e for e in events if e.get("type") == "final_summary"]
     assert len(fs_events) >= 1
     assert fs_events[-1]["verdict"] == conclusion
@@ -177,16 +177,21 @@ def test_cross_process_concurrent_writes(tmp_path):
         p.start()
 
     for p in processes:
-        p.join()
+        p.join(timeout=30)
+        if p.is_alive():
+            p.terminate()
+            p.join(timeout=5)
+        assert p.exitcode == 0
 
     # Now read the lines and verify
-    lines = jsonl_path.read_text().splitlines()
+    lines = jsonl_path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == num_workers * writes_per_worker
 
     # Parse each line to check if they are valid JSON and not corrupted/mangled
     counts = {}
     for line in lines:
         event = json.loads(line)
+        assert event["data"] == "跨进程观点 🌱 " * 1000
         worker = event["worker"]
         index = event["index"]
         counts.setdefault(worker, []).append(index)
@@ -239,7 +244,7 @@ def test_sync_convergence_score_only(tmp_path, monkeypatch):
         conn.close()
 
     # Verify existing round summary does NOT have convergence_score
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert len(data["round_summaries"]) == 1
     assert "convergence_score" not in data["round_summaries"][0]
 
@@ -258,7 +263,7 @@ def test_sync_convergence_score_only(tmp_path, monkeypatch):
         conn.close()
 
     # Verify convergence score is now synchronized!
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert len(data["round_summaries"]) == 1
     assert data["round_summaries"][0]["convergence_score"] is not None
 
@@ -305,7 +310,7 @@ def test_cross_process_auto_conclude_replay_events(tmp_path, monkeypatch):
     assert result["discussion_complete"] is True
 
     # Read events from discussion.json and token_stream.jsonl
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert data["status"] == "concluded"
 
     # Verify status_delta concluded event exists in discussion.json
@@ -315,7 +320,7 @@ def test_cross_process_auto_conclude_replay_events(tmp_path, monkeypatch):
     assert status_events_in_json[-1]["status"] == "concluded"
 
     # Verify status_delta concluded event exists in token_stream.jsonl
-    events_in_jsonl = [json.loads(line) for line in jsonl_path.read_text().splitlines()]
+    events_in_jsonl = [json.loads(line) for line in jsonl_path.read_text(encoding="utf-8").splitlines()]
     status_events_in_jsonl = [e for e in events_in_jsonl if e.get("type") == "status_delta"]
     assert len(status_events_in_jsonl) >= 1
     assert status_events_in_jsonl[-1]["status"] == "concluded"
@@ -348,14 +353,14 @@ def test_reconclusion_updates_verdict(tmp_path, monkeypatch):
     # Conclude with first conclusion (publisher is alive)
     core.end_discussion(disc_id, conclusion="旧结论")
 
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert data["conclusion"] == "旧结论"
     assert data["final_summary"]["verdict"] == "旧结论"
 
     # Re-conclude with new conclusion text
     core.end_discussion(disc_id, conclusion="新结论")
 
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert data["conclusion"] == "新结论"
     assert data["final_summary"]["verdict"] == "新结论"
 
@@ -400,23 +405,23 @@ def test_live_publisher_round_summary_has_convergence_score(tmp_path, monkeypatc
     core.speak(disc_id, "bob", "Round 1 bob")
 
     # After round 1 completes, check that convergence_score is in discussion.json
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert len(data["round_summaries"]) == 1
     assert "convergence_score" in data["round_summaries"][0]
     assert data["round_summaries"][0]["convergence_score"] is not None
 
     # Count round_summary events for round 1 in token_stream.jsonl
-    events = [json.loads(line) for line in jsonl_path.read_text().splitlines()]
+    events = [json.loads(line) for line in jsonl_path.read_text(encoding="utf-8").splitlines()]
     r1_events_before = [e for e in events if e.get("type") == "round_summary" and e.get("round") == 1]
 
     # Speak again in round 2 — this should NOT produce a duplicate round 1 summary event
     core.speak(disc_id, "alice", "Round 2 alice")
 
     # Re-read and verify no duplicate round 1 summary events appeared
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert "convergence_score" in data["round_summaries"][0]
 
-    events = [json.loads(line) for line in jsonl_path.read_text().splitlines()]
+    events = [json.loads(line) for line in jsonl_path.read_text(encoding="utf-8").splitlines()]
     r1_events_after = [e for e in events if e.get("type") == "round_summary" and e.get("round") == 1]
     assert len(r1_events_after) == len(r1_events_before)
 
@@ -471,7 +476,7 @@ def test_concurrent_speeches_are_all_preserved_in_json(tmp_path, monkeypatch):
         f.result()
 
     # Verify that all 10 speeches (plus the coordinator opening statement) are preserved in discussion.json
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     contents = [s["content"] for s in data.get("speeches", [])]
 
     # 10 user speeches + 1 coordinator opening
@@ -521,7 +526,7 @@ def test_live_publisher_does_not_overwrite_fallback_speech(tmp_path, monkeypatch
     core_live.speak(disc_id, "bob", "Live speech")
 
     # Verify that both fallback and live speeches are preserved
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     contents = [s["content"] for s in data.get("speeches", [])]
 
     assert "Fallback speech" in contents
@@ -568,7 +573,7 @@ def test_stale_live_publisher_does_not_revert_fallback_conclusion(tmp_path, monk
     core_fallback.end_discussion(disc_id, conclusion="新结论")
 
     # Verify that the conclusion remains "新结论" (no stale publisher can revert it)
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert data["conclusion"] == "新结论"
 
 
@@ -614,7 +619,7 @@ def test_stale_live_publisher_does_not_overwrite_newer_round_summary(tmp_path, m
 
     # 2. Simulate fallback writer updating the disk with a newer round summary (with convergence_score and timestamp t2)
     # Read existing
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     # Modify round 1 summary
     for r_s in data.get("round_summaries", []):
         if r_s.get("round") == 1:
@@ -627,7 +632,7 @@ def test_stale_live_publisher_does_not_overwrite_newer_round_summary(tmp_path, m
     publisher._write_discussion_json()
 
     # 4. Verify that the newer round 1 summary with convergence_score and t2 is retained on disk
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     round_summaries = data.get("round_summaries", [])
     assert len(round_summaries) == 1
     assert round_summaries[0]["round"] == 1
@@ -674,7 +679,7 @@ def test_equal_timestamp_keeps_more_complete_round_summary(tmp_path, monkeypatch
     )
 
     # 2. Simulate disk having a more complete round summary with the same timestamp
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     data["round_summaries"][0] = {
         "type": "round_summary",
         "round": 1,
@@ -689,7 +694,7 @@ def test_equal_timestamp_keeps_more_complete_round_summary(tmp_path, monkeypatch
     publisher._write_discussion_json()
 
     # 4. Verify that the more complete version (with 2 consensus items) is kept on disk
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert len(data["round_summaries"]) == 1
     assert len(data["round_summaries"][0]["consensus"]) == 2
 
@@ -721,7 +726,7 @@ def test_v1_revoked_tokens_migrated_to_hashes_on_write(tmp_path, monkeypatch):
     disc_json_path = disc_web_dir / "discussion.json"
 
     # Simulate an old v1 file on disk with plaintext revoked_tokens
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     old_token = "old_plaintext_token_abc"
     data["revoked_tokens"] = [old_token]
     data.pop("revoked_token_hashes", None)
@@ -732,7 +737,7 @@ def test_v1_revoked_tokens_migrated_to_hashes_on_write(tmp_path, monkeypatch):
     publisher._write_discussion_json()
 
     # Verify migration: revoked_tokens removed, hash present in revoked_token_hashes
-    result = json.loads(disc_json_path.read_text())
+    result = json.loads(disc_json_path.read_text(encoding="utf-8"))
     expected_hash = hashlib.sha256(old_token.encode("utf-8")).hexdigest()
     assert "revoked_tokens" not in result
     assert expected_hash in result["revoked_token_hashes"]
@@ -770,7 +775,7 @@ def test_fallback_conclude_preserves_final_summary_verdict(tmp_path, monkeypatch
     core.end_discussion(disc_id, conclusion="使用 Python")
 
     # Verify final state on disk
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert data["status"] == "concluded"
     assert data["conclusion"] == "使用 Python"
     # If final_summary was written, its verdict should match
@@ -821,7 +826,7 @@ def test_web_sync_writes_dispatch_snapshot_and_joiners(tmp_path, monkeypatch):
 
     disc_id = summon["discussion_id"]
     disc_json_path = web_base_dir / disc_id / "discussion.json"
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert data["schema_version"] == 3
     assert data["status"] == "assembling"
     assert data["dispatch_summary"]["total_summons"] == 1
@@ -830,7 +835,7 @@ def test_web_sync_writes_dispatch_snapshot_and_joiners(tmp_path, monkeypatch):
 
     handle_tool_call(core, db, "roundtable_accept_summon", {"discussion_id": disc_id, "agent_id": "agent-1"})
 
-    data = json.loads(disc_json_path.read_text())
+    data = json.loads(disc_json_path.read_text(encoding="utf-8"))
     assert data["status"] == "active"
     assert data["dispatch_summary"]["accepted"] == 1
     assert [participant["profile"] for participant in data["participants"]] == ["agent-1"]

@@ -8,11 +8,6 @@ WebPublisher is mocked here; tests/test_web_viewer.py exercises the real Node se
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
-import textwrap
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -40,40 +35,6 @@ def _mock_publisher():
     mock = MagicMock()
     mock.start.return_value = "http://localhost:8199/rt_test123"
     return mock
-
-
-def test_import_roundtable_without_fcntl():
-    """Top-level import should work on platforms without fcntl (for example Windows)."""
-    code = textwrap.dedent(
-        """
-        import builtins
-
-        real_import = builtins.__import__
-
-        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-            if name == "fcntl":
-                raise ImportError("simulated missing fcntl")
-            return real_import(name, globals, locals, fromlist, level)
-
-        builtins.__import__ = fake_import
-
-        import roundtable
-        from roundtable.web_sync import WebDiscussionSync
-
-        assert roundtable.__version__ == "2.1.0"
-        assert WebDiscussionSync.__name__ == "WebDiscussionSync"
-        """
-    )
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(Path.cwd() / "src")
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
 
 
 # ---------------------------------------------------------------------------

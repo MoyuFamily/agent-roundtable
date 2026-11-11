@@ -11,7 +11,7 @@
  */
 
 import { createServer } from "node:http";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import {
   readFileSync,
   watch,
@@ -1157,16 +1157,32 @@ async function renderPdf(md, signal) {
 
   let child = null;
   let killTimer = null;
+  let treeStopped = Promise.resolve();
   let stopping = false;
   const killWorker = () => {
     if (!child?.pid || child.exitCode !== null || child.signalCode !== null || stopping) return;
     stopping = true;
+    if (process.platform === 'win32') {
+      // Windows does not deliver SIGINT to a child through child.kill(). Stop its tree
+      // before the worker disappears, while taskkill can still identify the children.
+      treeStopped = new Promise((resolve) => {
+        execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+          windowsHide: true, timeout: 5000,
+        }, (error) => {
+          if (error && child.exitCode === null && child.signalCode === null) {
+            console.error('[export/pdf] Cannot stop worker tree:', error.message);
+            child.kill('SIGKILL');
+          }
+          resolve();
+        });
+      });
+      return;
+    }
     // Puppeteer's SIGINT handler terminates its separately detached browser process group.
     try { child.kill('SIGINT'); } catch { /* already exited */ }
     killTimer = setTimeout(() => {
       try {
-        if (process.platform === 'win32') child.kill('SIGKILL');
-        else process.kill(-child.pid, 'SIGKILL');
+        process.kill(-child.pid, 'SIGKILL');
       } catch { /* already exited */ }
     }, 2000);
   };
@@ -1180,7 +1196,7 @@ async function renderPdf(md, signal) {
       let spawnError = null;
       child = spawn(process.execPath, [PDF_WORKER, tmpMdPath, expectedPdfPath], {
         cwd: temporaryDir,
-        env: { ...process.env },
+        env: { ...process.env, TMP: temporaryDir, TEMP: temporaryDir, TMPDIR: temporaryDir, PUPPETEER_TMP_DIR: temporaryDir },
         detached: process.platform !== 'win32',
         stdio: ["ignore", "ignore", "pipe"],
       });
@@ -1209,6 +1225,7 @@ async function renderPdf(md, signal) {
     return readFileSync(expectedPdfPath);
   } finally {
     signal.removeEventListener('abort', killWorker);
+    await treeStopped;
     rmSync(temporaryDir, { recursive: true, force: true });
   }
 }

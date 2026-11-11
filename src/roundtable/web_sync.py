@@ -2,7 +2,7 @@
 
 Used when the in-memory WebPublisher is not available (e.g. another
 process is updating the discussion). Reads from RoundtableDB and
-writes the merged result to discussion.json under flock.
+writes the merged result to discussion.json under a cross-platform process lock.
 
 Callers pass in the target web_dir so this module does not need to
 know where SHARED_DATA_DIR lives — that lookup belongs to RoundtableCore.
@@ -12,30 +12,15 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sqlite3
 import time
 from pathlib import Path
-from typing import IO, Any
-
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - exercised through import smoke tests
-    fcntl = None  # type: ignore[assignment]
+from typing import Any
 
 from roundtable.db import RoundtableDB
+from roundtable.file_io import append_jsonl, file_lock, write_json_atomic
 
 logger = logging.getLogger(__name__)
-
-
-def _lock_ex(file_obj: IO[Any]) -> None:
-    if fcntl is not None:
-        fcntl.flock(file_obj.fileno(), fcntl.LOCK_EX)
-
-
-def _unlock(file_obj: IO[Any]) -> None:
-    if fcntl is not None:
-        fcntl.flock(file_obj.fileno(), fcntl.LOCK_UN)
 
 
 class WebDiscussionSync:
@@ -102,17 +87,9 @@ class WebDiscussionSync:
     def append_token_stream(self, web_dir: Path, event: dict[str, Any]) -> None:
         target = web_dir / "token_stream.jsonl"
         try:
-            with open(target, "a") as f:
-                _lock_ex(f)
-                try:
-                    f.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
-                    f.write("\n")
-                    f.flush()
-                    os.fsync(f.fileno())
-                finally:
-                    _unlock(f)
-        except Exception:
-            logger.debug("Failed to append event to token_stream.jsonl at %s", target)
+            append_jsonl(target, event)
+        except (OSError, TypeError, ValueError):
+            logger.exception("Failed to append replay event at %s", target)
 
     def sync_state(self, web_dir: Path, discussion_id: str, conn: sqlite3.Connection) -> None:
         json_path = web_dir / "discussion.json"
@@ -121,165 +98,153 @@ class WebDiscussionSync:
 
         lock_path = json_path.with_suffix(".json.lock")
         try:
-            with open(lock_path, "a") as lock_file:
-                _lock_ex(lock_file)
-                try:
-                    with open(json_path) as f:
-                        data = json.load(f)
+            with file_lock(lock_path):
+                with open(json_path, encoding="utf-8") as f:
+                    data = json.load(f)
 
-                    changed = False
-                    now = time.time()
+                changed = False
+                now = time.time()
 
-                    disc = self.db.get_discussion(conn, discussion_id)
-                    if not disc:
-                        return
+                disc = self.db.get_discussion(conn, discussion_id)
+                if not disc:
+                    return
 
-                    dispatches, dispatch_summary = self._dispatch_snapshot(conn, discussion_id)
-                    refreshed_disc = self.db.get_discussion(conn, discussion_id)
-                    if refreshed_disc:
-                        disc = refreshed_disc
+                dispatches, dispatch_summary = self._dispatch_snapshot(conn, discussion_id)
+                refreshed_disc = self.db.get_discussion(conn, discussion_id)
+                if refreshed_disc:
+                    disc = refreshed_disc
 
-                    old_status = data.get("status")
-                    if old_status != disc.status:
-                        data["status"] = disc.status
-                        changed = True
+                old_status = data.get("status")
+                if old_status != disc.status:
+                    data["status"] = disc.status
+                    changed = True
 
-                    participants = self._participants_snapshot(conn, discussion_id)
-                    if data.get("participants") != participants:
-                        data["participants"] = participants
-                        changed = True
+                participants = self._participants_snapshot(conn, discussion_id)
+                if data.get("participants") != participants:
+                    data["participants"] = participants
+                    changed = True
 
-                    if data.get("dispatches") != dispatches:
-                        data["dispatches"] = dispatches
-                        changed = True
+                if data.get("dispatches") != dispatches:
+                    data["dispatches"] = dispatches
+                    changed = True
 
-                    if data.get("dispatch_summary") != dispatch_summary:
-                        data["dispatch_summary"] = dispatch_summary
-                        changed = True
+                if data.get("dispatch_summary") != dispatch_summary:
+                    data["dispatch_summary"] = dispatch_summary
+                    changed = True
 
-                    if disc.status == "concluded" and data.get("conclusion") != disc.conclusion:
-                        data["conclusion"] = disc.conclusion
-                        changed = True
+                if disc.status == "concluded" and data.get("conclusion") != disc.conclusion:
+                    data["conclusion"] = disc.conclusion
+                    changed = True
 
-                    findings = self.db.get_findings(conn, discussion_id)
-                    conv_history = self.db.get_convergence_history(conn, discussion_id)
-                    conv_map = {c.round: c.score for c in conv_history}
+                findings = self.db.get_findings(conn, discussion_id)
+                conv_history = self.db.get_convergence_history(conn, discussion_id)
+                conv_map = {c.round: c.score for c in conv_history}
 
-                    findings_by_round: dict[int, list[Any]] = {}
-                    for finding in findings:
-                        findings_by_round.setdefault(finding.round, []).append(finding)
+                findings_by_round: dict[int, list[Any]] = {}
+                for finding in findings:
+                    findings_by_round.setdefault(finding.round, []).append(finding)
 
-                    existing_summaries = data.setdefault("round_summaries", [])
-                    existing_rounds_map = {s.get("round"): s for s in existing_summaries if "round" in s}
+                existing_summaries = data.setdefault("round_summaries", [])
+                existing_rounds_map = {s.get("round"): s for s in existing_summaries if "round" in s}
 
-                    max_round_to_sync = max(findings_by_round.keys()) if findings_by_round else 0
-                    for r in range(1, max_round_to_sync + 1):
-                        round_findings = findings_by_round.get(r, [])
-                        consensus_pts = [
-                            {"content": finding.content} for finding in round_findings if finding.type == "consensus"
-                        ]
-                        disagreement_pts = [
-                            {"content": finding.content} for finding in round_findings if finding.type == "disagreement"
-                        ]
+                max_round_to_sync = max(findings_by_round.keys()) if findings_by_round else 0
+                for r in range(1, max_round_to_sync + 1):
+                    round_findings = findings_by_round.get(r, [])
+                    consensus_pts = [
+                        {"content": finding.content} for finding in round_findings if finding.type == "consensus"
+                    ]
+                    disagreement_pts = [
+                        {"content": finding.content} for finding in round_findings if finding.type == "disagreement"
+                    ]
 
-                        if not round_findings and r not in existing_rounds_map:
-                            continue
+                    if not round_findings and r not in existing_rounds_map:
+                        continue
 
-                        score = conv_map.get(r)
-                        existing = existing_rounds_map.get(r)
-                        needs_update = False
-                        if not existing:
+                    score = conv_map.get(r)
+                    existing = existing_rounds_map.get(r)
+                    needs_update = False
+                    if not existing:
+                        needs_update = True
+                    else:
+                        ex_consensus = existing.get("consensus", [])
+                        ex_disagreement = existing.get("disagreement", [])
+                        ex_score = existing.get("convergence_score")
+                        if ex_consensus != consensus_pts or ex_disagreement != disagreement_pts or ex_score != score:
                             needs_update = True
+
+                    if needs_update:
+                        summary_event = {
+                            "type": "round_summary",
+                            "round": r,
+                            "consensus": consensus_pts,
+                            "disagreement": disagreement_pts,
+                            "timestamp": now,
+                        }
+                        if score is not None:
+                            summary_event["convergence_score"] = score
+
+                        if existing:
+                            existing.update(summary_event)
                         else:
-                            ex_consensus = existing.get("consensus", [])
-                            ex_disagreement = existing.get("disagreement", [])
-                            ex_score = existing.get("convergence_score")
-                            if (
-                                ex_consensus != consensus_pts
-                                or ex_disagreement != disagreement_pts
-                                or ex_score != score
-                            ):
-                                needs_update = True
+                            existing_summaries.append(summary_event)
 
-                        if needs_update:
-                            summary_event = {
-                                "type": "round_summary",
-                                "round": r,
-                                "consensus": consensus_pts,
-                                "disagreement": disagreement_pts,
-                                "timestamp": now,
-                            }
-                            if score is not None:
-                                summary_event["convergence_score"] = score
+                        data.setdefault("events", []).append(summary_event)
+                        changed = True
+                        self.append_token_stream(web_dir, summary_event)
 
-                            if existing:
-                                existing.update(summary_event)
-                            else:
-                                existing_summaries.append(summary_event)
+                existing_summaries.sort(key=lambda s: s.get("round", 0))
 
-                            data.setdefault("events", []).append(summary_event)
-                            changed = True
-                            self.append_token_stream(web_dir, summary_event)
+                if disc.status == "concluded":
+                    final_summary = data.get("final_summary")
+                    consensus_all = [
+                        {"content": finding.content} for finding in findings if finding.type == "consensus"
+                    ]
+                    disagreement_all = [
+                        {"content": finding.content} for finding in findings if finding.type == "disagreement"
+                    ]
 
-                    existing_summaries.sort(key=lambda s: s.get("round", 0))
-
-                    if disc.status == "concluded":
-                        final_summary = data.get("final_summary")
-                        consensus_all = [
-                            {"content": finding.content} for finding in findings if finding.type == "consensus"
-                        ]
-                        disagreement_all = [
-                            {"content": finding.content} for finding in findings if finding.type == "disagreement"
-                        ]
-
-                        needs_final_summary = False
-                        if not final_summary:
+                    needs_final_summary = False
+                    if not final_summary:
+                        needs_final_summary = True
+                    else:
+                        ex_consensus = final_summary.get("consensus", [])
+                        ex_disagreement = final_summary.get("disagreement", [])
+                        if (
+                            len(ex_consensus) != len(consensus_all)
+                            or len(ex_disagreement) != len(disagreement_all)
+                            or final_summary.get("verdict") != (disc.conclusion or "")
+                        ):
                             needs_final_summary = True
-                        else:
-                            ex_consensus = final_summary.get("consensus", [])
-                            ex_disagreement = final_summary.get("disagreement", [])
-                            if (
-                                len(ex_consensus) != len(consensus_all)
-                                or len(ex_disagreement) != len(disagreement_all)
-                                or final_summary.get("verdict") != (disc.conclusion or "")
-                            ):
-                                needs_final_summary = True
 
-                        if needs_final_summary:
-                            final_summary_event = {
-                                "type": "final_summary",
-                                "consensus": consensus_all,
-                                "disagreement": disagreement_all,
-                                "verdict": disc.conclusion or "",
-                                "timestamp": now,
-                            }
-                            data["final_summary"] = final_summary_event
-                            data.setdefault("events", []).append(final_summary_event)
-                            changed = True
-                            self.append_token_stream(web_dir, final_summary_event)
+                    if needs_final_summary:
+                        final_summary_event = {
+                            "type": "final_summary",
+                            "consensus": consensus_all,
+                            "disagreement": disagreement_all,
+                            "verdict": disc.conclusion or "",
+                            "timestamp": now,
+                        }
+                        data["final_summary"] = final_summary_event
+                        data.setdefault("events", []).append(final_summary_event)
+                        changed = True
+                        self.append_token_stream(web_dir, final_summary_event)
 
-                        if old_status != "concluded":
-                            status_event = {
-                                "type": "status_delta",
-                                "status": "concluded",
-                                "conclusion": disc.conclusion or "",
-                                "timestamp": now,
-                            }
-                            data.setdefault("events", []).append(status_event)
-                            changed = True
-                            self.append_token_stream(web_dir, status_event)
+                    if old_status != "concluded":
+                        status_event = {
+                            "type": "status_delta",
+                            "status": "concluded",
+                            "conclusion": disc.conclusion or "",
+                            "timestamp": now,
+                        }
+                        data.setdefault("events", []).append(status_event)
+                        changed = True
+                        self.append_token_stream(web_dir, status_event)
 
-                    if changed:
-                        data["updated_at"] = now
-                        tmp = json_path.with_suffix(".json.tmp")
-                        with open(tmp, "w") as f:
-                            json.dump(data, f, ensure_ascii=False, indent=2)
-                            f.flush()
-                            os.fsync(f.fileno())
-                        os.rename(str(tmp), str(json_path))
-                        logger.info("Synchronized web discussion.json for %s from database", discussion_id)
-                finally:
-                    _unlock(lock_file)
+                if changed:
+                    data["updated_at"] = now
+                    write_json_atomic(json_path, data)
+                    logger.info("Synchronized web discussion.json for %s from database", discussion_id)
+
         except Exception:
             logger.exception("Failed to sync web discussion state for %s", discussion_id)
 
@@ -297,41 +262,33 @@ class WebDiscussionSync:
 
         lock_path = json_path.with_suffix(".json.lock")
         try:
-            with open(lock_path, "a") as lock_file:
-                _lock_ex(lock_file)
-                try:
-                    with open(json_path) as f:
-                        data = json.load(f)
+            with file_lock(lock_path):
+                with open(json_path, encoding="utf-8") as f:
+                    data = json.load(f)
 
-                    data.setdefault("speeches", []).append(speech_data)
-                    now = time.time()
-                    data.setdefault("events", []).append(
-                        {
-                            "type": "speech_delta",
-                            "speech": speech_data,
-                            "timestamp": now,
-                        }
-                    )
-                    data["updated_at"] = now
+                data.setdefault("speeches", []).append(speech_data)
+                now = time.time()
+                data.setdefault("events", []).append(
+                    {
+                        "type": "speech_delta",
+                        "speech": speech_data,
+                        "timestamp": now,
+                    }
+                )
+                data["updated_at"] = now
 
-                    self.append_token_stream(
-                        web_dir,
-                        {
-                            "type": "speech_delta",
-                            "speech": speech_data,
-                            "timestamp": now,
-                        },
-                    )
+                self.append_token_stream(
+                    web_dir,
+                    {
+                        "type": "speech_delta",
+                        "speech": speech_data,
+                        "timestamp": now,
+                    },
+                )
 
-                    tmp = json_path.with_suffix(".json.tmp")
-                    with open(tmp, "w") as f:
-                        json.dump(data, f, ensure_ascii=False, indent=2)
-                        f.flush()
-                        os.fsync(f.fileno())
-                    os.rename(str(tmp), str(json_path))
-                    logger.info("Updated web discussion.json for %s (cross-process)", discussion_id)
-                finally:
-                    _unlock(lock_file)
+                write_json_atomic(json_path, data)
+                logger.info("Updated web discussion.json for %s (cross-process)", discussion_id)
+
         except Exception:
             logger.exception("Failed to update web discussion.json for %s", discussion_id)
 
@@ -342,43 +299,35 @@ class WebDiscussionSync:
 
         lock_path = json_path.with_suffix(".json.lock")
         try:
-            with open(lock_path, "a") as lock_file:
-                _lock_ex(lock_file)
-                try:
-                    with open(json_path) as f:
-                        data = json.load(f)
+            with file_lock(lock_path):
+                with open(json_path, encoding="utf-8") as f:
+                    data = json.load(f)
 
-                    data["conclusion"] = conclusion
-                    data["status"] = "concluded"
-                    now = time.time()
-                    data.setdefault("events", []).append(
-                        {
-                            "type": "status_delta",
-                            "status": "concluded",
-                            "conclusion": conclusion,
-                            "timestamp": now,
-                        }
-                    )
-                    data["updated_at"] = now
+                data["conclusion"] = conclusion
+                data["status"] = "concluded"
+                now = time.time()
+                data.setdefault("events", []).append(
+                    {
+                        "type": "status_delta",
+                        "status": "concluded",
+                        "conclusion": conclusion,
+                        "timestamp": now,
+                    }
+                )
+                data["updated_at"] = now
 
-                    self.append_token_stream(
-                        web_dir,
-                        {
-                            "type": "status_delta",
-                            "status": "concluded",
-                            "conclusion": conclusion,
-                            "timestamp": now,
-                        },
-                    )
+                self.append_token_stream(
+                    web_dir,
+                    {
+                        "type": "status_delta",
+                        "status": "concluded",
+                        "conclusion": conclusion,
+                        "timestamp": now,
+                    },
+                )
 
-                    tmp = json_path.with_suffix(".json.tmp")
-                    with open(tmp, "w") as f:
-                        json.dump(data, f, ensure_ascii=False, indent=2)
-                        f.flush()
-                        os.fsync(f.fileno())
-                    os.rename(str(tmp), str(json_path))
-                    logger.info("Concluded web discussion.json for %s (cross-process)", discussion_id)
-                finally:
-                    _unlock(lock_file)
+                write_json_atomic(json_path, data)
+                logger.info("Concluded web discussion.json for %s (cross-process)", discussion_id)
+
         except Exception:
             logger.exception("Failed to conclude web discussion.json for %s", discussion_id)

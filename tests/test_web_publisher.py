@@ -250,7 +250,7 @@ class TestWebPublisherLifecycle:
 
         stream_path = tmp_path / "token_stream.jsonl"
         assert stream_path.exists()
-        events = [json.loads(line) for line in stream_path.read_text().splitlines()]
+        events = [json.loads(line) for line in stream_path.read_text(encoding="utf-8").splitlines()]
         assert [event["type"] for event in events] == [
             "speech_start",
             "speech_token",
@@ -301,7 +301,9 @@ class TestWebPublisherLifecycle:
             }
         ]
 
-        events = [json.loads(line) for line in (tmp_path / "token_stream.jsonl").read_text().splitlines()]
+        events = [
+            json.loads(line) for line in (tmp_path / "token_stream.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
         assert events[-1]["type"] == "round_summary"
         assert events[-1]["round"] == 1
         assert events[-1]["consensus"] == consensus
@@ -324,7 +326,9 @@ class TestWebPublisherLifecycle:
             "timestamp": data["final_summary"]["timestamp"],
         }
 
-        events = [json.loads(line) for line in (tmp_path / "token_stream.jsonl").read_text().splitlines()]
+        events = [
+            json.loads(line) for line in (tmp_path / "token_stream.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
         assert events[-1]["type"] == "final_summary"
         assert events[-1]["verdict"] == "Ship it"
 
@@ -627,7 +631,7 @@ class TestRunDemoWebIntegration:
         json_file = disc_dir / "discussion.json"
         assert json_file.exists()
 
-        data = json.loads(json_file.read_text())
+        data = json.loads(json_file.read_text(encoding="utf-8"))
         assert data["topic"] == "选择后端框架：FastAPI vs Go Gin vs Node Express"
         assert data["status"] == "concluded"
         assert len(data["speeches"]) == 7  # opening + 2 rounds x 3 participants

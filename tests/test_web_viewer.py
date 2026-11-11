@@ -130,7 +130,13 @@ def server(discussion_dir, request):
         ["node", str(script), "--port", str(port), "--data-dir", str(discussion_dir)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env={**os.environ, "TMPDIR": str(discussion_dir), **options},
+        env={
+            **os.environ,
+            "TMPDIR": str(discussion_dir),
+            "TMP": str(discussion_dir),
+            "TEMP": str(discussion_dir),
+            **options,
+        },
     )
     # Wait for server to start
     base = f"http://127.0.0.1:{port}"
@@ -312,7 +318,7 @@ def test_route_failures_return_errors_and_leave_server_running(server):
     if (directory / "server.mjs").exists():
         assert "X-Powered-By" not in response.headers
     path = directory / "test_disc" / "discussion.json"
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     data["topic"] = 123  # A malformed imported snapshot fails inside an async export route.
     path.write_text(json.dumps(data))
     response = requests.get(f"{base}/api/test_token_abc123/export/markdown", timeout=5)
@@ -407,7 +413,7 @@ class TestExportPDF:
         try:
             url = f"http://127.0.0.1:{probe.server_port}/unexpected"
             path = directory / "test_disc" / "discussion.json"
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
             data["speeches"][0]["content"] = (
                 f"![remote image]({url})\n<img src='{url}'>\n"
                 f"<script>fetch('{url}')</script>\n<iframe src='{url}'></iframe>"
@@ -432,18 +438,43 @@ class TestExportPDF:
 
     def test_aborted_export_cleans_temporary_directory(self, server, pdf_support):
         base, port, directory = server
+        path = directory / "test_disc" / "discussion.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["speeches"][0]["content"] = "A long review paragraph.\n\n" * 10000
+        path.write_text(json.dumps(data), encoding="utf-8")
         with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
             client.sendall(
                 b"GET /api/test_token_abc123/export/pdf HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
             )
-            deadline = time.monotonic() + 5
-            while not list(directory.glob("roundtable-pdf-*")) and time.monotonic() < deadline:
+            browser_ready = "roundtable-pdf-*/puppeteer_dev_chrome_profile-*/DevToolsActivePort"
+            deadline = time.monotonic() + 15
+            while not list(directory.glob(browser_ready)) and time.monotonic() < deadline:
                 time.sleep(0.02)
-            assert list(directory.glob("roundtable-pdf-*"))
-        deadline = time.monotonic() + 5
+            assert list(directory.glob(browser_ready)), "Browser must be running before cancellation"
+        deadline = time.monotonic() + 10
         while list(directory.glob("roundtable-pdf-*")) and time.monotonic() < deadline:
             time.sleep(0.05)
         assert not list(directory.glob("roundtable-pdf-*"))
+        if os.name == "nt":
+            task_path = str(directory).replace("'", "''")
+            command = [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_Process | Where-Object { "
+                "$_.Name -in @('chrome.exe', 'node.exe') -and $_.CommandLine -and "
+                f"$_.CommandLine.Contains('{task_path}\\roundtable-pdf-') "
+                "} | Select-Object -ExpandProperty ProcessId",
+            ]
+        else:
+            command = ["ps", "-axo", "pid=,command="]
+        processes = subprocess.run(command, check=True, capture_output=True, text=True, timeout=10).stdout
+        leftovers = (
+            processes.strip()
+            if os.name == "nt"
+            else [line for line in processes.splitlines() if str(directory / "roundtable-pdf-") in line]
+        )
+        assert not leftovers, leftovers
         assert requests.get(f"{base}/api/test_token_abc123/export/markdown", timeout=5).status_code == 200
 
     @pytest.mark.parametrize("server", [{"PUPPETEER_EXECUTABLE_PATH": "/missing/roundtable/chromium"}], indirect=True)
@@ -487,14 +518,14 @@ class TestRevokeAuthorization:
         assert resp.json()["revoked"] is True
 
         disc_path = discussion_dir / "test_disc" / "discussion.json"
-        data = json.loads(disc_path.read_text())
+        data = json.loads(disc_path.read_text(encoding="utf-8"))
         token_hash = hashlib.sha256(b"test_token_abc123").hexdigest()
         assert token_hash in data["revoked_token_hashes"]
 
     def test_revoke_preserves_cross_process_disk_updates(self, server):
         base, _, discussion_dir = server
         disc_path = discussion_dir / "test_disc" / "discussion.json"
-        data = json.loads(disc_path.read_text())
+        data = json.loads(disc_path.read_text(encoding="utf-8"))
         data["dispatch_summary"] = {"accepted": 2, "pending": 0}
         data["speeches"].append(
             {
@@ -515,7 +546,7 @@ class TestRevokeAuthorization:
         )
         assert resp.status_code == 200
 
-        result = json.loads(disc_path.read_text())
+        result = json.loads(disc_path.read_text(encoding="utf-8"))
         token_hash = hashlib.sha256(b"test_token_abc123").hexdigest()
         assert token_hash in result["revoked_token_hashes"]
         assert result["dispatch_summary"] == {"accepted": 2, "pending": 0}

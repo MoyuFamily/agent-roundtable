@@ -389,6 +389,9 @@ class WebPublisher:
                 "discussion.json.tmp",
             ):
                 (self._discussion_dir / fname).unlink(missing_ok=True)
+            revocations = self._discussion_dir / "revocations"
+            if revocations.exists():
+                shutil.rmtree(revocations)
             with contextlib.suppress(OSError):
                 self._discussion_dir.rmdir()
             logger.info("Discussion dir removed for %s", self._discussion_id)
@@ -920,6 +923,11 @@ class WebPublisher:
                     data["participants"] = list(participant_map.values())
                     self._participants = data["participants"]
 
+            if self._token:
+                token_hash = _hash_token(self._token)
+                if (self._discussion_dir / "revocations" / token_hash).exists():
+                    data["revoked_token_hashes"] = sorted(set(data.get("revoked_token_hashes", [])) | {token_hash})
+                    self._revoked = True
             write_json_atomic(target, data)
 
     def _read_discussion_json(self) -> dict[str, Any] | None:

@@ -27,6 +27,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Share cross-platform viewer file locks and UTF-8 I/O; atomically replace snapshots on Windows and preserve the prior file when serialization fails.
+- Isolate browser profiles and short POSIX socket paths, and terminate Windows PDF worker process trees on cancellation. Verify cancellation after Chrome has actually started.
+- Persist HTTP link revocation independently from discussion snapshots so concurrent Python updates cannot be overwritten or undo a revocation.
+
 - Stop issuing duplicate authentication cookies containing raw viewer tokens. The login flow now verifies access and the exact cookie set together.
 - Handle asynchronous viewer route failures in both Express and the dependency-free server so a bad request does not terminate the process.
 

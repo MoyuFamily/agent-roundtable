@@ -457,7 +457,6 @@ class TestExportPDF:
         deadline = time.monotonic() + 10
         while list(directory.glob("roundtable-pdf-*")) and time.monotonic() < deadline:
             time.sleep(0.05)
-        assert not list(directory.glob("roundtable-pdf-*"))
         if os.name == "nt":
             task_path = str(directory).replace("'", "''")
             command = [
@@ -478,6 +477,7 @@ class TestExportPDF:
             else [line for line in processes.splitlines() if str(directory / "roundtable-pdf-") in line]
         )
         assert not leftovers, leftovers
+        assert not list(directory.glob("roundtable-pdf-*")), list(directory.glob("roundtable-pdf-*/**/*"))
         assert requests.get(f"{base}/api/test_token_abc123/export/markdown", timeout=5).status_code == 200
 
     @pytest.mark.parametrize("server", [{"PUPPETEER_EXECUTABLE_PATH": "/missing/roundtable/chromium"}], indirect=True)
@@ -510,21 +510,6 @@ class TestRevokeAuthorization:
         )
         assert resp.status_code == 403
 
-    def test_revoke_with_owner_secret_succeeds(self, server):
-        base, _, discussion_dir = server
-        resp = requests.post(
-            f"{base}/api/test_token_abc123/revoke",
-            json={"owner_secret": "owner_secret_123"},
-            timeout=5,
-        )
-        assert resp.status_code == 200
-        assert resp.json()["revoked"] is True
-
-        disc_path = discussion_dir / "test_disc" / "discussion.json"
-        data = json.loads(disc_path.read_text(encoding="utf-8"))
-        token_hash = hashlib.sha256(b"test_token_abc123").hexdigest()
-        assert token_hash in data["revoked_token_hashes"]
-
     def test_revoke_preserves_cross_process_disk_updates(self, server):
         base, _, discussion_dir = server
         disc_path = discussion_dir / "test_disc" / "discussion.json"
@@ -548,12 +533,19 @@ class TestRevokeAuthorization:
             timeout=5,
         )
         assert resp.status_code == 200
+        assert resp.json()["revoked"] is True
 
         result = json.loads(disc_path.read_text(encoding="utf-8"))
         token_hash = hashlib.sha256(b"test_token_abc123").hexdigest()
-        assert token_hash in result["revoked_token_hashes"]
+        assert (disc_path.parent / "revocations" / token_hash).exists()
+        assert result == data  # Revoking never rewrites the Python-owned snapshot.
         assert result["dispatch_summary"] == {"accepted": 2, "pending": 0}
         assert any(s["agent_id"] == "carol" for s in result["speeches"])
+        # A later writer based on an older snapshot cannot undo the independent revoke.
+        result["conclusion"] = "A newer conclusion after revocation"
+        result["revoked_token_hashes"] = []
+        disc_path.write_text(json.dumps(result), encoding="utf-8")
+        assert requests.get(f"{base}/api/test_token_abc123/data", timeout=5).status_code == 403
 
     def test_owner_viewer_config_contains_owner_capability(self, server):
         base, _, _ = server

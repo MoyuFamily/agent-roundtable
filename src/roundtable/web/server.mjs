@@ -17,12 +17,10 @@ import {
   watch,
   existsSync,
   writeFileSync,
-  renameSync,
   createReadStream,
   readdirSync,
   mkdirSync,
   statSync,
-  unlinkSync,
   mkdtempSync,
   rmSync,
 } from "node:fs";
@@ -174,53 +172,16 @@ function readDiscussionFor(entry) {
   return data;
 }
 
-function readDiscussionSnapshot(path) {
-  try {
-    if (!existsSync(path)) return null;
-    const before = statSync(path);
-    const raw = readFileSync(path, "utf-8");
-    const data = JSON.parse(raw);
-    const after = statSync(path);
-    if (before.mtimeMs !== after.mtimeMs || before.size !== after.size) return null;
-    return { data, signature: `${after.mtimeMs}:${after.size}` };
-  } catch {
-    return null;
-  }
-}
-
 function writeRevocationHash(entry, incomingHash) {
-  // Python owns full discussion.json merge semantics under discussion.json.lock.
-  // Node's revoke endpoint performs only a targeted revocation merge: re-read the
-  // latest disk snapshot, add this token hash, and retry if the file changes
-  // before the atomic rename.
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const tmpPath = `${entry.discussionPath}.node-revoke-${process.pid}-${Date.now()}-${attempt}.tmp`;
-    const snapshot = readDiscussionSnapshot(entry.discussionPath);
-    if (!snapshot) continue;
-
-    const data = snapshot.data;
-    const revoked = Array.isArray(data.revoked_token_hashes) ? data.revoked_token_hashes : [];
-    const revokedSet = new Set(revoked);
-    revokedSet.add(incomingHash);
-    data.revoked_token_hashes = [...revokedSet];
-    delete data.revoked_tokens;
-    data.updated_at = Math.floor(Date.now() / 1000);
-
-    try {
-      const latest = statSync(entry.discussionPath);
-      const latestSignature = `${latest.mtimeMs}:${latest.size}`;
-      if (latestSignature !== snapshot.signature) continue;
-
-      writeFileSync(tmpPath, JSON.stringify(data, null, 2));
-      renameSync(tmpPath, entry.discussionPath);
-      return data;
-    } catch {
-      try { unlinkSync(tmpPath); } catch { /* ignore cleanup races */ }
-      continue;
-    }
+  // Revocation is monotonic and separate from the Python-owned snapshot. A marker
+  // cannot overwrite a concurrent speech or be removed by a stale snapshot write.
+  const directory = join(entry.dir, 'revocations');
+  mkdirSync(directory, { recursive: true });
+  try {
+    writeFileSync(join(directory, incomingHash), '', { flag: 'wx' });
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
   }
-
-  throw new Error("Unable to safely persist revocation");
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +240,7 @@ function isTokenValid(token) {
   const data = readDiscussionFor(entry);
   if (!data) return false;
   const incomingHash = _hashToken(token);
+  if (existsSync(join(entry.dir, 'revocations', incomingHash))) return false;
   const storedHash = data.token_hash || (data.token ? _hashToken(data.token) : "");
   if (!_safeStrEqual(storedHash, incomingHash)) return false;
   for (const revokedHash of data.revoked_token_hashes || []) {
@@ -1267,8 +1229,8 @@ router.get("/api/:token/export/pdf", async (req, res, params) => {
     });
     res.end(pdfBuffer);
   } catch (err) {
+    if (err.message !== 'PDF export cancelled.') console.error("[export/pdf] Error:", err.message);
     if (!res.destroyed) {
-      console.error("[export/pdf] Error:", err.message);
       sendJSON(
         res,
         {

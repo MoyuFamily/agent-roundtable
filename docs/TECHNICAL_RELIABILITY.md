@@ -57,6 +57,10 @@ HTTP 请求体限制为1 MiB，读取空闲超时为10秒。不支持 chunked �
 
 ## Viewer 会话与请求错误
 
+Python 的实时发布和跨进程写入共用 file_io：POSIX 使用 flock，Windows 使用 msvcrt 字节锁；整个读取、合并、替换过程持有同一个 sidecar 锁。快照通过同目录临时文件和 os.replace 更新，失败时保留原文件并清理临时文件。JSON 和 JSONL 明确使用 UTF-8，避免系统默认编码破坏中文或 emoji。锁只协调遵守该协议的 Python 进程，不代表任意外部写入均安全。
+
+HTTP 撤销链接写入 revocations/<token_hash> 独立标记，不再覆盖 discussion.json，因此不与 Python 快照更新争抢整个文件。访问检查同时识别标记和历史快照中的 revoked_token_hashes；后续 Python 发布会合并当前 token 的标记。旧快照写回不能撤销该标记，删除整个 Viewer 时才清理标记目录。
+
 密码验证只签发以 token 哈希命名的会话 Cookie，不再重复签发带原始 token 的旧格式。会话密钥仍在每次服务启动时生成，重启后需重新输入密码；历史讨论文件的格式迁移保留。
 
 Express 与无依赖的内置 HTTP 路径都会处理异步路由异常，返回 JSON 错误并保持进程运行。内置路径用于尚未安装 Node 依赖时读取讨论，是仍在使用的降级能力；PDF 和旧 bcrypt 密码校验仍需要对应依赖。回归通过无依赖目录中的实际进程验证该路径。
@@ -64,6 +68,8 @@ Express 与无依赖的内置 HTTP 路径都会处理异步路由异常，返回
 ## PDF 导出
 
 Viewer 的 pdf-worker.mjs 从安装位置加载 md-to-pdf，导出时不运行 npx 或下载依赖。每个请求使用独立临时目录和渲染进程，默认60秒超时（可通过 `ROUNDTABLE_PDF_TIMEOUT_MS` 设置，最大120秒）；请求断开或超时会终止渲染并清理文件。渲染函数等 worker 关闭后清理目录，再返回 PDF 内容或错误，因此正常与失败 HTTP 响应都在清理完成后发送。在 POSIX 平台通过 Puppeteer 的信号处理器终止它独立创建的浏览器进程组，worker 未按时退出时再强制终止 worker 进程组。
+
+Windows 使用 taskkill /T /F 结束本次 worker 及其子进程，并等待命令结束后清理文件。浏览器 profile 放在请求目录下；POSIX 浏览器的 socket 临时目录单独创建在短路径 /tmp 下，以免深层工作目录超过 Unix socket 路径长度限制。两处目录都随请求释放。取消测试等待真实浏览器启动后明确断开连接，再核对目录及相关进程是否清理。
 
 原始 HTML、脚本和远程图片作为文本处理，不在导出浏览器中执行或请求；代码块、表格和正文仍按 Markdown 排版。可用 `PUPPETEER_EXECUTABLE_PATH` 指定 Chrome/Chromium 可执行文件。受控 CI 环境需要关闭浏览器沙箱时显式设置 `ROUNDTABLE_PDF_NO_SANDBOX=1`，默认不关闭。
 

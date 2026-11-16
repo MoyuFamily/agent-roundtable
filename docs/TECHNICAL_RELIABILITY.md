@@ -71,6 +71,10 @@ Viewer 的 pdf-worker.mjs 从安装位置加载 md-to-pdf，导出时不运行 n
 
 Windows 使用 taskkill /T /F 结束本次 worker 及其子进程，并等待命令结束后清理文件。浏览器 profile 放在请求目录下；POSIX 浏览器的 socket 临时目录单独创建在短路径 /tmp 下，以免深层工作目录超过 Unix socket 路径长度限制。两处目录都随请求释放。取消测试等待真实浏览器启动后明确断开连接，再核对目录及相关进程是否清理。
 
+Windows CI 曾在子进程退出后报告 profile 目录 EBUSY。目录删除采用异步、最多5次、100毫秒递增间隔的重试，超过上限继续报错，不忽略残留。清理异常即使发生在客户端断开后也会记录。
+
+CI 在 Ubuntu 的 Python 3.10/3.11/3.12 和 Windows Server 2025 runner 的 Python 3.12 上运行完整源码检查，要求实际 Chrome/PDF 测试通过。Windows 验证包含独立进程文件锁、Unicode 文件往返、HTTP Bridge、MCP stdio/SSE 和取消后的进程检查；这不等同于所有 Windows 桌面版本、真实宿主应用或 Windows 安装包均已验收。干净 wheel 安装验证目前运行在 Ubuntu。
+
 原始 HTML、脚本和远程图片作为文本处理，不在导出浏览器中执行或请求；代码块、表格和正文仍按 Markdown 排版。可用 `PUPPETEER_EXECUTABLE_PATH` 指定 Chrome/Chromium 可执行文件。受控 CI 环境需要关闭浏览器沙箱时显式设置 `ROUNDTABLE_PDF_NO_SANDBOX=1`，默认不关闭。
 
 PDF 测试只在预检发现依赖缺失时允许跳过，运行过程中返回503视为失败。设置 `ROUNDTABLE_REQUIRE_PDF=1` 后，缺少依赖也会失败；CI 采用该模式。验证覆盖实际渲染、并发导出、超时清理、未授权导出拒绝及阻止正文中的远程资源请求。

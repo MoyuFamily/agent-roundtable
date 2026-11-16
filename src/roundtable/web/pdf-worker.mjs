@@ -1,6 +1,7 @@
 /** Isolated PDF renderer. No package lookup/download is performed at request time. */
 import { createRequire } from 'node:module';
 import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
 
@@ -30,6 +31,7 @@ try {
       marked_options: { renderer },
       launch_options: {
         executablePath,
+        userDataDir: join(process.env.PUPPETEER_TMP_DIR || process.cwd(), 'chrome-profile'),
         args: process.env.ROUNDTABLE_PDF_NO_SANDBOX === '1' ? ['--no-sandbox'] : [],
       },
       pdf_options: { format: 'A4', margin: '20mm', printBackground: true },

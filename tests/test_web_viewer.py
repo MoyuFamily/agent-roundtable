@@ -154,7 +154,9 @@ def server(discussion_dir, request):
 
     yield base, port, discussion_dir
     proc.terminate()
-    proc.wait(timeout=5)
+    stdout, stderr = proc.communicate(timeout=5)
+    if stderr:
+        print(stderr.decode("utf-8", errors="replace"))
 
 
 @pytest.fixture
@@ -446,7 +448,7 @@ class TestExportPDF:
             client.sendall(
                 b"GET /api/test_token_abc123/export/pdf HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
             )
-            browser_ready = "roundtable-pdf-*/puppeteer_dev_chrome_profile-*/DevToolsActivePort"
+            browser_ready = "roundtable-pdf-*/chrome-profile/DevToolsActivePort"
             deadline = time.monotonic() + 15
             while not list(directory.glob(browser_ready)) and time.monotonic() < deadline:
                 time.sleep(0.02)

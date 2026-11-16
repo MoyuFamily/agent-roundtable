@@ -1152,6 +1152,7 @@ router.get("/api/:token/export/markdown", async (req, res, params) => {
 async function renderPdf(md, signal) {
   if (signal.aborted) throw new Error('PDF export cancelled.');
   const temporaryDir = mkdtempSync(join(tmpdir(), 'roundtable-pdf-'));
+  let browserTemporaryDir = null;
   const tmpMdPath = join(temporaryDir, 'review.md');
   const expectedPdfPath = join(temporaryDir, 'review.pdf');
 
@@ -1189,6 +1190,9 @@ async function renderPdf(md, signal) {
   signal.addEventListener('abort', killWorker, { once: true });
 
   try {
+    // Chrome creates Unix-domain sockets in TMPDIR, whose path length is bounded.
+    // Keep that runtime directory short even when the review's TMPDIR is deeply nested.
+    browserTemporaryDir = mkdtempSync(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'rtb-'));
     writeFileSync(tmpMdPath, md, "utf-8");
 
     await new Promise((resolveP, rejectP) => {
@@ -1196,7 +1200,10 @@ async function renderPdf(md, signal) {
       let spawnError = null;
       child = spawn(process.execPath, [PDF_WORKER, tmpMdPath, expectedPdfPath], {
         cwd: temporaryDir,
-        env: { ...process.env, TMP: temporaryDir, TEMP: temporaryDir, TMPDIR: temporaryDir, PUPPETEER_TMP_DIR: temporaryDir },
+        env: {
+          ...process.env, TMP: browserTemporaryDir, TEMP: browserTemporaryDir,
+          TMPDIR: browserTemporaryDir, PUPPETEER_TMP_DIR: temporaryDir,
+        },
         detached: process.platform !== 'win32',
         stdio: ["ignore", "ignore", "pipe"],
       });
@@ -1226,7 +1233,11 @@ async function renderPdf(md, signal) {
   } finally {
     signal.removeEventListener('abort', killWorker);
     await treeStopped;
-    rmSync(temporaryDir, { recursive: true, force: true });
+    try {
+      rmSync(temporaryDir, { recursive: true, force: true });
+    } finally {
+      if (browserTemporaryDir) rmSync(browserTemporaryDir, { recursive: true, force: true });
+    }
   }
 }
 

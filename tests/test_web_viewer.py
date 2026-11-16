@@ -453,6 +453,7 @@ class TestExportPDF:
             while not list(directory.glob(browser_ready)) and time.monotonic() < deadline:
                 time.sleep(0.02)
             assert list(directory.glob(browser_ready)), "Browser must be running before cancellation"
+            client.shutdown(socket.SHUT_RDWR)
         deadline = time.monotonic() + 10
         while list(directory.glob("roundtable-pdf-*")) and time.monotonic() < deadline:
             time.sleep(0.05)

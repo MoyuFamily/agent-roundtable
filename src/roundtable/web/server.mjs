@@ -22,8 +22,8 @@ import {
   mkdirSync,
   statSync,
   mkdtempSync,
-  rmSync,
 } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import * as readline from "node:readline";
@@ -1196,9 +1196,12 @@ async function renderPdf(md, signal) {
     signal.removeEventListener('abort', killWorker);
     await treeStopped;
     try {
-      rmSync(temporaryDir, { recursive: true, force: true });
+      // Windows can retain Chrome directory handles briefly after taskkill exits.
+      await rm(temporaryDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     } finally {
-      if (browserTemporaryDir) rmSync(browserTemporaryDir, { recursive: true, force: true });
+      if (browserTemporaryDir) {
+        await rm(browserTemporaryDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      }
     }
   }
 }

@@ -122,7 +122,7 @@ def test_evidence_reaches_roles_and_one_conclusion_reaches_every_reader(review, 
     transcript = handle_resource_read(reopened, reopened_db, f"roundtable://discussions/{did}/transcript")
     assert transcript["conclusion"] == canonical
     assert canonical in transcript["transcript"]
-    assert canonical in (tmp_path / "report.md").read_text()
+    assert canonical in (tmp_path / "report.md").read_text(encoding="utf-8")
     summary = reopened.summarize(did)["structured_summary"]
     assert summary.index(canonical) < summary.index("PEER_PRIVATE_FIRST_PASS")
 
@@ -210,7 +210,7 @@ def test_late_export_does_not_replace_a_newer_report(review, evidence, report, t
     update(review, evidence)
     web_dir = tmp_path / "viewer"
     web_dir.mkdir()
-    (web_dir / "discussion.json").write_text(json.dumps({"status": "active", "events": []}))
+    (web_dir / "discussion.json").write_text(json.dumps({"status": "active", "events": []}), encoding="utf-8")
     monkeypatch.setattr(RoundtableCore, "_get_web_dir", lambda *args: web_dir)
     newer = {**report, "recommendation": "Revised recommendation after the final check"}
     other = RoundtableCore(db=RoundtableDB(db.db_path))
@@ -223,8 +223,8 @@ def test_late_export_does_not_replace_a_newer_report(review, evidence, report, t
     core.end_discussion(did, report=report, expected_revision=1)
     current = core.read(did)["conclusion"]
     assert newer["recommendation"] in current
-    assert current in (tmp_path / "report.md").read_text()
-    viewer = json.loads((web_dir / "discussion.json").read_text())
+    assert current in (tmp_path / "report.md").read_text(encoding="utf-8")
+    viewer = json.loads((web_dir / "discussion.json").read_text(encoding="utf-8"))
     assert viewer["conclusion"] == viewer["final_summary"]["verdict"] == current
     assert [event for event in viewer["events"] if event["type"] == "status_delta"][-1]["conclusion"] == current
 

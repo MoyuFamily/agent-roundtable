@@ -188,7 +188,7 @@ class TestEndDiscussionWithPublisher:
         did = result["discussion_id"]
         directory = core._get_web_dir(did)
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "discussion.json").write_text(json.dumps({"status": "active", "events": []}))
+        (directory / "discussion.json").write_text(json.dumps({"status": "active", "events": []}), encoding="utf-8")
         return did, mock_pub
 
     def test_conclude_publishes_saved_state_and_retains_viewer(self, core):
@@ -197,7 +197,7 @@ class TestEndDiscussionWithPublisher:
 
         result = core.end_discussion(disc_id, conclusion="Saved recommendation")
 
-        snapshot = json.loads((core._get_web_dir(disc_id) / "discussion.json").read_text())
+        snapshot = json.loads((core._get_web_dir(disc_id) / "discussion.json").read_text(encoding="utf-8"))
         assert snapshot["conclusion"] == snapshot["final_summary"]["verdict"] == "Saved recommendation"
         assert snapshot["status"] == "concluded"
         mock_pub.stop.assert_not_called()
@@ -257,7 +257,7 @@ class TestEndDiscussionWithPublisher:
 
         assert end_result["ok"] is True
         assert end_result["web_retained"] is True
-        snapshot = json.loads((core._get_web_dir(disc_id) / "discussion.json").read_text())
+        snapshot = json.loads((core._get_web_dir(disc_id) / "discussion.json").read_text(encoding="utf-8"))
         assert snapshot["conclusion"] == snapshot["final_summary"]["verdict"] == "Updated conclusion"
         assert disc_id not in core._publishers
 

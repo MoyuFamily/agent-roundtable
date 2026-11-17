@@ -260,7 +260,7 @@ def test_canonical_report_browser_behavior(template):
         input=json.dumps({**synthetic_snapshot(), "template": template}, ensure_ascii=False),
         cwd=ROOT,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         timeout=60,
     )
     if result.returncode == 77:

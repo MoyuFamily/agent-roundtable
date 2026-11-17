@@ -5,7 +5,7 @@
 <h1 align="center">Roundtable</h1>
 
 <p align="center">
-  <strong>Roundtable helps you organize professional roles for important decisions, use agents and models for their analysis, and work through trade-offs across disciplines.</strong>
+  <strong>Roundtable aims to turn scattered material into decision recommendations with supporting evidence, clear trade-offs, and a basis for revision as information changes.</strong>
 </p>
 
 <p align="center">
@@ -27,24 +27,26 @@
 
 ## Product Direction
 
-Important decisions involve user value, technical feasibility, experience, and operating costs. Roundtable aims to help you assemble relevant professional perspectives, obtain concrete analyses, and compare feasible choices.
+Roundtable will build its strengths by continually improving **how it handles input** and **the quality of its output**. The review goals are:
 
-**Roles define responsibilities; agents bring context and tools; models perform analysis.** These are separate choices. There is no fixed mapping from a model brand to a job title, and more participants are not automatically better.
-
-| Need | Review workflow |
+| Area of improvement | Review requirements |
 |---|---|
-| Broader coverage | Identify missing perspectives and assign questions, materials, and deliverables |
-| Deeper analysis | Ask each role for evidence, options, costs, and constraints |
-| Useful trade-offs | Discuss consequential conflicts and compare alternatives, retaining dissent |
-| Traceability | Preserve speeches and references, distinguishing recommendations from user decisions |
+| Input handling | Extract information relevant to the decision; identify sources, versions, and applicability; distinguish facts, estimates, and unknowns; identify gaps and conflicts |
+| Output quality | Keep recommendations clear, concise, and actionable: include conclusions, supporting evidence, costs, conditions that would change the assessment, and next steps; provide detailed evidence as needed |
+
+**Roles define responsibilities; agents bring context and tools; models perform analysis.** These can be configured separately. There is no fixed mapping from a model to a job title, and reviews do not always need more roles or models.
+
+Multiple roles, agents, and models are methods for supporting these goals. Their contribution to Roundtable requires comparative evaluation; an advantage over a single assistant has not been established.
 
 ## Current Capabilities
 
 The Python core manages discussions, speaking order, references, SQLite records, formatted summaries, and a Web Viewer. Skills and MCP prompts guide the host through the review. The `decision-support` and `code-review` templates supply editable role responsibilities.
 
-The user or coordinator selects roles; the host runs agents and selects models; the user makes the decision. Automatic team selection, model routing, semantic finding extraction, and evidence verification are not implemented. `convergence_score` is a ratio of externally supplied annotations and may be `None`; it is not answer accuracy. `summarize()` formats recorded material rather than performing professional synthesis.
+**The user or coordinator selects roles; the host runs agents and selects models; the user makes the decision.** Extracting relevant material, checking sources and applicability, distinguishing facts, estimates, and unknowns, and synthesizing conclusions currently depend on the user, coordinator, and host. Existing records and conclusions can be exported as Markdown or rendered as PDF with an available browser. Automatic material parsing, semantic verification, structured evidence links, analytical chart generation, and consistency checks across artifacts are not implemented. The engine also does not provide automatic team selection, model routing, or semantic finding extraction.
 
-The current source also supports versioned brief updates, speech-linked annotations, and prompt retrieval through HTTP tools. Reads, summaries, and exports retain full conclusions; actual review rounds are distinct from the engine cursor. See the [workflow guide](docs/DECISION_WORKFLOW.md).
+`convergence_score` is calculated from externally supplied consensus/disagreement annotations and may be `None`; it is not answer accuracy. `summarize()` formats recorded material rather than performing professional synthesis.
+
+The current source also supports brief updates with sources and version history, speech-linked annotations, and prompt retrieval through HTTP tools. Reads, summaries, and exports retain full conclusions; actual review rounds are distinct from the engine cursor. See the [workflow guide](docs/DECISION_WORKFLOW.md).
 
 See the [product direction and acceptance criteria](docs/product/DIRECTION.md) and [decision workflow guide](docs/DECISION_WORKFLOW.md) (Chinese). These changes describe the source tree; check a published package's version and capabilities before assuming it includes them.
 
@@ -225,11 +227,11 @@ src/roundtable/
 
 ## 🛣️ Roadmap
 
-1. Complete a reliable review: MCP compatibility, notifications, message acknowledgement, two-client flows, and package verification.
-2. Validate professional contribution: coverage, depth, and trade-offs compared with a single assistant and independent role summaries. Include Code Review with actionable findings and false-positive checks.
-3. Automate repeated burdens only after observing them: role suggestions, model matching, and structured evidence management.
+1. **Improve the path from materials to advice**: check for missing material, source applicability, and confusion between facts and estimates; deliver concise, actionable recommendations consistent with the detailed evidence.
+2. **Update conclusions reliably**: reconsider affected judgments when information changes, explain the differences, and update or mark superseded outputs.
+3. **Validate the contribution of collaboration and automation**: compare with a single assistant and independent role summaries using comparable material and budgets; use quality improvements and coordination costs to decide whether to add roles, models, or automation.
 
-Real usage will determine whether to maintain a standalone product, keep a lightweight skill, or reduce scope. See [product direction](docs/product/DIRECTION.md).
+MCP compatibility, notifications, message acknowledgement, two-client flows, and package checks remain a maintained reliability foundation. Expand input and delivery formats based on observed benefits, then decide whether to maintain a standalone product, keep a lightweight skill, or reduce scope. See [product direction](docs/product/DIRECTION.md).
 
 ## 🤝 Contributing
 

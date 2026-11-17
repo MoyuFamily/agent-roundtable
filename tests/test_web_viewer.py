@@ -10,6 +10,7 @@ Tests cover:
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import os
 import socket
@@ -24,6 +25,13 @@ import pytest
 import requests
 
 SERVER_SCRIPT = Path(__file__).resolve().parent.parent / "src" / "roundtable" / "web" / "server.mjs"
+CANONICAL_REPORT = (
+    "### 建议 / Recommendation\n\nKeep the complete recommendation.\n\n"
+    "### 依据 / Evidence\n\n" + "Recorded evidence and limits.\n\n" * 40 + "### 代价 / Costs\n\nTime and effort.\n\n"
+    "### 未知 / Unknowns\n\nDemand remains unknown.\n\n"
+    "### 改变条件 / Change conditions\n\nRevisit after new evidence.\n\n"
+    "### 下一步 / Next steps\n\nVerify one claim. END_OF_CANONICAL_REPORT"
+)
 
 
 @pytest.fixture
@@ -61,7 +69,7 @@ def discussion_dir(tmp_path):
         "token_hash": hashlib.sha256(b"test_token_abc123").hexdigest(),
         "owner_secret_hash": hashlib.sha256(b"owner_secret_123").hexdigest(),
         "topic": "Test Discussion Topic",
-        "status": "completed",
+        "status": "concluded",
         "schema_version": 2,
         "participants": [
             {"id": "alice", "name": "Alice", "role": "Engineer", "display_name": "Alice"},
@@ -69,6 +77,7 @@ def discussion_dir(tmp_path):
         ],
         "speeches": [
             {
+                "id": 1,
                 "seq": 1,
                 "round": 0,
                 "agent_id": "alice",
@@ -77,6 +86,7 @@ def discussion_dir(tmp_path):
                 "content": "Hello, I think we should focus on performance.",
             },
             {
+                "id": 2,
                 "seq": 2,
                 "round": 0,
                 "agent_id": "bob",
@@ -85,6 +95,7 @@ def discussion_dir(tmp_path):
                 "content": "I agree, but UX is also important.",
             },
             {
+                "id": 3,
                 "seq": 3,
                 "round": 1,
                 "agent_id": "alice",
@@ -106,7 +117,7 @@ def discussion_dir(tmp_path):
             "disagreement_points": ["Order of implementation"],
             "verdict": "Start with performance, then UX.",
         },
-        "conclusion": "The team agrees to prioritize performance optimization.",
+        "conclusion": CANONICAL_REPORT,
         "consensus_score": 0.75,
         "revoked_token_hashes": [],
         "stream": {"seq": 3, "events": []},
@@ -122,9 +133,18 @@ def server(discussion_dir, request):
     """Start the web server and yield the base URL."""
     options = dict(getattr(request, "param", {}))
     script = SERVER_SCRIPT
-    if options.pop("without_dependencies", False):
+    capture_pdf_input = options.pop("capture_pdf_input", False)
+    if options.pop("without_dependencies", False) or capture_pdf_input:
         script = discussion_dir / "server.mjs"
         script.write_bytes(SERVER_SCRIPT.read_bytes())
+    if capture_pdf_input:
+        # Exercise the real PDF route and its Markdown handoff without interpreting PDF bytes.
+        script.with_name("pdf-worker.mjs").write_text(
+            "import {readFileSync, writeFileSync} from 'node:fs';\n"
+            "writeFileSync(new URL('./pdf-input.md', import.meta.url), readFileSync(process.argv[2]));\n"
+            "writeFileSync(process.argv[3], '%PDF-test-worker');\n",
+            encoding="utf-8",
+        )
     port = _find_free_port()
     proc = subprocess.Popen(
         ["node", str(script), "--port", str(port), "--data-dir", str(discussion_dir)],
@@ -180,7 +200,7 @@ def pw_server(tmp_path):
     disc = {
         "token_hash": hashlib.sha256(b"pw_token_456").hexdigest(),
         "topic": "Secret Discussion",
-        "status": "completed",
+        "status": "concluded",
         "schema_version": 2,
         "password_hash": pw_hash,
         "participants": [
@@ -198,7 +218,7 @@ def pw_server(tmp_path):
         ],
         "round_summaries": [],
         "final_summary": None,
-        "conclusion": None,
+        "conclusion": "PRIVATE_REPORT_SENTINEL\n\nRecommendation with evidence.",
         "revoked_token_hashes": [],
         "stream": {"seq": 1, "events": []},
         "updated_at": int(time.time()),
@@ -243,6 +263,31 @@ def pw_server(tmp_path):
 
 
 class TestServerLifecycle:
+    def test_updated_conclusion_reaches_sse_and_poll(self, server):
+        base, _, directory = server
+        path = directory / "test_disc" / "discussion.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+
+        def next_event(lines, name):
+            event = None
+            for line in lines:
+                if line.startswith("event: "):
+                    event = line[7:]
+                elif line.startswith("data: ") and event == name:
+                    return json.loads(line[6:])
+            pytest.fail(f"SSE closed before {name}")
+
+        with requests.get(f"{base}/api/test_token_abc123/events", stream=True, timeout=5) as response:
+            response.encoding = "utf-8"
+            lines = response.iter_lines(chunk_size=1, decode_unicode=True)
+            assert next_event(lines, "init")["conclusion"] == CANONICAL_REPORT
+            data["conclusion"] = CANONICAL_REPORT + "\n\nA revised next step."
+            data["updated_at"] += 1
+            path.write_text(json.dumps(data), encoding="utf-8")
+            assert next_event(lines, "update")["conclusion"] == data["conclusion"]
+        poll = requests.get(f"{base}/api/test_token_abc123/poll?since=0", timeout=5)
+        assert poll.json()["conclusion"] == data["conclusion"]
+
     def test_server_starts(self, server):
         base, _port, _ = server
         resp = requests.get(f"{base}/api/test_token_abc123/data", timeout=5)
@@ -264,6 +309,7 @@ class TestServerLifecycle:
         data = resp.json()
         assert data["topic"] == "Test Discussion Topic"
         assert len(data["participants"]) == 2
+        assert data["conclusion"] == CANONICAL_REPORT
         # Token should NOT be in the response
         assert "token" not in data
         assert "token_hash" not in data
@@ -285,6 +331,27 @@ class TestServerLifecycle:
 
 
 class TestPasswordProtection:
+    def test_share_requires_authentication_before_rendering_any_content(self, pw_server):
+        base, _, _ = pw_server
+        session = requests.Session()
+        url = f"{base}/share/pw_token_456"
+        response = session.get(url, timeout=5)
+        assert response.status_code == 200
+        assert "Access Verification" in response.text
+        for private_text in ("Secret Discussion", "secret speech", "PRIVATE_REPORT_SENTINEL"):
+            assert private_text not in response.text
+        assert 'property="og:' not in response.text
+        login = session.post(
+            f"{base}/api/pw_token_456/validate-password", json={"password": "testpassword123"}, timeout=5
+        )
+        assert login.status_code == 200
+        response = session.get(url, timeout=5)
+        assert "Access Verification" not in response.text
+        assert "Secret Discussion" in response.text
+        assert "PRIVATE_REPORT_SENTINEL" in response.text
+        # Authentication must still be required for a fresh client after a successful login.
+        assert "PRIVATE_REPORT_SENTINEL" not in requests.get(url, timeout=5).text
+
     def test_login_protects_content_and_issues_only_hashed_token_cookie(self, pw_server):
         base, _, _ = pw_server
         session = requests.Session()
@@ -363,6 +430,36 @@ class TestExportMarkdown:
         assert "## Round Summaries" in md
         assert "## Final Summary" in md
         assert "## Conclusion" in md
+        assert md.count(CANONICAL_REPORT) == 1
+        assert md.index("## Conclusion") < md.index("## Participants") < md.index("## Round")
+        assert "Start with performance, then UX." not in md
+        assert "### Verdict" not in md
+        assert "Both agree on performance" in md
+        assert "Order of implementation" in md
+
+    @pytest.mark.parametrize("conclusion", [None, "", "  "])
+    def test_ended_without_conclusion_does_not_promote_legacy_verdict(self, server, conclusion):
+        base, _, directory = server
+        path = directory / "test_disc" / "discussion.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["conclusion"] = conclusion
+        path.write_text(json.dumps(data), encoding="utf-8")
+        response = requests.get(f"{base}/api/test_token_abc123/export/markdown", timeout=5)
+        assert response.status_code == 200
+        assert "no conclusion has been submitted" in response.text
+        assert "Start with performance, then UX." not in response.text
+        assert "Order of implementation" in response.text
+
+    def test_compatibility_mirror_is_not_exported_twice(self, server):
+        base, _, directory = server
+        path = directory / "test_disc" / "discussion.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["final_summary"]["verdict"] = data["conclusion"]
+        data["final_summary"]["consensus"] = [{"content": "Recorded consensus note"}]
+        path.write_text(json.dumps(data), encoding="utf-8")
+        response = requests.get(f"{base}/api/test_token_abc123/export/markdown", timeout=5)
+        assert response.text.count(CANONICAL_REPORT) == 1
+        assert "- Recorded consensus note" in response.text
 
     def test_export_markdown_invalid_token(self, server):
         base, _, _ = server
@@ -371,6 +468,16 @@ class TestExportMarkdown:
 
 
 class TestExportPDF:
+    @pytest.mark.parametrize("server", [{"capture_pdf_input": True}], indirect=True)
+    def test_pdf_uses_identical_markdown_input(self, server):
+        base, _, directory = server
+        markdown = requests.get(f"{base}/api/test_token_abc123/export/markdown", timeout=5)
+        response = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=10)
+        assert response.status_code == 200
+        pdf_input = (directory / "pdf-input.md").read_bytes()
+        assert pdf_input == markdown.content
+        assert pdf_input.decode("utf-8").count(CANONICAL_REPORT) == 1
+
     def test_export_pdf_invalid_token(self, server):
         base, _, _ = server
         resp = requests.get(f"{base}/api/bad_token/export/pdf", timeout=5)
@@ -420,6 +527,7 @@ class TestExportPDF:
                 f"![remote image]({url})\n<img src='{url}'>\n"
                 f"<script>fetch('{url}')</script>\n<iframe src='{url}'></iframe>"
             )
+            data["conclusion"] = data["speeches"][0]["content"]
             path.write_text(json.dumps(data))
             response = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=90)
             assert response.status_code == 200, response.text
@@ -565,6 +673,44 @@ class TestRevokeAuthorization:
 # ---------------------------------------------------------------------------
 # i18n tests
 # ---------------------------------------------------------------------------
+
+
+class TestConclusionPages:
+    @pytest.mark.parametrize("route", ["r", "embed"])
+    def test_conclusion_precedes_process_in_both_templates(self, server, route):
+        base, _, _ = server
+        response = requests.get(f"{base}/{route}/test_token_abc123", timeout=5)
+        markup = response.text
+        assert markup.index('id="conclusionCard"') < markup.index('id="discussionProcess"')
+        assert markup.index('id="discussionProcess"') < markup.index('id="speechesContainer"')
+        assert '<details id="discussionProcess" class="discussion-process" open>' in markup
+        assert 'id="finalSummaryCard"' in markup
+
+    def test_share_preserves_complete_escaped_report_before_process(self, server):
+        base, _, directory = server
+        path = directory / "test_disc" / "discussion.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        report = CANONICAL_REPORT + "\n<script>alert(1)</script> & $& {{viewerUrl}}"
+        data["conclusion"] = report
+        path.write_text(json.dumps(data), encoding="utf-8")
+        response = requests.get(f"{base}/share/test_token_abc123", timeout=5)
+        assert response.status_code == 200
+        assert html.escape(report, quote=True) in response.text
+        assert 'data-i18n="conclusionSource">结论原文' in response.text
+        assert "<script>alert(1)</script>" not in response.text
+        assert response.text.index('class="share-conclusion"') < response.text.index('class="participants"')
+        assert "Start with performance, then UX." not in response.text
+        assert "END_OF_CANONICAL_REPORT" not in response.text.split("</head>")[0]
+
+    def test_share_ended_without_report_is_explicit(self, server):
+        base, _, directory = server
+        path = directory / "test_disc" / "discussion.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["conclusion"] = None
+        path.write_text(json.dumps(data), encoding="utf-8")
+        response = requests.get(f"{base}/share/test_token_abc123", timeout=5)
+        assert 'data-i18n="conclusionMissing"' in response.text
+        assert "Start with performance, then UX." not in response.text
 
 
 class TestI18n:

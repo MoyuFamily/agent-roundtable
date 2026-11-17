@@ -81,6 +81,9 @@
       padding: 1.25rem 2rem;
       border-bottom: 1px solid var(--border);
     }
+    .share-conclusion { padding: 1.25rem 2rem; border-bottom: 1px solid var(--border); }
+    .share-conclusion h2 { font-size: 1rem; margin-bottom: 0.75rem; }
+    .conclusion-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
     .participant-chip {
       display: inline-flex;
       align-items: center;
@@ -153,6 +156,7 @@
       border-top: 1px solid var(--border);
       display: flex;
       gap: 0.75rem;
+      flex-wrap: wrap;
     }
     .btn {
       padding: 0.6rem 1.2rem;
@@ -215,6 +219,8 @@
       <div class="meta">{{metaText}}</div>
     </div>
 
+    {{conclusionHtml}}
+
     <div class="participants">
       {{participantsHtml}}
     </div>
@@ -228,19 +234,34 @@
     </div>
 
     <div class="share-footer">
-      <a href="{{viewerUrl}}" class="btn btn-primary">▶ 查看完整讨论</a>
-      <button class="btn btn-secondary" onclick="copyLink()">📋 复制链接</button>
+      <a href="{{viewerUrl}}" class="btn btn-primary" data-i18n="viewFullConclusion">查看完整结论与讨论</a>
+      <button class="btn btn-secondary" onclick="copyLink(this)" data-i18n="copyLink">复制链接</button>
+      <button class="btn btn-secondary" id="langSwitchBtn" type="button">EN</button>
     </div>
   </div>
 
   <div class="disclaimer">由 Roundtable 圆桌讨论引擎生成 · 多 Agent 协作式 AI 讨论</div>
 
+  <script src="/i18n.js"></script>
   <script>
-    function copyLink() {
+    const i18n = window.__RT_I18N__;
+    i18n.initI18n();
+    function translateShare() {
+      document.documentElement.lang = i18n.getLang();
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        el.textContent = i18n.t(el.dataset.i18n);
+      });
+      document.getElementById('langSwitchBtn').textContent = i18n.getLang() === 'zh-CN' ? 'EN' : '中';
+    }
+    document.getElementById('langSwitchBtn').addEventListener('click', () => {
+      i18n.setLang(i18n.getLang() === 'zh-CN' ? 'en-US' : 'zh-CN');
+      translateShare();
+    });
+    translateShare();
+    function copyLink(btn) {
       navigator.clipboard.writeText(window.location.href).then(() => {
-        const btn = event.target.closest('.btn');
         const orig = btn.textContent;
-        btn.textContent = '✓ 已复制';
+        btn.textContent = i18n.t('copied');
         setTimeout(() => { btn.textContent = orig; }, 2000);
       });
     }

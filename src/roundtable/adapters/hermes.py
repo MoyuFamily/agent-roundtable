@@ -1,7 +1,7 @@
 """Hermes Agent adapter for Roundtable.
 
 Drop-in replacement for hermes tools/roundtable_tools.py that delegates
-to the independent roundtable library. Registers all 7 tools with the
+to the independent roundtable library. Registers its tools with the
 Hermes tool registry.
 
 Usage in Hermes:
@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from roundtable.core import RoundtableCore
+from roundtable.evidence import EVIDENCE_SCHEMA, REPORT_SCHEMA
 from roundtable.exceptions import RoundtableError
 
 try:
@@ -165,6 +166,10 @@ def _handle_speak(args: dict[str, Any], **kw: Any) -> str:
 
 def _handle_read(args: dict[str, Any], **kw: Any) -> str:
     return _handle(args, "read")
+
+
+def _handle_update_context(args: dict[str, Any], **kw: Any) -> str:
+    return _handle(args, "update_context")
 
 
 def _handle_status(args: dict[str, Any], **kw: Any) -> str:
@@ -356,6 +361,23 @@ ROUNDTABLE_SUMMARIZE_SCHEMA = {
     },
 }
 
+ROUNDTABLE_UPDATE_CONTEXT_SCHEMA = {
+    "name": "roundtable_update_context",
+    "description": "Replace the shared brief and optional structured evidence, preserving revision history.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "discussion_id": {"type": "string"},
+            "context": {"type": "string", "description": "Complete current brief"},
+            "source": {"type": "string"},
+            "reason": {"type": "string"},
+            "expected_revision": {"type": "integer", "minimum": 0},
+            "evidence": EVIDENCE_SCHEMA,
+        },
+        "required": ["discussion_id", "context", "source", "expected_revision"],
+    },
+}
+
 ROUNDTABLE_END_SCHEMA = {
     "name": "roundtable_end",
     "description": (
@@ -367,6 +389,12 @@ ROUNDTABLE_END_SCHEMA = {
             "discussion_id": {"type": "string", "description": "Discussion ID (rt_xxxxxxxx)"},
             "force": {"type": "boolean", "description": "Cancel instead of conclude", "default": False},
             "conclusion": {"type": "string", "description": "Optional: conclusion text"},
+            "report": REPORT_SCHEMA,
+            "expected_revision": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Required with report; brief revision used for the recommendation",
+            },
         },
         "required": ["discussion_id"],
     },
@@ -435,7 +463,7 @@ ROUNDTABLE_NOTIFY_SCHEMA = {
 
 
 def register_roundtable_tools(registry: Any, *, check_fn: Any = None) -> None:
-    """Register all 8 roundtable tools with a Hermes tool registry.
+    """Register the roundtable tools with a Hermes tool registry.
 
     Args:
         registry: The Hermes tools.registry object.
@@ -445,6 +473,7 @@ def register_roundtable_tools(registry: Any, *, check_fn: Any = None) -> None:
         ("roundtable_init", ROUNDTABLE_INIT_SCHEMA, _handle_init, "🎯"),
         ("roundtable_speak", ROUNDTABLE_SPEAK_SCHEMA, _handle_speak, "💬"),
         ("roundtable_read", ROUNDTABLE_READ_SCHEMA, _handle_read, "📖"),
+        ("roundtable_update_context", ROUNDTABLE_UPDATE_CONTEXT_SCHEMA, _handle_update_context, "📎"),
         ("roundtable_status", ROUNDTABLE_STATUS_SCHEMA, _handle_status, "📊"),
         ("roundtable_summarize", ROUNDTABLE_SUMMARIZE_SCHEMA, _handle_summarize, "📝"),
         ("roundtable_end", ROUNDTABLE_END_SCHEMA, _handle_end, "🏁"),
@@ -504,6 +533,15 @@ registry.register(
     handler=_handle_read,
     check_fn=_check_roundtable_enabled,
     emoji="📖",
+)
+
+registry.register(
+    name="roundtable_update_context",
+    toolset="roundtable",
+    schema=ROUNDTABLE_UPDATE_CONTEXT_SCHEMA,
+    handler=_handle_update_context,
+    check_fn=_check_roundtable_enabled,
+    emoji="📎",
 )
 
 registry.register(

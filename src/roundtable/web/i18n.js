@@ -59,6 +59,10 @@
 
       // Conclusions & viewpoints
       conclusion: '结论',
+      conclusionMissing: '讨论已结束，尚未提交结论。',
+      discussionProcess: '讨论过程',
+      conclusionSource: '结论原文',
+      viewFullConclusion: '查看完整结论与讨论',
       convergence: '收敛度',
       consensusPoints: '✅ 共识观点',
       disagreementPoints: '⚡ 分歧观点',
@@ -180,6 +184,10 @@
 
       // Conclusions & viewpoints
       conclusion: 'Conclusion',
+      conclusionMissing: 'Discussion ended; no conclusion has been submitted.',
+      discussionProcess: 'Discussion process',
+      conclusionSource: 'Report source',
+      viewFullConclusion: 'View the full conclusion and discussion',
       convergence: 'Convergence',
       consensusPoints: '✅ Consensus',
       disagreementPoints: '⚡ Disagreement',

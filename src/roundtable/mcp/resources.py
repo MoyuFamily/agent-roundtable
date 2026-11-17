@@ -10,6 +10,7 @@ from typing import Any
 
 from roundtable.core import RoundtableCore
 from roundtable.db import RoundtableDB
+from roundtable.evidence import render_evidence
 
 RESOURCE_URIS: list[dict[str, str]] = [
     {
@@ -59,10 +60,12 @@ def _build_transcript(core: RoundtableCore, discussion_id: str) -> dict[str, Any
         return result
     speeches = result.get("speeches", [])
     lines = [f"# Discussion: {result.get('topic', discussion_id)}\n"]
-    lines.append(f"\n## Current brief (v{result['context_revision']})\n\n{result['context'] or '(Not supplied)'}\n")
     lines.append(
         f"\n## Conclusion\n\n{result['conclusion'] if result['conclusion'] is not None else '(Not recorded)'}\n"
     )
+    lines.append(f"\n## Current brief (v{result['context_revision']})\n\n{result['context'] or '(Not supplied)'}\n")
+    if result["evidence"] is not None:
+        lines.append("\n" + render_evidence(result["evidence"]))
     lines.append(
         f"\nReview rounds: {result['total_rounds']}; completed: {result['completed_rounds']} (opening excluded).\n"
     )
@@ -77,5 +80,7 @@ def _build_transcript(core: RoundtableCore, discussion_id: str) -> dict[str, Any
         "transcript": "\n".join(lines),
         "discussion_id": discussion_id,
         "conclusion": result["conclusion"],
+        "evidence": result["evidence"],
+        "decision_report": result["decision_report"],
         "context_history": result["context_history"],
     }

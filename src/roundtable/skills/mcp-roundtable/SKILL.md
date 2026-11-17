@@ -31,7 +31,8 @@ they are not seven independently validated automation products.
 
 The server records discussions. The host handles source reading and report creation.
 The server does not automatically select teams, invoke models, parse materials,
-extract findings, verify evidence, or synchronize report contents. Model identity and capabilities
+extract findings, verify evidence, or check external artifacts. Built-in readers and exports
+reuse one saved conclusion. Model identity and capabilities
 must not be inferred from role names. This skill grants no extra permissions
 for delegation, external messages, code changes, or merging.
 
@@ -66,6 +67,13 @@ source access so roles can check originals and challenge the extraction. The bri
   predictions, and preferences.
 - Unknowns, stale/conflicting or unreadable evidence, affected options, decision
   impact, and the coordinator's next verification step.
+
+Save it through roundtable_update_context's evidence alongside the complete narrative
+context, source, and expected_revision. Sources use id/title and optional safe
+reference/version/date; items use id/statement/kind/verification/citations, each citation
+with source_id/locator. Calculation items require derivation; applicability is optional.
+Inspect the schema for allowed values. Omission retains the evidence, an explicit object
+replaces it with history preserved. Validation checks structure and references, not truth.
 
 Use one coordinator-prepared price table for matching configuration, quantity/unit,
 term, and comparison date. Record source_id/locator, currency, tax, included/excluded
@@ -140,10 +148,16 @@ and tests. A source reference is not permission to disclose the original materia
    Reuse the same checked facts, calculations, and recommendation in short answers,
    reports, charts, and exports; verify key figures and conclusions agree. Keep
    decision-changing limitations in the overview. Suggested owners are not commitments.
-9. Persist with roundtable_end(..., conclusion="...") even after automatic
-   round-limit conclusion. Distinguish pending recommendation, confirmed user
-   decision, and deferred decision. Read back the full conclusion with read or
-   summarize. Do not infer implementation authorization.
+9. With structured evidence, call roundtable_end with report and expected_revision.
+   Include recommendation, status (proposed/confirmed/deferred), rationale (text and
+   evidence_ids), tradeoffs, uncertainties, revisit_conditions, and next_actions.
+   All fields are required; rationale and next_actions must be nonempty. Confirmed
+   means an actual user decision. The engine rejects missing references or a stale
+   revision and renders one saved conclusion for built-in readers/exports; it does
+   not verify the reasoning. Do not also pass conclusion or force. Without structured
+   evidence, use roundtable_end(..., conclusion="..."). Both work after automatic
+   round-limit conclusion. Read back with read or summarize; do not infer permission
+   to implement. A free-text replacement removes the old structured report.
 
 ## Participant
 

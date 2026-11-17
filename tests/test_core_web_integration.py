@@ -8,6 +8,7 @@ WebPublisher is mocked here; tests/test_web_viewer.py exercises the real Node se
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,10 +18,12 @@ from roundtable.db import RoundtableDB
 
 
 @pytest.fixture
-def core(tmp_path):
+def core(tmp_path, monkeypatch):
     """Isolated RoundtableCore with a fresh database."""
     db = RoundtableDB(tmp_path / "roundtable.db")
-    return RoundtableCore(db)
+    core = RoundtableCore(db)
+    monkeypatch.setattr(core, "_get_web_dir", lambda did: tmp_path / "web" / did)
+    return core
 
 
 def _make_participants():
@@ -182,15 +185,21 @@ class TestEndDiscussionWithPublisher:
                 _make_participants(),
                 web=True,
             )
-        return result["discussion_id"], mock_pub
+        did = result["discussion_id"]
+        directory = core._get_web_dir(did)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "discussion.json").write_text(json.dumps({"status": "active", "events": []}))
+        return did, mock_pub
 
-    def test_conclude_calls_publisher_conclude_and_retains_viewer(self, core):
+    def test_conclude_publishes_saved_state_and_retains_viewer(self, core):
         """Normal conclude should flush state to disk then release the publisher."""
         disc_id, mock_pub = self._create_web_discussion(core)
 
-        result = core.end_discussion(disc_id)
+        result = core.end_discussion(disc_id, conclusion="Saved recommendation")
 
-        mock_pub.conclude.assert_called_once()
+        snapshot = json.loads((core._get_web_dir(disc_id) / "discussion.json").read_text())
+        assert snapshot["conclusion"] == snapshot["final_summary"]["verdict"] == "Saved recommendation"
+        assert snapshot["status"] == "concluded"
         mock_pub.stop.assert_not_called()
         assert disc_id not in core._publishers
         assert result["web_retained"] is True
@@ -222,15 +231,19 @@ class TestEndDiscussionWithPublisher:
         assert end_result["ok"] is True
         assert disc_id not in core._publishers
 
-    def test_publisher_conclude_failure_releases_publisher(self, core):
-        """Conclude failures should not leave a stale in-memory publisher."""
-        disc_id, mock_pub = self._create_web_discussion(core)
-        mock_pub.conclude.side_effect = RuntimeError("PM2 crash")
+    def test_snapshot_failure_preserves_saved_conclusion_and_releases_publisher(self, core, monkeypatch):
+        disc_id, _ = self._create_web_discussion(core)
 
-        end_result = core.end_discussion(disc_id)
+        def fail_write(*args):
+            raise OSError("Disk unavailable")
+
+        monkeypatch.setattr("roundtable.web_sync.write_json_atomic", fail_write)
+
+        end_result = core.end_discussion(disc_id, conclusion="Saved despite unavailable viewer")
 
         assert end_result["ok"] is True
         assert end_result["web_retained"] is False
+        assert core.read(disc_id)["conclusion"] == "Saved despite unavailable viewer"
         assert disc_id not in core._publishers
 
     def test_concluded_update_releases_publisher(self, core):
@@ -244,7 +257,8 @@ class TestEndDiscussionWithPublisher:
 
         assert end_result["ok"] is True
         assert end_result["web_retained"] is True
-        update_pub.conclude.assert_called_once_with("Updated conclusion")
+        snapshot = json.loads((core._get_web_dir(disc_id) / "discussion.json").read_text())
+        assert snapshot["conclusion"] == snapshot["final_summary"]["verdict"] == "Updated conclusion"
         assert disc_id not in core._publishers
 
 

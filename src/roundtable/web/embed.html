@@ -67,13 +67,18 @@
 
     <!-- Active state -->
     <div id="activeState" class="hidden">
-      <div id="participantsBar" class="flex gap-2 mb-3 overflow-x-auto pb-2"></div>
-      <div id="speechesContainer"></div>
-
-      <div id="conclusionCard" class="hidden conclusion-card mt-5">
-        <h3 class="text-base font-semibold mb-2" style="position:relative;z-index:1;color:var(--rt-text-primary)" data-i18n="conclusion">📌 讨论结论</h3>
-        <div id="conclusionContent" class="leading-relaxed" style="position:relative;z-index:1;color:var(--rt-text-secondary)"></div>
-      </div>
+      <section id="conclusionCard" class="hidden conclusion-card" aria-labelledby="conclusionTitle">
+        <h2 id="conclusionTitle" class="text-base font-semibold mb-2" data-i18n="conclusion">结论</h2>
+        <div id="conclusionContent" class="leading-relaxed"></div>
+      </section>
+      <details id="discussionProcess" class="discussion-process" open>
+        <summary data-i18n="discussionProcess">讨论过程</summary>
+        <div class="discussion-process-content">
+          <div id="participantsBar" class="flex gap-2 mb-3 overflow-x-auto pb-2"></div>
+          <div id="speechesContainer"></div>
+          <div id="finalSummaryCard" class="hidden viewpoints-card"></div>
+        </div>
+      </details>
     </div>
 
     <!-- Revoked state -->

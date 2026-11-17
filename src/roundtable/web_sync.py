@@ -91,10 +91,10 @@ class WebDiscussionSync:
         except (OSError, TypeError, ValueError):
             logger.exception("Failed to append replay event at %s", target)
 
-    def sync_state(self, web_dir: Path, discussion_id: str, conn: sqlite3.Connection) -> None:
+    def sync_state(self, web_dir: Path, discussion_id: str, conn: sqlite3.Connection) -> bool:
         json_path = web_dir / "discussion.json"
         if not json_path.exists():
-            return
+            return False
 
         lock_path = json_path.with_suffix(".json.lock")
         try:
@@ -107,7 +107,7 @@ class WebDiscussionSync:
 
                 disc = self.db.get_discussion(conn, discussion_id)
                 if not disc:
-                    return
+                    return False
 
                 dispatches, dispatch_summary = self._dispatch_snapshot(conn, discussion_id)
                 refreshed_disc = self.db.get_discussion(conn, discussion_id)
@@ -132,7 +132,8 @@ class WebDiscussionSync:
                     data["dispatch_summary"] = dispatch_summary
                     changed = True
 
-                if disc.status == "concluded" and data.get("conclusion") != disc.conclusion:
+                conclusion_changed = disc.status == "concluded" and data.get("conclusion") != disc.conclusion
+                if conclusion_changed:
                     data["conclusion"] = disc.conclusion
                     changed = True
 
@@ -229,7 +230,7 @@ class WebDiscussionSync:
                         changed = True
                         self.append_token_stream(web_dir, final_summary_event)
 
-                    if old_status != "concluded":
+                    if old_status != "concluded" or conclusion_changed:
                         status_event = {
                             "type": "status_delta",
                             "status": "concluded",
@@ -244,9 +245,11 @@ class WebDiscussionSync:
                     data["updated_at"] = now
                     write_json_atomic(json_path, data)
                     logger.info("Synchronized web discussion.json for %s from database", discussion_id)
+                return True
 
         except Exception:
             logger.exception("Failed to sync web discussion state for %s", discussion_id)
+            return False
 
     def update_speech(
         self,
@@ -291,43 +294,3 @@ class WebDiscussionSync:
 
         except Exception:
             logger.exception("Failed to update web discussion.json for %s", discussion_id)
-
-    def conclude(self, web_dir: Path, discussion_id: str, conclusion: str) -> None:
-        json_path = web_dir / "discussion.json"
-        if not json_path.exists():
-            return
-
-        lock_path = json_path.with_suffix(".json.lock")
-        try:
-            with file_lock(lock_path):
-                with open(json_path, encoding="utf-8") as f:
-                    data = json.load(f)
-
-                data["conclusion"] = conclusion
-                data["status"] = "concluded"
-                now = time.time()
-                data.setdefault("events", []).append(
-                    {
-                        "type": "status_delta",
-                        "status": "concluded",
-                        "conclusion": conclusion,
-                        "timestamp": now,
-                    }
-                )
-                data["updated_at"] = now
-
-                self.append_token_stream(
-                    web_dir,
-                    {
-                        "type": "status_delta",
-                        "status": "concluded",
-                        "conclusion": conclusion,
-                        "timestamp": now,
-                    },
-                )
-
-                write_json_atomic(json_path, data)
-                logger.info("Concluded web discussion.json for %s (cross-process)", discussion_id)
-
-        except Exception:
-            logger.exception("Failed to conclude web discussion.json for %s", discussion_id)

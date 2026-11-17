@@ -16,6 +16,7 @@ from typing import Any
 
 from roundtable.core import RoundtableCore
 from roundtable.db import RoundtableDB
+from roundtable.evidence import EVIDENCE_SCHEMA, REPORT_SCHEMA
 
 TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
@@ -287,6 +288,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "source": {"type": "string", "description": "Actual source of the update, e.g. user or a document"},
                 "reason": {"type": "string"},
                 "expected_revision": {"type": "integer", "minimum": 0},
+                "evidence": {
+                    **EVIDENCE_SCHEMA,
+                    "description": "Complete source register and evidence items. Omit to retain existing evidence.",
+                },
             },
             "required": ["discussion_id", "context", "source", "expected_revision"],
         },
@@ -365,12 +370,18 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "roundtable_end",
-        "description": "End a discussion with an optional conclusion.",
+        "description": "Conclude with text or an evidence-linked report rendered consistently for all outputs.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "discussion_id": {"type": "string"},
                 "conclusion": {"type": "string"},
+                "report": REPORT_SCHEMA,
+                "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Required with report. The brief revision used to prepare this recommendation.",
+                },
                 "force": {"type": "boolean", "default": False, "description": "Force cancel instead of conclude"},
             },
             "required": ["discussion_id"],
@@ -592,6 +603,7 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
                 source=arguments["source"],
                 expected_revision=arguments["expected_revision"],
                 reason=arguments.get("reason"),
+                evidence=arguments.get("evidence"),
             )
 
         elif name == "roundtable_record_finding":
@@ -627,6 +639,8 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
                 arguments["discussion_id"],
                 conclusion=arguments.get("conclusion"),
                 force=arguments.get("force", False),
+                report=arguments.get("report"),
+                expected_revision=arguments.get("expected_revision"),
             )
 
         elif name == "roundtable_wait_for_turn":

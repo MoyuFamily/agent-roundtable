@@ -19,6 +19,7 @@
       participants: [],
       topic: '',
       conclusion: null,
+      finalSummary: null,
       currentRound: 0,
       speechIdSet: new Set(),
       roundSummaries: [],
@@ -34,6 +35,10 @@
 
     // Auto-scroll state
     let autoScrollEnabled = true;
+    let receivedSnapshot = false;
+    let suppressAutoScroll = false;
+    let renderedConclusion = undefined;
+    let renderedConclusionLanguage = null;
     const SCROLL_THRESHOLD = 50;
 
 
@@ -50,30 +55,34 @@
     const $participantsBar = document.getElementById('participantsBar');
     const $conclusionCard = document.getElementById('conclusionCard');
     const $conclusionContent = document.getElementById('conclusionContent');
+    const $discussionProcess = document.getElementById('discussionProcess');
+    const $finalSummaryCard = document.getElementById('finalSummaryCard');
     const $revokedState = document.getElementById('revokedState');
     const $scrollBottomBtn = document.getElementById('scrollBottomBtn');
     const $dispatchStatusPanel = document.getElementById('dispatchStatusPanel');
 
     // ---- Auto-scroll logic ----
-    const mainEl = document.querySelector('main');
+    const scrollEl = document.scrollingElement || document.documentElement;
 
-    mainEl?.addEventListener('scroll', () => {
-      const distanceFromBottom = mainEl.scrollHeight - mainEl.scrollTop - mainEl.clientHeight;
+    document.addEventListener('scroll', () => {
+      const distanceFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
       autoScrollEnabled = distanceFromBottom < SCROLL_THRESHOLD;
       if ($scrollBottomBtn) {
-        $scrollBottomBtn.classList.toggle('hidden', autoScrollEnabled);
+        $scrollBottomBtn.classList.toggle('hidden', autoScrollEnabled || !$discussionProcess?.open);
       }
-    });
+    }, { passive: true });
 
     $scrollBottomBtn?.addEventListener('click', () => {
-      mainEl?.scrollTo({ top: mainEl.scrollHeight, behavior: 'smooth' });
+      if ($discussionProcess) $discussionProcess.open = true;
+      scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: 'smooth' });
       autoScrollEnabled = true;
       $scrollBottomBtn.classList.add('hidden');
     });
 
     function scrollToEnd() {
-      if (autoScrollEnabled && mainEl) {
-        mainEl.scrollTop = mainEl.scrollHeight;
+      if (autoScrollEnabled && !suppressAutoScroll &&
+          $discussionProcess?.open && !document.body.classList.contains('replay-mode')) {
+        scrollEl.scrollTop = scrollEl.scrollHeight;
       }
     }
 
@@ -152,17 +161,19 @@
     // ---- Data handling ----
     function handleDelta(data) {
       const events = Array.isArray(data?.events) ? data.events : [];
-      for (const eventData of events) {
-        applyStreamEvent(eventData);
-      }
+      withLiveSpeeches(() => {
+        for (const eventData of events) applyStreamEvent(eventData);
+      });
       if (events.length > 0) {
         $waitingState.classList.add('hidden');
         $activeState.classList.remove('hidden');
       }
     }
 
-    function applyStreamEvent(eventData) {
+    function applyStreamEvent(eventData, { replay = false } = {}) {
       if (!eventData || !eventData.type) return;
+      // Historical status/verdict events must never replace the live report.
+      if (replay && (eventData.type === 'status_delta' || eventData.type === 'final_summary')) return;
       if (eventData.type === 'speech_start') {
         renderStreamingSpeechStart(eventData);
       } else if (eventData.type === 'speech_token') {
@@ -177,23 +188,42 @@
           state.status = eventData.status || eventData.payload.status;
           updateStatusUI();
         }
-        const conclusion = eventData.conclusion || eventData.payload?.conclusion;
-        if (conclusion && !state.conclusion) {
-          state.conclusion = conclusion;
-          renderConclusion(conclusion);
-        }
+        // The server also sends a full snapshot. Only that snapshot owns conclusion:
+        // buffered deltas can arrive after a newer snapshot (including on reconnect).
       } else if (eventData.type === 'round_summary') {
-        renderRoundSummary(eventData);
+        renderRoundSummary(eventData, replay);
       } else if (eventData.type === 'final_summary') {
         renderFinalSummary(eventData);
       }
     }
 
     function handleData(data) {
+      const previousSuppression = suppressAutoScroll;
+      suppressAutoScroll = !receivedSnapshot;
+      receivedSnapshot = true;
+      try {
+        withLiveSpeeches(() => applySnapshot(data));
+      } finally {
+        suppressAutoScroll = previousSuppression;
+      }
+    }
+
+    function withLiveSpeeches(render) {
+      const previousContainer = activeSpeechesContainer;
+      activeSpeechesContainer = $speechesContainer;
+      try { render(); } finally { activeSpeechesContainer = previousContainer; }
+    }
+
+    function applySnapshot(data) {
       if (data.status === 'revoked' || (data.revoked_tokens && data.revoked_tokens.includes(CONFIG.token))) {
         showRevoked();
         return;
       }
+
+      // Apply the report before process rendering can trigger any auto-scroll.
+      state.status = data.status || state.status;
+      updateConclusion(data.conclusion);
+      updateStatusUI();
 
       // Update topic
       if (data.topic && data.topic !== state.topic) {
@@ -222,7 +252,7 @@
             const latestRound = rounds[rounds.length - 1];
             for (const r of rounds) {
               if (r !== latestRound) {
-                const section = document.getElementById(`round-section-${r}`);
+                const section = document.getElementById(`speechesContainer-round-section-${r}`);
                 if (section) {
                   section.classList.add('collapsed');
                 }
@@ -232,22 +262,10 @@
         }
       }
 
-      // Update status
-      if (data.status !== state.status) {
-        state.status = data.status;
-        updateStatusUI();
-      }
-
       if (Array.isArray(data.dispatches)) {
         state.dispatches = data.dispatches;
         state.dispatchSummary = data.dispatch_summary || null;
         renderDispatchStatus();
-      }
-
-      // Conclusion
-      if (data.conclusion && !state.conclusion) {
-        state.conclusion = data.conclusion;
-        renderConclusion(data.conclusion);
       }
 
       // Round summaries / viewpoint cards
@@ -257,9 +275,7 @@
         }
       }
 
-      if (data.final_summary) {
-        renderFinalSummary(data.final_summary);
-      }
+      renderFinalSummary(data.final_summary || null);
 
       // Show active state if we have speeches or viewpoint cards
       if ((state.speeches.length > 0 || state.roundSummaries.length > 0) && state.status !== 'waiting') {
@@ -622,18 +638,20 @@
       }).join('');
     }
 
-    function renderRoundSummary(summary) {
+    function renderRoundSummary(summary, replay = false) {
       const roundNum = Number(summary.round || 0);
       const key = `round-${roundNum}`;
-      state.roundSummarySet.add(key);
-      state.roundSummaries = state.roundSummaries.filter(item => Number(item.round || 0) !== roundNum).concat(summary);
+      if (!replay) {
+        state.roundSummarySet.add(key);
+        state.roundSummaries = state.roundSummaries.filter(item => Number(item.round || 0) !== roundNum).concat(summary);
+      }
       getOrCreateRoundSection(roundNum, false);
       const prefix = activeSpeechesContainer ? activeSpeechesContainer.id : 'speechesContainer';
       const body = document.getElementById(`${prefix}-round-body-${roundNum}`);
-      let card = document.getElementById(`viewpoints-${key}`);
+      let card = document.getElementById(`${prefix}-viewpoints-${key}`);
       if (!card) {
         card = document.createElement('div');
-        card.id = `viewpoints-${key}`;
+        card.id = `${prefix}-viewpoints-${key}`;
         card.className = 'viewpoints-card';
         if (body) body.appendChild(card);
       }
@@ -680,11 +698,14 @@
     }
 
     function renderFinalSummary(summary) {
-      if (!summary) return;
+      state.finalSummary = summary;
+      if (!$finalSummaryCard) return;
+      $finalSummaryCard.classList.toggle('hidden', !summary);
+      if (!summary) { $finalSummaryCard.innerHTML = ''; return; }
       const consensus = summary.consensus || summary.consensus_points || [];
       const disagreement = summary.disagreement || summary.disagreement_points || [];
-      const verdict = summary.verdict ? `<div class="verdict-box"><span class="verdict-icon">📋</span><div><div style="font-weight:700;margin-bottom:8px;">${t("conclusion")}</div><div class="markdown-content">${renderMarkdown(summary.verdict)}</div></div></div>` : '';
-      $conclusionContent.innerHTML = `
+      // Consensus/disagreement are process notes, never another report body.
+      $finalSummaryCard.innerHTML = `
         <div class="viewpoints-grid">
           <div class="viewpoints-column">
             <h4>${t("finalConsensus")}</h4>
@@ -695,12 +716,7 @@
             <ul>${renderViewpointList(disagreement, 'disagreement')}</ul>
           </div>
         </div>
-        ${verdict}
       `;
-      $conclusionCard.classList.remove('hidden');
-      // 最终总结发光效果
-      $conclusionCard.classList.add('final-summary-glow');
-      scrollToEnd();
     }
 
     function mergeSpeech(speech, isNew = false) {
@@ -775,14 +791,39 @@
       }
     }
 
-    function renderConclusion(content) {
-      $conclusionContent.innerHTML = `<div class="markdown-content">${renderMarkdown(content)}</div>`;
-      $conclusionCard.classList.remove('hidden');
-      setTimeout(() => {
-        $conclusionCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 300);
-      // Show replay entry when conclusion appears
-      showReplayEntry();
+    function hasConclusion() {
+      return typeof state.conclusion === 'string' && state.conclusion.trim().length > 0;
+    }
+
+    function discussionEnded() {
+      return state.status === 'concluded' || state.status === 'completed';
+    }
+
+    function updateConclusion(content) {
+      const hadConclusion = hasConclusion();
+      state.conclusion = typeof content === 'string' ? content : null;
+      const hasReport = hasConclusion();
+      // Set a default only when report availability changes; keep the user's choice
+      // across repeated snapshots and report revisions. No verdict fallback.
+      if ($discussionProcess && hadConclusion !== hasReport) {
+        $discussionProcess.open = !hasReport;
+      }
+      if (hasReport && !hadConclusion) {
+        autoScrollEnabled = false;
+        $scrollBottomBtn?.classList.add('hidden');
+      }
+    }
+
+    function renderConclusion() {
+      const hasReport = hasConclusion();
+      if (renderedConclusion !== state.conclusion || renderedConclusionLanguage !== getLang()) {
+        $conclusionContent.innerHTML = hasReport
+          ? `<div class="markdown-content">${renderMarkdown(state.conclusion)}</div>`
+          : `<p class="conclusion-empty">${t('conclusionMissing')}</p>`;
+        renderedConclusion = state.conclusion;
+        renderedConclusionLanguage = getLang();
+      }
+      $conclusionCard.classList.toggle('hidden', !hasReport && !discussionEnded());
     }
 
     function updateStatusUI() {
@@ -791,13 +832,16 @@
         assembling: { cls: 'assembling', label: t('statusAssembling') },
         active:  { cls: 'live',    label: 'LIVE' },
         concluded: { cls: 'ended', label: t('statusConcluded') },
+        completed: { cls: 'ended', label: t('statusConcluded') },
       };
       const info = statusMap[state.status] || statusMap.waiting;
       $statusBadge.className = `status-badge ${info.cls}`;
       $statusLabel.textContent = info.label;
-      if (state.status === 'concluded') {
+      renderConclusion();
+      if (discussionEnded() || hasConclusion()) {
         $waitingState.classList.add('hidden');
         $activeState.classList.remove('hidden');
+        showReplayEntry();
       }
     }
 
@@ -819,7 +863,7 @@
     function renderDispatchStatus() {
       if (!$dispatchStatusPanel) return;
       const dispatches = Array.isArray(state.dispatches) ? state.dispatches : [];
-      if (dispatches.length === 0 || state.status === 'concluded') {
+      if (dispatches.length === 0 || discussionEnded()) {
         $dispatchStatusPanel.classList.add('hidden');
         $dispatchStatusPanel.innerHTML = '';
         return;
@@ -1324,9 +1368,11 @@
       return `${m}:${s}`;
     }
 
+    let replayEntryRequested = false;
     function showReplayEntry() {
       const $replayEntry = document.getElementById('replayEntry');
-      if (!$replayEntry) return;
+      if (!$replayEntry || CONFIG.embed || replayEntryRequested) return;
+      replayEntryRequested = true;
 
       // Fetch meta to show in entry card
       fetch(`${API_BASE}/api/${CONFIG.token}/replay/meta`)
@@ -1559,7 +1605,7 @@
 
       replayState.eventSource.addEventListener('replay_event', (e) => {
         const ev = JSON.parse(e.data);
-        applyStreamEvent(ev);
+        applyStreamEvent(ev, { replay: true });
       });
 
       replayState.eventSource.addEventListener('replay_end', () => {
@@ -1583,7 +1629,7 @@
       es.addEventListener('replay_event', (e) => {
         const ev = JSON.parse(e.data);
         if (ev._offsetMs <= toMs) {
-          applyStreamEvent(ev);
+          applyStreamEvent(ev, { replay: true });
         }
       });
       
@@ -1623,6 +1669,8 @@
         applyStaticI18n();
         // Re-render dynamic content
         renderParticipants();
+        updateStatusUI();
+        renderFinalSummary(state.finalSummary);
         if (replayState.data) {
           renderTimelineStrip();
         }

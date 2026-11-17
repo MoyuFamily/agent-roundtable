@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from roundtable.evidence import render_evidence
 from roundtable.models import ConvergenceRecord, Discussion, Finding, Participant, Speech, review_round_counts
 
 
@@ -35,17 +36,19 @@ def build_structured_summary(
     """Format recorded evidence; only speech excerpts are truncated, never the conclusion."""
     lines = []
     lines.append(f"# 圆桌讨论摘要: {disc.topic}")
+    lines.append("\n## 最终结论")
+    lines.append(disc.conclusion if disc.conclusion is not None else "尚未记录结论；会议结束不等于已形成决策建议。")
+    lines.append("\n以下为已记录材料的整理，不自动判断共识、证据真伪或用户是否批准建议。")
     if disc.context:
         lines.append(f"\n**当前背景**: {disc.context}")
+    if context_history and context_history[-1].get("evidence") is not None:
+        lines.append("")
+        lines.append(render_evidence(context_history[-1]["evidence"]))
     if context_history and len(context_history) > 1:
         lines.append("\n## 背景修订记录")
         lines.append("当前背景取代旧版本中的冲突信息；历史发言保留当时的判断。")
         for revision in context_history:
             lines.append(f"- v{revision['revision']} · {revision['source']}: {revision['reason'] or '未填写原因'}")
-
-    lines.append("\n## 最终结论")
-    lines.append(disc.conclusion if disc.conclusion is not None else "尚未记录结论；会议结束不等于已形成决策建议。")
-    lines.append("\n以下为已记录材料的整理，不自动判断共识、证据真伪或用户是否批准建议。")
 
     # Participants
     lines.append("\n## 参与者")

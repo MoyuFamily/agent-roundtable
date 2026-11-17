@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from roundtable.evidence import normalize_evidence
 from roundtable.exceptions import (
     DiscussionNotActiveError,
     DiscussionNotFoundError,
@@ -183,7 +184,7 @@ class RoundtableDB:
             (discussion_id,),
         ).fetchall()
         if rows:
-            return [dict(row) for row in rows]
+            return [{**dict(row), "evidence": json.loads(row["evidence"]) if row["evidence"] else None} for row in rows]
         disc = self.get_discussion(conn, discussion_id)
         if not disc:
             raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
@@ -195,6 +196,7 @@ class RoundtableDB:
                 "source": disc.created_by,
                 "reason": "Initial brief",
                 "created_at": disc.created_at,
+                "evidence": None,
             }
         ]
 
@@ -207,6 +209,7 @@ class RoundtableDB:
         source: str,
         expected_revision: int,
         reason: str | None = None,
+        evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Atomically replace the current brief while preserving every revision."""
         if not isinstance(context, str) or not context.strip():
@@ -227,6 +230,16 @@ class RoundtableDB:
             history = self.get_context_history(conn, discussion_id)
             if history[-1]["revision"] != expected_revision:
                 raise ValueError("Context revision conflict; read the current brief before updating")
+            evidence = normalize_evidence(evidence) if evidence is not None else history[-1]["evidence"]
+            # A source ID identifies one source version for the entire review.
+            # Corrections to extracted items are allowed, but source identities cannot be repointed.
+            if evidence is not None:
+                known_sources = {
+                    source["id"]: source for entry in history for source in (entry["evidence"] or {}).get("sources", [])
+                }
+                for item in evidence["sources"]:
+                    if item["id"] in known_sources and item != known_sources[item["id"]]:
+                        raise ValueError("Source ID already identifies different metadata; use a new source ID")
             initial = history[0]
             conn.execute(
                 """INSERT OR IGNORE INTO context_revisions
@@ -236,15 +249,32 @@ class RoundtableDB:
             revision = expected_revision + 1
             conn.execute(
                 """INSERT INTO context_revisions
-                   (discussion_id, revision, context, source, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)""",
-                (discussion_id, revision, context, source.strip(), reason, int(time.time())),
+                   (discussion_id, revision, context, source, reason, created_at, evidence)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    discussion_id,
+                    revision,
+                    context,
+                    source.strip(),
+                    reason,
+                    int(time.time()),
+                    json.dumps(evidence, ensure_ascii=False) if evidence is not None else None,
+                ),
             )
             conn.execute("UPDATE discussions SET context = ? WHERE id = ?", (context, discussion_id))
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
             raise
-        return {"context": context, "context_revision": revision, "source": source.strip()}
+        return {"context": context, "context_revision": revision, "source": source.strip(), "evidence": evidence}
+
+    def get_decision_report(self, conn: sqlite3.Connection, discussion_id: str) -> dict[str, Any] | None:
+        row = conn.execute(
+            "SELECT context_revision, report FROM decision_reports WHERE discussion_id = ?", (discussion_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return {"context_revision": row["context_revision"], "report": json.loads(row["report"])}
 
     def activate_discussion(self, conn: sqlite3.Connection, discussion_id: str) -> bool:
         """Move an assembling discussion into the active speaking lifecycle."""

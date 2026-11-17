@@ -116,6 +116,29 @@ class Roundtable:
         except Exception as e:
             return {"error": str(e)}
 
+    def update_context(
+        self,
+        discussion_id: str,
+        context: str,
+        *,
+        source: str,
+        expected_revision: int,
+        reason: str | None = None,
+        evidence: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Save a revised brief and optional evidence without consuming a turn."""
+        try:
+            return self._core.update_context(
+                discussion_id,
+                context,
+                source=source,
+                expected_revision=expected_revision,
+                reason=reason,
+                evidence=evidence,
+            )
+        except Exception as e:
+            return {"error": str(e)}
+
     def summarize(self, discussion_id: str, *, compact: bool = False) -> dict[str, Any]:
         """Get summary data."""
         try:
@@ -129,10 +152,14 @@ class Roundtable:
         *,
         force: bool = False,
         conclusion: str | None = None,
+        report: dict[str, Any] | None = None,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
         """End a discussion."""
         try:
-            return self._core.end_discussion(discussion_id, force=force, conclusion=conclusion)
+            return self._core.end_discussion(
+                discussion_id, force=force, conclusion=conclusion, report=report, expected_revision=expected_revision
+            )
         except Exception as e:
             return {"error": str(e)}
 

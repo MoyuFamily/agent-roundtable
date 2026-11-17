@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
-from dataclasses import replace
+import tempfile
 from pathlib import Path
 from typing import Any
 
 from roundtable.db import RoundtableDB
+from roundtable.file_io import file_lock
 from roundtable.formatter import build_structured_summary, format_history
 from roundtable.models import ConvergenceRecord, Discussion, Participant, Speech
 from roundtable.notify import Notifier
@@ -21,14 +23,47 @@ class OutputBuilder:
         self.db = db
 
     def write_markdown(self, output_path: str, content: str) -> dict[str, Any]:
+        temporary: Path | None = None
         try:
             path = Path(output_path).expanduser()
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content.rstrip() + "\n", encoding="utf-8")
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
+            ) as stream:
+                temporary = Path(stream.name)
+                stream.write(content.rstrip() + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
             return {"output_written": True, "output_path": str(path)}
         except OSError as exc:
             logger.exception("Failed to write roundtable output_path: %s", output_path)
             return {"output_written": False, "output_path": output_path, "output_error": str(exc)}
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def publish(self, discussion_id: str) -> dict[str, Any]:
+        """Read and export under one file lock, so a late writer cannot restore old content."""
+        conn = self.db.connect()
+        try:
+            disc = self.db.get_discussion(conn, discussion_id)
+            if disc is None or disc.output_path is None:
+                return {}
+            path = Path(disc.output_path).expanduser()
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with file_lock(path.with_suffix(path.suffix + ".lock")):
+                    # Start the snapshot after taking the export lock, never from the caller's stale read.
+                    conn.execute("BEGIN")
+                    current = self.db.get_discussion(conn, discussion_id)
+                    if current is None:
+                        return {}
+                    return self.write_markdown(str(path), self.build_summary_markdown(conn, current))
+            except OSError as exc:
+                return {"output_written": False, "output_path": str(path), "output_error": str(exc)}
+        finally:
+            conn.close()
 
     def build_summary_markdown(self, conn: sqlite3.Connection, disc: Discussion) -> str:
         participants = self.db.get_participants(conn, disc.id)
@@ -64,17 +99,6 @@ class OutputBuilder:
             context_history=self.db.get_context_history(conn, disc.id),
             findings=findings,
         )
-
-    def build_output_markdown(
-        self,
-        conn: sqlite3.Connection,
-        disc: Discussion,
-        *,
-        conclusion_override: str | None = None,
-    ) -> str:
-        if conclusion_override is not None:
-            disc = replace(disc, conclusion=conclusion_override)
-        return self.build_summary_markdown(conn, disc)
 
     def notify_concluded(self, conn: sqlite3.Connection, disc: Discussion, notifier: Notifier) -> None:
         findings = self.db.get_findings(conn, disc.id)

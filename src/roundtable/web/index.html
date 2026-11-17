@@ -94,38 +94,42 @@
 
     <!-- Active state (hidden initially) -->
     <div id="activeState" class="hidden">
-      <!-- Participants bar -->
-      <div id="participantsBar" class="flex gap-2 mb-4 overflow-x-auto pb-2"></div>
-      <!-- Participants trigger (mobile) -->
-      <div id="participantsTrigger" class="participants-trigger mb-3" onclick="toggleParticipantsDrawer()">
-        <span class="trigger-avatars" id="triggerAvatars"></span>
-        <span id="triggerCount">0 位参与者</span>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
-      </div>
-      <!-- Participants drawer (mobile) -->
-      <div id="participantsDrawerOverlay" class="participants-drawer-overlay" onclick="toggleParticipantsDrawer()"></div>
-      <div id="participantsDrawer" class="participants-drawer">
-        <div class="drawer-handle"></div>
-        <div class="drawer-title" data-i18n="participants">👥 参与者</div>
-        <div id="drawerParticipantList" class="drawer-participant-list"></div>
-      </div>
+      <section id="conclusionCard" class="hidden conclusion-card" aria-labelledby="conclusionTitle">
+        <h2 id="conclusionTitle" class="text-lg font-semibold mb-2" data-i18n="conclusion">结论</h2>
+        <div id="conclusionContent" class="leading-relaxed"></div>
+      </section>
 
-      <!-- Speeches container -->
-      <div id="speechesContainer"></div>
+      <details id="discussionProcess" class="discussion-process" open>
+        <summary data-i18n="discussionProcess">讨论过程</summary>
+        <div class="discussion-process-content">
+          <!-- Participants bar -->
+          <div id="participantsBar" class="flex gap-2 mb-4 overflow-x-auto pb-2"></div>
+          <!-- Participants trigger (mobile) -->
+          <div id="participantsTrigger" class="participants-trigger mb-3" onclick="toggleParticipantsDrawer()">
+            <span class="trigger-avatars" id="triggerAvatars"></span>
+            <span id="triggerCount">0 位参与者</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+          </div>
+          <!-- Participants drawer (mobile) -->
+          <div id="participantsDrawerOverlay" class="participants-drawer-overlay" onclick="toggleParticipantsDrawer()"></div>
+          <div id="participantsDrawer" class="participants-drawer">
+            <div class="drawer-handle"></div>
+            <div class="drawer-title" data-i18n="participants">👥 参与者</div>
+            <div id="drawerParticipantList" class="drawer-participant-list"></div>
+          </div>
 
-      <!-- Conclusion card (hidden until concluded) -->
-      <div id="conclusionCard" class="hidden conclusion-card mt-6">
-        <h3 class="text-lg font-semibold mb-2" style="position:relative;z-index:1;color:var(--rt-text-primary)" data-i18n="conclusion">📌 讨论结论</h3>
-        <div id="conclusionContent" class="leading-relaxed" style="position:relative;z-index:1;color:var(--rt-text-secondary)"></div>
-      </div>
+          <div id="speechesContainer"></div>
+          <div id="finalSummaryCard" class="hidden viewpoints-card"></div>
 
-      <!-- Replay entry card (hidden until concluded) -->
-      <div id="replayEntry" class="hidden replay-entry" onclick="enterReplayMode()">
-        <div class="replay-entry-icon">🎬</div>
-        <div class="replay-entry-title" data-i18n="replayEntryTitle">回放讨论全过程</div>
-        <div class="replay-entry-meta" id="replayEntryMeta">加载中…</div>
-        <div class="replay-entry-agents" id="replayEntryAgents"></div>
-      </div>
+          <!-- Replay entry card (hidden until concluded) -->
+          <div id="replayEntry" class="hidden replay-entry" onclick="enterReplayMode()">
+            <div class="replay-entry-icon">🎬</div>
+            <div class="replay-entry-title" data-i18n="replayEntryTitle">回放讨论全过程</div>
+            <div class="replay-entry-meta" id="replayEntryMeta">加载中…</div>
+            <div class="replay-entry-agents" id="replayEntryAgents"></div>
+          </div>
+        </div>
+      </details>
     </div>
 
     <!-- Revoked state (hidden) — updated to dark theme per design spec -->

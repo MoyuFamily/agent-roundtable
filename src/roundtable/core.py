@@ -6,6 +6,7 @@ imports. All handlers return plain dicts (JSON-serializable).
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from collections.abc import Callable
@@ -20,6 +21,7 @@ from roundtable.demo_data import (
     DEMO_SPEECHES,
     DEMO_TOPIC,
 )
+from roundtable.evidence import normalize_report, render_report
 from roundtable.exceptions import (
     DiscussionNotActiveError,
     DiscussionNotFoundError,
@@ -368,26 +370,8 @@ class RoundtableCore:
                 if disc_after:
                     self._notify_concluded(conn, disc_after, notifier)
                     if disc_after.output_path:
-                        self._write_markdown_output(
-                            disc_after.output_path,
-                            self._build_output_markdown(conn, disc_after),
-                        )
+                        self._output.publish(discussion_id)
 
-                    publisher = self._publishers.get(discussion_id)
-                    if publisher:
-                        try:
-                            # 流式推送：最终观点总结
-                            findings = self.db.get_findings(conn, discussion_id)
-                            consensus_pts = [f.content for f in findings if f.type == "consensus"]
-                            disagreement_pts = [f.content for f in findings if f.type == "disagreement"]
-                            publisher.on_final_summary(
-                                consensus=[{"content": p} for p in consensus_pts],
-                                disagreement=[{"content": p} for p in disagreement_pts],
-                                verdict=disc_after.conclusion or "",
-                            )
-                            publisher.conclude(disc_after.conclusion or "")
-                        except (OSError, RuntimeError, ValueError):
-                            logger.exception("Web publisher conclude failed for auto-concluded %s", discussion_id)
             # Sync web discussion findings and conclusion from the database
             self._sync_web_discussion_state(discussion_id, conn)
 
@@ -424,12 +408,19 @@ class RoundtableCore:
         source: str,
         expected_revision: int,
         reason: str | None = None,
+        evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Update shared facts without consuming a turn or overwriting their history."""
         conn = self.db.connect()
         try:
             result = self.db.update_context(
-                conn, discussion_id, context, source=source, expected_revision=expected_revision, reason=reason
+                conn,
+                discussion_id,
+                context,
+                source=source,
+                expected_revision=expected_revision,
+                reason=reason,
+                evidence=evidence,
             )
             self._emit("context_updated", discussion_id=discussion_id, revision=result["context_revision"])
             return {"ok": True, "discussion_id": discussion_id, **result}
@@ -552,6 +543,8 @@ class RoundtableCore:
                 "topic": disc.topic,
                 "context": disc.context,
                 "context_revision": context_history[-1]["revision"],
+                "evidence": context_history[-1]["evidence"],
+                "decision_report": self.db.get_decision_report(conn, discussion_id),
                 "context_history": context_history,
                 "conclusion": disc.conclusion,
                 **review_round_counts(disc, all_speeches),
@@ -637,6 +630,8 @@ class RoundtableCore:
                 "status": disc.status,
                 "context": disc.context,
                 "context_revision": context_history[-1]["revision"],
+                "evidence": context_history[-1]["evidence"],
+                "decision_report": self.db.get_decision_report(conn, discussion_id),
                 "conclusion": disc.conclusion,
                 **review_round_counts(disc, self.db.get_speeches(conn, discussion_id)),
                 "current_round": disc.current_round,
@@ -730,6 +725,8 @@ class RoundtableCore:
                 "topic": disc.topic,
                 "context": disc.context,
                 "context_revision": context_history[-1]["revision"],
+                "evidence": context_history[-1]["evidence"],
+                "decision_report": self.db.get_decision_report(conn, discussion_id),
                 "context_history": context_history,
                 "conclusion": disc.conclusion,
                 "status": disc.status,
@@ -766,7 +763,7 @@ class RoundtableCore:
             }
 
             if disc.output_path:
-                output_result = self._write_markdown_output(disc.output_path, structured_summary)
+                output_result = self._output.publish(discussion_id)
                 result.update(output_result)
 
             if not compact:
@@ -784,140 +781,95 @@ class RoundtableCore:
         *,
         force: bool = False,
         conclusion: str | None = None,
+        report: dict[str, Any] | None = None,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
-        """End a discussion (conclude or cancel)."""
+        """Conclude with text or a source-linked report, atomically against its brief."""
         if not discussion_id:
             raise ValueError("discussion_id is required")
+        if report is not None and (force or conclusion is not None):
+            raise ValueError("report cannot be combined with conclusion or force")
+        if report is not None and expected_revision is None:
+            raise ValueError("expected_revision is required for a report")
+        if expected_revision is not None and (type(expected_revision) is not int or expected_revision < 0):
+            raise ValueError("expected_revision must be a non-negative integer")
 
         conn = self.db.connect()
         try:
+            conn.execute("BEGIN IMMEDIATE")
             disc = self.db.get_discussion(conn, discussion_id)
             if not disc:
                 raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
-            if disc.status != "active":
-                if force and disc.status == "assembling":
-                    ok = self.db.cancel_discussion(conn, discussion_id)
-                    self._emit("discussion_ended", discussion_id=discussion_id, action="cancelled")
-                    return {
-                        "ok": True,
-                        "discussion_id": discussion_id,
-                        "action": "cancelled",
-                        "success": ok,
-                        "web_retained": False,
-                    }
-                if disc.status == "concluded" and not force and conclusion is not None:
-                    conn.execute(
-                        "UPDATE discussions SET conclusion = ? WHERE id = ?",
-                        (conclusion, discussion_id),
-                    )
-                    disc_after = self.db.get_discussion(conn, discussion_id)
-                    conclusion_output_result: dict[str, Any] = {}
-                    if disc_after and disc_after.output_path:
-                        conclusion_output_result = self._write_markdown_output(
-                            disc_after.output_path,
-                            self._build_output_markdown(conn, disc_after, conclusion_override=conclusion),
-                        )
-
-                    publisher = self._publishers.pop(discussion_id, None)
-                    web_retained = False
-                    if publisher:
-                        try:
-                            # 流式推送：最终观点总结
-                            findings = self.db.get_findings(conn, discussion_id)
-                            consensus_pts = [f.content for f in findings if f.type == "consensus"]
-                            disagreement_pts = [f.content for f in findings if f.type == "disagreement"]
-                            publisher.on_final_summary(
-                                consensus=[{"content": p} for p in consensus_pts],
-                                disagreement=[{"content": p} for p in disagreement_pts],
-                                verdict=conclusion or "",
-                            )
-                            publisher.conclude(conclusion)
-                            web_retained = True
-                            logger.info("Web publisher retained for concluded discussion %s", discussion_id)
-                        except (OSError, RuntimeError, ValueError):
-                            logger.exception("Web publisher conclude update failed for %s", discussion_id)
-                    else:
-                        self._conclude_web_discussion(discussion_id, conclusion)
-
-                    # Sync web discussion findings and conclusion from the database
-                    self._sync_web_discussion_state(discussion_id, conn)
-
-                    result = {
-                        "ok": True,
-                        "discussion_id": discussion_id,
-                        "action": "concluded",
-                        "success": True,
-                        "web_retained": web_retained,
-                        "conclusion": conclusion,
-                    }
-                    result.update(conclusion_output_result)
-                    self._emit("conclusion_updated", discussion_id=discussion_id)
-                    return result
+            updating_conclusion = (
+                disc.status == "concluded" and not force and (conclusion is not None or report is not None)
+            )
+            if disc.status != "active" and not updating_conclusion and not (force and disc.status == "assembling"):
                 raise DiscussionNotActiveError(f"Discussion {discussion_id} is already {disc.status}")
+
+            current = self.db.get_context_history(conn, discussion_id)[-1]
+            if expected_revision is not None and current["revision"] != expected_revision:
+                raise ValueError("Context revision conflict; read the current brief before concluding")
+            if report is not None:
+                report = normalize_report(report, current["evidence"])
+                conclusion = render_report(report, current["evidence"], current["revision"])
+                conn.execute(
+                    """INSERT INTO decision_reports (discussion_id, context_revision, report) VALUES (?, ?, ?)
+                       ON CONFLICT(discussion_id) DO UPDATE SET
+                       context_revision = excluded.context_revision, report = excluded.report""",
+                    (discussion_id, current["revision"], json.dumps(report, ensure_ascii=False)),
+                )
+            elif conclusion is not None:
+                # A free-text replacement must not leave a different structured report attached.
+                conn.execute("DELETE FROM decision_reports WHERE discussion_id = ?", (discussion_id,))
 
             if force:
                 ok = self.db.cancel_discussion(conn, discussion_id)
                 action = "cancelled"
+            elif updating_conclusion:
+                conn.execute("UPDATE discussions SET conclusion = ? WHERE id = ?", (conclusion, discussion_id))
+                ok, action = True, "concluded"
             else:
                 ok = self.db.conclude_discussion(conn, discussion_id, conclusion=conclusion)
                 action = "concluded"
+            disc_after = self.db.get_discussion(conn, discussion_id)
+            saved_report = self.db.get_decision_report(conn, discussion_id)
+            conn.execute("COMMIT")
 
-            # Fire concluded notification (only on conclude, not cancel)
-            disc_after = None
-            if action == "concluded":
-                disc_after = self.db.get_discussion(conn, discussion_id)
-                if disc_after:
-                    notifier = self._make_notifier(disc.notifications)
-                    self._notify_concluded(conn, disc_after, notifier)
+            # Publish only after evidence validation and the database commit succeed.
+            if action == "concluded" and disc_after and not updating_conclusion:
+                self._notify_concluded(conn, disc_after, self._make_notifier(disc.notifications))
 
             output_result: dict[str, Any] = {}
             if action == "concluded" and disc_after and disc_after.output_path:
-                output_result = self._write_markdown_output(
-                    disc_after.output_path,
-                    self._build_output_markdown(conn, disc_after),
-                )
+                output_result = self._output.publish(discussion_id)
 
-            # Web publisher hook. A concluded viewer remains online for post-meeting
-            # review; force-cancel still stops it immediately.
             publisher = self._publishers.pop(discussion_id, None)
-            web_retained = False
-            if publisher:
+            if publisher and action != "concluded":
                 try:
-                    if action == "concluded" and disc_after:
-                        # 流式推送：最终观点总结
-                        findings = self.db.get_findings(conn, discussion_id)
-                        all_points = [f.content for f in findings]
-                        publisher.on_final_summary(
-                            consensus=[{"content": p} for p in all_points],
-                            disagreement=[],
-                            verdict=disc_after.conclusion or "",
-                        )
-                        publisher.conclude(disc_after.conclusion or "")
-                        web_retained = True
-                        logger.info("Web publisher retained for concluded discussion %s", discussion_id)
-                    else:
-                        publisher.stop()
-                        logger.info("Web publisher stopped for %s", discussion_id)
+                    publisher.stop()
                 except (OSError, RuntimeError, ValueError):
-                    logger.exception(f"Web publisher cleanup failed for {discussion_id}")
-            elif action == "concluded" and disc_after:
-                # Cross-process: update discussion.json directly
-                self._conclude_web_discussion(discussion_id, disc_after.conclusion or "")
+                    logger.exception("Web publisher cleanup failed for %s", discussion_id)
+            # The sync reads current DB state under the viewer lock; never republish disc_after.
+            web_synced = self._sync_web_discussion_state(discussion_id, conn)
 
-            # Sync web discussion findings and conclusion from the database
-            self._sync_web_discussion_state(discussion_id, conn)
-
-            result = {
+            if updating_conclusion:
+                self._emit("conclusion_updated", discussion_id=discussion_id)
+            else:
+                self._emit("discussion_ended", discussion_id=discussion_id, action=action)
+            return {
                 "ok": True,
                 "discussion_id": discussion_id,
                 "action": action,
                 "success": ok,
-                "web_retained": web_retained,
-                "conclusion": disc_after.conclusion if disc_after else None,
+                "web_retained": web_synced and action == "concluded",
+                "conclusion": disc_after.conclusion if disc_after and action == "concluded" else None,
+                "decision_report": saved_report,
+                **output_result,
             }
-            result.update(output_result)
-            self._emit("discussion_ended", discussion_id=discussion_id, action=action)
-            return result
+        except Exception:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
         finally:
             conn.close()
 
@@ -1022,9 +974,13 @@ class RoundtableCore:
         *,
         force: bool = False,
         conclusion: str | None = None,
+        report: dict[str, Any] | None = None,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
         """End a discussion (conclude or cancel). Alias for end_discussion."""
-        return self.end_discussion(discussion_id, force=force, conclusion=conclusion)
+        return self.end_discussion(
+            discussion_id, force=force, conclusion=conclusion, report=report, expected_revision=expected_revision
+        )
 
     def get_status(self, discussion_id: str) -> dict[str, Any]:
         """Get discussion status including convergence metrics. Alias for status."""
@@ -1098,8 +1054,8 @@ class RoundtableCore:
     def _append_token_stream_jsonl_fallback(self, web_dir: Path, event: dict[str, Any]) -> None:
         self._web_sync.append_token_stream(web_dir, event)
 
-    def _sync_web_discussion_state(self, discussion_id: str, conn: sqlite3.Connection) -> None:
-        self._web_sync.sync_state(self._get_web_dir(discussion_id), discussion_id, conn)
+    def _sync_web_discussion_state(self, discussion_id: str, conn: sqlite3.Connection) -> bool:
+        return self._web_sync.sync_state(self._get_web_dir(discussion_id), discussion_id, conn)
 
     def _update_web_discussion_json(
         self,
@@ -1110,26 +1066,8 @@ class RoundtableCore:
     ) -> None:
         self._web_sync.update_speech(self._get_web_dir(discussion_id), discussion_id, speech_data, topic, participants)
 
-    def _conclude_web_discussion(self, discussion_id: str, conclusion: str) -> None:
-        self._web_sync.conclude(self._get_web_dir(discussion_id), discussion_id, conclusion)
-
     def _make_notifier(self, config: dict[str, Any] | None) -> Notifier:
         return Notifier(config, send_fn=self._send_fn)
-
-    def _write_markdown_output(self, output_path: str, content: str) -> dict[str, Any]:
-        return self._output.write_markdown(output_path, content)
-
-    def _build_summary_markdown(self, conn: sqlite3.Connection, disc: Discussion) -> str:
-        return self._output.build_summary_markdown(conn, disc)
-
-    def _build_output_markdown(
-        self,
-        conn: sqlite3.Connection,
-        disc: Discussion,
-        *,
-        conclusion_override: str | None = None,
-    ) -> str:
-        return self._output.build_output_markdown(conn, disc, conclusion_override=conclusion_override)
 
     def _notify_concluded(self, conn: sqlite3.Connection, disc: Discussion, notifier: Notifier) -> None:
         self._output.notify_concluded(conn, disc, notifier)

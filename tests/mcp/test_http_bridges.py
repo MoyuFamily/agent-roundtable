@@ -99,6 +99,18 @@ def test_http_review_updates_prompts_turn_notices_and_restart(review_bridge):
         context="User confirmed a new constraint",
         source="user",
         expected_revision=0,
+        evidence={
+            "sources": [],
+            "items": [
+                {
+                    "id": "U1",
+                    "statement": "User confirmed a new constraint",
+                    "kind": "user_report",
+                    "verification": "unverified",
+                    "citations": [],
+                }
+            ],
+        },
     )
     prompt = _post(
         bridge.port,
@@ -113,13 +125,28 @@ def test_http_review_updates_prompts_turn_notices_and_restart(review_bridge):
     assert "FIRST_VIEW" not in prompt["text"]
     final = _post(bridge.port, "/speak", {"discussion_id": did, "participant": "b", "content": "SECOND_VIEW"})
     assert final["discussion_complete"]
-    tool("roundtable_end", discussion_id=did, conclusion="Complete recommendation with limits")
+    ended = tool(
+        "roundtable_end",
+        discussion_id=did,
+        expected_revision=1,
+        report={
+            "recommendation": "Complete recommendation with limits",
+            "status": "proposed",
+            "rationale": [{"text": "Respect the user's stated constraint", "evidence_ids": ["U1"]}],
+            "tradeoffs": [],
+            "uncertainties": ["Constraint is user-reported"],
+            "revisit_conditions": [],
+            "next_actions": ["Validate the constraint"],
+        },
+    )
     before = tool("roundtable_read", discussion_id=did)
     bridge.stop()
     bridge.start()
     after = tool("roundtable_read", discussion_id=did)
     assert after == before
-    assert after["conclusion"] == "Complete recommendation with limits"
+    assert after["conclusion"] == ended["conclusion"]
+    assert after["decision_report"]["context_revision"] == 1
+    assert after["evidence"]["items"][0]["id"] == "U1"
     assert after["completed_rounds"] == after["total_rounds"] == 1
     assert "error" in _post(
         bridge.port,

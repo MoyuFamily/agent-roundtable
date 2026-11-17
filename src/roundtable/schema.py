@@ -402,12 +402,34 @@ def _migrate_v4_to_v5(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _migrate_v5_to_v6(conn: sqlite3.Connection) -> None:
+    """Keep evidence with its brief revision and persist source-linked decision reports."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(context_revisions)")}
+        if "evidence" not in columns:
+            conn.execute("ALTER TABLE context_revisions ADD COLUMN evidence TEXT")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS decision_reports (
+                discussion_id TEXT PRIMARY KEY,
+                context_revision INTEGER NOT NULL,
+                report TEXT NOT NULL,
+                FOREIGN KEY (discussion_id) REFERENCES discussions(id) ON DELETE CASCADE
+            )
+        """)
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
 _MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migrate_v0_to_v1,
     _migrate_v1_to_v2,
     _migrate_v2_to_v3,
     _migrate_v3_to_v4,
     _migrate_v4_to_v5,
+    _migrate_v5_to_v6,
 ]
 
 CURRENT_SCHEMA_VERSION = len(_MIGRATIONS)

@@ -579,6 +579,18 @@
     }
 
     /* Conclusion card */
+    .discussion-process { margin-top: var(--rt-space-4); }
+    .discussion-process > summary {
+      cursor: pointer;
+      padding: var(--rt-space-3) 0;
+      font-weight: 600;
+      color: var(--rt-text-secondary);
+    }
+    .discussion-process-content { padding-top: var(--rt-space-2); }
+    #conclusionTitle, #conclusionContent { position: relative; z-index: 1; }
+    #conclusionTitle { color: var(--rt-text-primary); }
+    #conclusionContent { color: var(--rt-text-secondary); overflow-wrap: anywhere; }
+    .conclusion-empty { color: var(--rt-text-muted); }
     .conclusion-card {
       background: linear-gradient(135deg, rgba(79, 70, 229, 0.08), var(--rt-bg-card));
       border: 1.5px solid var(--rt-brand);

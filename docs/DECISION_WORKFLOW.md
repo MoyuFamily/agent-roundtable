@@ -2,7 +2,7 @@
 
 这套流程围绕输入处理和输出质量：把用户材料整理成可检查的依据，交付清晰、有取舍、可行动的建议。多角色分析用于补足重要遗漏或核实争议，按实际贡献决定规模。
 
-当前由宿主运行 Agent、解析材料、核验并撰写结果，Roundtable 记录会议并提供提示词。角色定义专业责任，Agent 携带资料与工具，模型按具体任务选择。已有记录与结论支持 Markdown 导出及 PDF 排版渲染（需可用浏览器）；自动解析、模型选择、自动组队、证据验证、分析图表生成与跨产物一致性检查尚未由引擎实现。
+当前由宿主运行 Agent、解析材料、核验并撰写结果，Roundtable 保存证据与报告并提供提示词。角色定义专业责任，Agent 携带资料与工具，模型按具体任务选择。已有记录与结论支持 Markdown 导出及 PDF 排版渲染（需可用浏览器）；自动解析、模型选择、自动组队、事实真伪验证、分析图表生成与外部产物一致性检查尚未由引擎实现。
 
 ## 何时使用
 
@@ -72,13 +72,63 @@ Hermes 使用 `roundtable_init`，MCP 使用 `roundtable_create`。将简报放�
 3. 根据状态返回的 next_speaker 或轮次工具依次记录发言，不假设模板列表顺序就是实际顺序；独立分析的执行可按宿主能力并行。
 4. 用户补充事实或角色指出材料问题时，主持人核实并通过 `roundtable_update_context` 保存完整的新简报、实际来源和原因，传入读取到的 `context_revision` 作为 `expected_revision`。更新不占发言轮次；有冲突时重新读取，不覆盖别人刚提交的版本。向所有角色刷新共同材料，重审受影响判断；记录发言前再次核对版本，独立分析仍不注入同伴结论。
 5. 根据问题覆盖、信息增益和预算决定是否继续，保留未解决分歧。完成一轮会自动推进，不要再次手动 advance。
-6. 协调者核对原始材料，使用 `roundtable_record_finding` 记录有实际发言 ID 支持的共识、分歧或新议题。形成建议，使用 `roundtable_end` 的 conclusion 保存，并通过 read 或 summarize 回读核对。达到轮次上限后可以更新结论。用户尚未决定时明确标注“待用户确认”。
+6. 协调者核对原始材料，使用 `roundtable_record_finding` 记录有实际发言 ID 支持的共识、分歧或新议题。形成建议，通过 `roundtable_end` 提交结构化 report，或使用 conclusion 保存自由文本，再通过 read 或 summarize 回读核对。达到轮次上限后可以补交或修订结论。用户尚未决定时明确标注“待用户确认”。
 
 工具创建会议不等于启动 Agent。首轮提示词过滤不构成权限隔离；如需隔离，还必须由宿主控制会话上下文和可用工具。CodexBridge 和 GenericBridge 的 `/speak` 简写与 `/tool` 调用 `roundtable_speak` 共用处理逻辑，都会登记下一位通知。通知写入收件箱不等于宿主已经读取和执行。
 
 `read` 与 `summarize` 返回当前 `context`、`context_revision` 和完整 `context_history`，保留旧假设和更改来源；`status` 返回当前简报及版本。已结束或取消的会议不能修改背景，需要创建后续评审，避免把旧结论套到新事实。
 
 `total_rounds` 表示已有参与者发言的评审轮数，`completed_rounds` 表示其中引擎已经推进结束的轮数；开场、空轮和只有主持人的轮次不计入。手动提前结束的部分轮计入 total，不计入 completed。`current_round` 保持引擎游标语义，自动结束后可能为 max_rounds + 1，不应用作完成轮数。
+
+## 保存共同证据与决策报告
+
+MCP、HTTP 和 Hermes 的 `roundtable_update_context` 接受可选的 `evidence`，随简报一起保存版本。材料由宿主读取并提炼；引擎检查字段、引用和版本，不判断内容是否真实。下面是合成示例中的 evidence：
+
+```json
+{
+  "sources": [{"id": "S1", "title": "试点估算", "version": "1"}],
+  "items": [
+    {
+      "id": "F1",
+      "statement": "试点预计占用两周开发时间",
+      "kind": "fact",
+      "verification": "verified",
+      "citations": [{"source_id": "S1", "locator": "第2节"}]
+    },
+    {
+      "id": "U1",
+      "statement": "客户需求尚未验证",
+      "kind": "unknown",
+      "verification": "unverified",
+      "citations": []
+    }
+  ]
+}
+```
+
+将其与完整 `context`、`source`、`expected_revision` 一起提交。`sources` 可提供安全的 `reference`、`version`、`date`，不填时显示未提供；不要填入敏感原件路径。`kind` 区分 fact、user_report、assumption、calculation、unknown；`verification` 表示提交者报告的 verified、unverified、conflicting。计算项必须提供 `derivation`，适用条件可写 `applicability`。未核实及冲突项保留原状态，不因被报告引用就变成已核实。
+
+更新时省略 evidence 会保留上一版；传完整对象会替换当前证据并保留历史，空 sources/items 表示明确清空。来源 ID 在一次评审中标识固定的来源元数据，变更原文版本等元数据需使用新 ID；事实提炼纠正可在新简报版本中修改条目。无效引用或旧 `expected_revision` 会拒绝整个更新，不会留下半份简报。
+
+有结构化证据时，`roundtable_end` 接受以下 `report`，同时传本次分析使用的 `expected_revision`：
+
+```json
+{
+  "recommendation": "先验证需求，再决定是否投入试点",
+  "status": "proposed",
+  "rationale": [{"text": "投入范围可估算，但需求仍不明确", "evidence_ids": ["F1", "U1"]}],
+  "tradeoffs": ["需求验证会推迟实施，但可减少无效投入"],
+  "uncertainties": ["需求强度与付费意愿未知"],
+  "revisit_conditions": ["取得足以支持试点的客户证据"],
+  "next_actions": ["整理目标客户反馈，验证试点需求"]
+}
+```
+
+所有字段都需提供；rationale 和 next_actions 不能为空，每条理由必须引用本版存在的证据条目。其余列表允许为空，显示“未记录”，不自动解释为没有风险。`status` 为 proposed／confirmed／deferred，confirmed 仅记录用户实际已确认的决定。引擎不能证明用户确实批准，也不会因此执行建议。
+
+提交时校验报告引用与简报版本，并在同一事务内保存报告、结论和会议状态。成功后生成唯一的结论 Markdown；读取、摘要、Viewer 和 Markdown/PDF 导出复用它。report 与自由文本 conclusion、force 不能同时提交。旧版自由文本仍可用；用自由文本替换结构化报告时会移除旧 report，避免出现两份不同的结论。
+
+read/status/summarize 返回 `evidence` 和 `decision_report`（其中包含 report 与 context_revision）；参与者提示词自动带入同版证据。未结构化的旧会议返回 null，仍保留原始简报与结论。已结束会议不能改证据，后续新信息需发起新的评审。
 
 ## MCP 提示词
 
@@ -124,7 +174,7 @@ Hermes 使用 `roundtable_init`，MCP 使用 `roundtable_create`。将简报放�
 
 按需再展开方案对比、证据定位、计算、角色覆盖和未验证部分。影响选择的限制应在概览中可见。图表用于解释对比或变化，不能用精美排版代替核查。
 
-短答、完整报告、表格和图文导出复用同一份已核对的事实、计算与结论；交付前核对关键数字、条件和推荐一致。材料更新后，说明哪些判断改变、为什么改变，保留未变约束，更新或标记旧产物。当前这些检查由宿主完成，简报版本历史不代表引擎已自动关联或重算所有结果。
+结构化报告的读取、摘要及 Markdown/PDF 导出复用同一份保存的结论。宿主另制的短答、图表或报告也须复用核对结果，交付前检查关键数字、条件和推荐一致。材料更新后，说明哪些判断改变、为什么改变，保留未变约束，更新或标记旧产物。内容语义与外部产物仍由宿主核查，版本和引用校验不代表引擎已自动重算或验证判断。
 
 Code Review 的每条发现包含代码位置、触发条件、影响、证据/复现、优先级理由、修复建议和验证状态。最终按根因去重，区分阻塞项、非阻塞建议、未验证部分，再给出合并、修复后再审或材料不足的建议。无问题报告不构成质量保证；评审授权不自动等于修复或合并授权。
 

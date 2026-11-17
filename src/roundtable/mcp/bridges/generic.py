@@ -23,7 +23,8 @@ from roundtable.mcp.bridges.base import AgentBridge
 from roundtable.mcp.tools import handle_tool_call
 
 logger = logging.getLogger(__name__)
-MAX_REQUEST_BYTES = 1024 * 1024
+# A bounded 500k-character material can take 6 MB when JSON escapes non-BMP text.
+MAX_REQUEST_BYTES = 8 * 1024 * 1024
 
 
 class GenericBridge(AgentBridge):
@@ -243,7 +244,7 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
                 self._respond(400, {"error": "invalid Content-Length"})
                 return
             if length > MAX_REQUEST_BYTES:
-                self._respond(413, {"error": "JSON body exceeds 1 MiB"})
+                self._respond(413, {"error": f"JSON body exceeds {MAX_REQUEST_BYTES // (1024 * 1024)} MiB"})
                 return
             try:
                 self.connection.settimeout(10)

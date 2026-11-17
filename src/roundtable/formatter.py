@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from roundtable.evidence import render_evidence
+from roundtable.evidence import render_evidence, render_materials
 from roundtable.models import ConvergenceRecord, Discussion, Finding, Participant, Speech, review_round_counts
 
 
@@ -32,6 +32,7 @@ def build_structured_summary(
     *,
     context_history: list[dict[str, Any]] | None = None,
     findings: list[Finding] | None = None,
+    materials: list[dict[str, Any]] | None = None,
 ) -> str:
     """Format recorded evidence; only speech excerpts are truncated, never the conclusion."""
     lines = []
@@ -44,6 +45,8 @@ def build_structured_summary(
     if context_history and context_history[-1].get("evidence") is not None:
         lines.append("")
         lines.append(render_evidence(context_history[-1]["evidence"]))
+    if materials and not disc.conclusion:
+        lines.append("\n" + render_materials(materials))
     if context_history and len(context_history) > 1:
         lines.append("\n## 背景修订记录")
         lines.append("当前背景取代旧版本中的冲突信息；历史发言保留当时的判断。")

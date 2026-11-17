@@ -42,13 +42,21 @@ Multiple roles, agents, and models are methods for supporting these goals. Their
 
 The Python core manages discussions, speaking order, references, SQLite records, formatted summaries, and a Web Viewer. Skills and MCP prompts guide the host through the review. The `decision-support` and `code-review` templates supply editable role responsibilities.
 
-**The user or coordinator selects roles; the host runs agents and selects models; the user makes the decision.** Extracting relevant material, checking sources and applicability, distinguishing facts, estimates, and unknowns, and synthesizing conclusions currently depend on the user, coordinator, and host. Existing records and conclusions can be exported as Markdown or rendered as PDF with an available browser. Automatic material parsing, semantic verification, evidence-change impact analysis, analytical chart generation, and consistency checks on external artifacts are not implemented. The engine also does not provide automatic team selection, model routing, or semantic finding extraction.
+**The user or coordinator selects roles; the host runs agents and selects models; the user makes the decision.** Extracting relevant material, checking sources and applicability, distinguishing facts, estimates, and unknowns, and synthesizing conclusions currently depend on the user, coordinator, and host. Existing records and conclusions can be exported as Markdown or rendered as PDF with an available browser. Local text, Markdown, CSV and PDF text extraction are available. Automatic semantic extraction, OCR, fact verification, evidence-change impact analysis, analytical chart generation, and consistency checks on external artifacts are not implemented. The engine also does not provide automatic team selection, model routing, or semantic finding extraction.
 
 `convergence_score` is calculated from externally supplied consensus/disagreement annotations and may be `None`; it is not answer accuracy. `summarize()` formats recorded material rather than performing professional synthesis.
 
 The current source stores structured evidence with brief revisions, validates report references and the expected revision, and renders one saved conclusion for reads, the Viewer, and Markdown/PDF exports. The coordinator still checks facts and reasoning. Brief history with provenance, speech-linked annotations, and HTTP prompt retrieval are also available. See the [workflow guide](docs/DECISION_WORKFLOW.md) for interfaces and examples.
 
 See the [product direction and acceptance criteria](docs/product/DIRECTION.md) and [decision workflow guide](docs/DECISION_WORKFLOW.md) (Chinese). These changes describe the source tree; check a published package's version and capabilities before assuming it includes them.
+
+### Import and inspect materials
+
+Prepare authorized files locally with `python -m roundtable.import_material synthetic-notes.md --source-id S1 --title "Synthetic notes"`. PDF extraction requires the optional `agent-roundtable[materials]` extra. Text/Markdown retain physical line ranges; CSV retains logical rows and physical locations; PDFs retain every page and flag visual review or extraction gaps. No OCR is performed.
+
+Submit the JSON packet to `roundtable_add_material` with the discussion ID, safe import provenance (`source`), and current `expected_revision`. It registers an immutable source and increments the brief revision without taking a turn; exact retries are idempotent. Use new source IDs for changed content. Read complete segments with `roundtable_read_material`, following `next_offset`; optional `query` is a casefolded literal substring filter. These tools work through MCP, HTTP and Hermes, with equivalent Generic Python methods.
+
+Imported citations require the actual `segment_id` and exact stored `locator`. Readable text is not verified evidence. Verified claims citing incomplete extractions need a host-supplied `review_note` describing the check actually performed. Ordinary reads and reports include metadata and issues, without automatically copying raw text. Keep sensitive packets and databases in authorized private storage. See the [material workflow](docs/DECISION_WORKFLOW.md#导入材料与原文引用) for limits and the packet contract.
 
 ## 🧩 Use Cases
 

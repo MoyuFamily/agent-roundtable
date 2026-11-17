@@ -10,7 +10,7 @@ from typing import Any
 
 from roundtable.core import RoundtableCore
 from roundtable.db import RoundtableDB
-from roundtable.evidence import render_evidence
+from roundtable.evidence import render_evidence, render_materials
 
 RESOURCE_URIS: list[dict[str, str]] = [
     {
@@ -66,6 +66,8 @@ def _build_transcript(core: RoundtableCore, discussion_id: str) -> dict[str, Any
     lines.append(f"\n## Current brief (v{result['context_revision']})\n\n{result['context'] or '(Not supplied)'}\n")
     if result["evidence"] is not None:
         lines.append("\n" + render_evidence(result["evidence"]))
+    if not result["conclusion"]:
+        lines.append("\n" + render_materials(result["materials"]))
     lines.append(
         f"\nReview rounds: {result['total_rounds']}; completed: {result['completed_rounds']} (opening excluded).\n"
     )
@@ -81,6 +83,7 @@ def _build_transcript(core: RoundtableCore, discussion_id: str) -> dict[str, Any
         "discussion_id": discussion_id,
         "conclusion": result["conclusion"],
         "evidence": result["evidence"],
+        "materials": result["materials"],
         "decision_report": result["decision_report"],
         "context_history": result["context_history"],
     }

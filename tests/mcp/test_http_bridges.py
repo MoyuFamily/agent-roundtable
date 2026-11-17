@@ -15,6 +15,7 @@ import requests
 
 from roundtable.codex import build_parser
 from roundtable.mcp.bridges import CodexBridge, GenericBridge
+from roundtable.mcp.bridges.generic import MAX_REQUEST_BYTES
 from roundtable.mcp.tools import handle_tool_call
 
 
@@ -187,6 +188,71 @@ def test_wait_for_turn_does_not_block_the_speech_it_is_waiting_for(review_bridge
         assert waiting.result(timeout=2)["your_turn"] is True
 
 
+def test_material_import_and_paginated_read_over_http_preserve_unicode_after_restart(review_bridge):
+    bridge = review_bridge
+    did = _tool(
+        bridge,
+        "roundtable_create",
+        topic="Material transport",
+        participants=[{"profile": "a"}, {"profile": "b"}],
+        web=False,
+    )["discussion_id"]
+    # A legal Unicode packet exceeds the old 1 MiB HTTP cap when JSON-escaped.
+    material = {
+        "source": {"id": "S1", "title": "合成材料"},
+        "format": "text",
+        "segments": [
+            {"id": f"s{i}", "locator": f"section {i}", "text": "合成🧪" * 20_000, "status": "ready"} for i in range(3)
+        ],
+    }
+    saved = _post(
+        bridge.port,
+        "/tool",
+        {
+            "name": "roundtable_add_material",
+            "arguments": {
+                "discussion_id": did,
+                "material": material,
+                "source": "coordinator",
+                "expected_revision": 0,
+            },
+        },
+    )
+    assert saved.get("created"), saved
+    bridge.stop()
+    bridge.start()
+    first = _post(
+        bridge.port,
+        "/tool",
+        {
+            "name": "roundtable_read_material",
+            "arguments": {
+                "discussion_id": did,
+                "source_id": "S1",
+                "limit": 2,
+            },
+        },
+    )
+    second = _post(
+        bridge.port,
+        "/tool",
+        {
+            "name": "roundtable_read_material",
+            "arguments": {
+                "discussion_id": did,
+                "source_id": "S1",
+                "offset": first["next_offset"],
+                "limit": 2,
+            },
+        },
+    )
+    assert first["segments"] + second["segments"] == material["segments"]
+    assert second["next_offset"] is None
+    status = _get(bridge.port, f"/status/{did}")
+    assert status["materials"] == [saved["material"]]
+    assert "合成🧪" not in json.dumps(status, ensure_ascii=False)
+
+
 def test_auth_covers_reads_and_writes_without_exposing_credentials(bridge_type, bridge_factory):
     bridge = bridge_factory(bridge_type, auth_token="private-token")
     base = f"http://127.0.0.1:{bridge.port}"
@@ -336,7 +402,7 @@ def test_invalid_request_framing_and_json_return_errors_without_stalling(bridge_
     cases = [
         (b"Content-Length: nope", b"", 400),
         (b"Content-Length: -1", b"", 400),
-        (b"Content-Length: 1048577", b"", 413),
+        (f"Content-Length: {MAX_REQUEST_BYTES + 1}".encode("ascii"), b"", 413),
         (b"Content-Length: 0\r\nContent-Length: 2", b"{}", 400),
         (b"Transfer-Encoding: chunked", b"0\r\n\r\n", 400),
         (b"Content-Length: 1", b"\xff", 400),

@@ -22,6 +22,7 @@ from typing import Any
 from roundtable.core import RoundtableCore
 from roundtable.evidence import EVIDENCE_SCHEMA, REPORT_SCHEMA
 from roundtable.exceptions import RoundtableError
+from roundtable.materials import MATERIAL_SCHEMA
 
 try:
     from tools.registry import registry
@@ -170,6 +171,14 @@ def _handle_read(args: dict[str, Any], **kw: Any) -> str:
 
 def _handle_update_context(args: dict[str, Any], **kw: Any) -> str:
     return _handle(args, "update_context")
+
+
+def _handle_add_material(args: dict[str, Any], **kw: Any) -> str:
+    return _handle(args, "add_material")
+
+
+def _handle_read_material(args: dict[str, Any], **kw: Any) -> str:
+    return _handle(args, "read_material")
 
 
 def _handle_status(args: dict[str, Any], **kw: Any) -> str:
@@ -378,6 +387,49 @@ ROUNDTABLE_UPDATE_CONTEXT_SCHEMA = {
     },
 }
 
+ROUNDTABLE_ADD_MATERIAL_SCHEMA = {
+    "name": "roundtable_add_material",
+    "description": (
+        "Import an immutable material packet and register its source in an active/assembling discussion. "
+        "Increments the context revision without consuming a turn; exact retries are idempotent. "
+        "Prepare files locally; the server does not read file paths."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "discussion_id": {"type": "string"},
+            "material": MATERIAL_SCHEMA,
+            "source": {"type": "string", "description": "Safe provenance of this import, e.g. coordinator"},
+            "expected_revision": {"type": "integer", "minimum": 0},
+        },
+        "required": ["discussion_id", "material", "source", "expected_revision"],
+    },
+}
+
+ROUNDTABLE_READ_MATERIAL_SCHEMA = {
+    "name": "roundtable_read_material",
+    "description": (
+        "Read requested full material segments. Ordinary discussion reads expose only material summaries. "
+        "Query matches literal substrings with Unicode casefolding; no regex or semantic search."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "discussion_id": {"type": "string"},
+            "source_id": {"type": "string"},
+            "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0,
+                "description": "Offset within matching segments; use next_offset to continue",
+            },
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+            "query": {"type": "string", "description": "Optional literal substring filter"},
+        },
+        "required": ["discussion_id", "source_id"],
+    },
+}
+
 ROUNDTABLE_END_SCHEMA = {
     "name": "roundtable_end",
     "description": (
@@ -474,6 +526,8 @@ def register_roundtable_tools(registry: Any, *, check_fn: Any = None) -> None:
         ("roundtable_speak", ROUNDTABLE_SPEAK_SCHEMA, _handle_speak, "💬"),
         ("roundtable_read", ROUNDTABLE_READ_SCHEMA, _handle_read, "📖"),
         ("roundtable_update_context", ROUNDTABLE_UPDATE_CONTEXT_SCHEMA, _handle_update_context, "📎"),
+        ("roundtable_add_material", ROUNDTABLE_ADD_MATERIAL_SCHEMA, _handle_add_material, "📎"),
+        ("roundtable_read_material", ROUNDTABLE_READ_MATERIAL_SCHEMA, _handle_read_material, "📖"),
         ("roundtable_status", ROUNDTABLE_STATUS_SCHEMA, _handle_status, "📊"),
         ("roundtable_summarize", ROUNDTABLE_SUMMARIZE_SCHEMA, _handle_summarize, "📝"),
         ("roundtable_end", ROUNDTABLE_END_SCHEMA, _handle_end, "🏁"),
@@ -542,6 +596,24 @@ registry.register(
     handler=_handle_update_context,
     check_fn=_check_roundtable_enabled,
     emoji="📎",
+)
+
+registry.register(
+    name="roundtable_add_material",
+    toolset="roundtable",
+    schema=ROUNDTABLE_ADD_MATERIAL_SCHEMA,
+    handler=_handle_add_material,
+    check_fn=_check_roundtable_enabled,
+    emoji="📎",
+)
+
+registry.register(
+    name="roundtable_read_material",
+    toolset="roundtable",
+    schema=ROUNDTABLE_READ_MATERIAL_SCHEMA,
+    handler=_handle_read_material,
+    check_fn=_check_roundtable_enabled,
+    emoji="📖",
 )
 
 registry.register(

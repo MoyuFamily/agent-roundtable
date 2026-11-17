@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Local UTF-8 text, Markdown, CSV and optional PDF extraction via `python -m roundtable.import_material`. Preserve line, logical-row and page locations; label incomplete extraction without claiming verification or OCR.
+- Immutable material packets stored separately from ordinary output, with revision-safe import, complete paginated reads, and literal text search across MCP, HTTP, Generic and Hermes. Imported evidence citations must resolve to actual segments and locations; incomplete extractions need explicit review notes before a host marks them verified.
+- Material issue counts and cited-location warnings in the canonical report, with source text returned only by dedicated material reads.
 - Editable `decision-support` and `code-review` templates and a source-level workflow guide.
 - Independent participant prompts that omit peer speeches, with an explicit response phase for cross-role discussion. Host context separation remains required for actual isolation.
 - Versioned shared briefs via `roundtable_update_context`, with source/reason, optimistic concurrency and schema-v5 history preserved across restarts. Updated briefs reach participant prompts without consuming a turn.

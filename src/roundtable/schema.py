@@ -423,6 +423,20 @@ def _migrate_v5_to_v6(conn: sqlite3.Connection) -> None:
         raise
 
 
+def _migrate_v6_to_v7(conn: sqlite3.Connection) -> None:
+    """Store immutable, explicitly imported source segments apart from public output."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS materials (
+            discussion_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            material TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (discussion_id, source_id),
+            FOREIGN KEY (discussion_id) REFERENCES discussions(id) ON DELETE CASCADE
+        )
+    """)
+
+
 _MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migrate_v0_to_v1,
     _migrate_v1_to_v2,
@@ -430,6 +444,7 @@ _MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migrate_v3_to_v4,
     _migrate_v4_to_v5,
     _migrate_v5_to_v6,
+    _migrate_v6_to_v7,
 ]
 
 CURRENT_SCHEMA_VERSION = len(_MIGRATIONS)

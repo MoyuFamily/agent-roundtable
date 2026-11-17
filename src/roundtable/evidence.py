@@ -17,6 +17,7 @@ __all__ = [
     "normalize_evidence",
     "normalize_report",
     "render_evidence",
+    "render_materials",
     "render_report",
 ]
 
@@ -94,7 +95,16 @@ EVIDENCE_SCHEMA: dict[str, Any] = {
                             "type": "object",
                             "additionalProperties": False,
                             "required": ["source_id", "locator"],
-                            "properties": {"source_id": _ID_SCHEMA, "locator": _TEXT_SCHEMA},
+                            "properties": {
+                                "source_id": _ID_SCHEMA,
+                                "locator": _TEXT_SCHEMA,
+                                "segment_id": _ID_SCHEMA,
+                                "review_note": {
+                                    **_TEXT_SCHEMA,
+                                    "description": "Submitted verification of incomplete extraction.",
+                                },
+                            },
+                            "dependentRequired": {"review_note": ["segment_id"]},
                         },
                     },
                     "applicability": _TEXT_SCHEMA,
@@ -243,17 +253,25 @@ def normalize_evidence(value: dict[str, Any]) -> dict[str, Any]:
             "verification": _choice(item["verification"], f"{path}.verification", _VERIFICATION_LABELS),
         }
         citations: list[dict[str, str]] = []
-        seen_citations: set[tuple[str, str]] = set()
+        seen_citations: set[tuple[tuple[str, str], ...]] = set()
         for citation_index, entry in enumerate(_array(item["citations"], f"{path}.citations")):
             citation_path = f"{path}.citations[{citation_index}]"
-            citation = _object(entry, citation_path, ("source_id", "locator"))
+            citation = _object(entry, citation_path, ("source_id", "locator"), ("segment_id", "review_note"))
             source_id = _identifier(citation["source_id"], f"{citation_path}.source_id")
             if source_id not in source_ids:
                 raise ValueError(f"{citation_path}.source_id: unknown source reference")
             locator = _text(citation["locator"], f"{citation_path}.locator")
-            if (source_id, locator) not in seen_citations:
-                citations.append({"source_id": source_id, "locator": locator})
-                seen_citations.add((source_id, locator))
+            normalized_citation = {"source_id": source_id, "locator": locator}
+            if "segment_id" in citation:
+                normalized_citation["segment_id"] = _identifier(citation["segment_id"], f"{citation_path}.segment_id")
+            if "review_note" in citation:
+                if "segment_id" not in citation:
+                    raise ValueError(f"{citation_path}.segment_id: required with review_note")
+                normalized_citation["review_note"] = _text(citation["review_note"], f"{citation_path}.review_note")
+            key = tuple(normalized_citation.items())
+            if key not in seen_citations:
+                citations.append(normalized_citation)
+                seen_citations.add(key)
         normalized_item["citations"] = citations
         for field in ("applicability", "derivation"):
             if field in item:
@@ -350,6 +368,10 @@ def _evidence_lines(bundle: dict[str, Any]) -> list[str]:
         if item["citations"]:
             for citation in item["citations"]:
                 lines.append(f"- 来源：`{citation['source_id']}`；定位：{_markdown(citation['locator'], indent=2)}")
+                if "segment_id" in citation:
+                    lines.append(f"  - 原文片段：`{citation['segment_id']}`")
+                if "review_note" in citation:
+                    lines.append(f"  - 提交方核验说明：{_markdown(citation['review_note'], indent=4)}")
         else:
             lines.append("- 来源定位：未知（未提交引用）")
     lines.extend(["", "## 来源", ""])
@@ -379,7 +401,44 @@ def render_evidence(evidence: dict[str, Any] | None) -> str:
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
-def render_report(report: dict[str, Any], evidence: dict[str, Any] | None, context_revision: int) -> str:
+def render_materials(materials: list[dict[str, Any]], *, cited_segments: set[tuple[str, str]] | None = None) -> str:
+    """Render the extraction inventory without ever including source text."""
+    if not materials:
+        return ""
+    labels = {"needs_review": "待检查", "unreadable": "未能读取"}
+    lines = ["## 材料读取情况", "", "可读不代表已核实；以下状态记录导入时的提取情况，核验说明见证据引用。"]
+    if cited_segments is not None:
+        lines.append("列出所有材料的问题数量，仅展开本报告引用片段的定位；其他位置见材料目录。")
+    for material in materials:
+        source = material["source"]
+        issues = material["issues"]
+        review = sum(issue["status"] == "needs_review" for issue in issues)
+        unreadable = sum(issue["status"] == "unreadable" for issue in issues)
+        lines.extend(
+            [
+                "",
+                f"### `{source['id']}` · {_markdown(source['title'])}",
+                "",
+                f"共 {material['segment_count']} 个片段；待检查 {review}；未能读取 {unreadable}。",
+            ]
+        )
+        for issue in issues:
+            if cited_segments is not None and (source["id"], issue["segment_id"]) not in cited_segments:
+                continue
+            lines.append(
+                f"- `{issue['segment_id']}` · {_markdown(issue['locator'], indent=2)} · "
+                f"{labels[issue['status']]}：{_markdown(issue['note'], indent=2)}"
+            )
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def render_report(
+    report: dict[str, Any],
+    evidence: dict[str, Any] | None,
+    context_revision: int,
+    *,
+    materials: list[dict[str, Any]] | None = None,
+) -> str:
     """Render the decision first, followed by cited evidence and brief revision.
 
     Evidence and source appendices retain submission order, including every
@@ -429,5 +488,13 @@ def render_report(report: dict[str, Any], evidence: dict[str, Any] | None, conte
     source_ids = {citation["source_id"] for item in cited_items for citation in item["citations"]}
     cited_sources = [source for source in bundle["sources"] if source["id"] in source_ids]
     lines.extend(["", "## 被引用证据", "", *_evidence_lines({"sources": cited_sources, "items": cited_items})])
+    if materials:
+        cited_segments = {
+            (citation["source_id"], citation["segment_id"])
+            for item in cited_items
+            for citation in item["citations"]
+            if "segment_id" in citation
+        }
+        lines.extend(["", render_materials(materials, cited_segments=cited_segments)])
     lines.extend(["", "## 输入简报版本", "", str(context_revision)])
     return "\n".join(lines).rstrip("\n") + "\n"

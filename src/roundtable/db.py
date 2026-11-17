@@ -23,6 +23,7 @@ from roundtable.exceptions import (
     InvalidReplyToError,
     InvalidSpeechOrderError,
 )
+from roundtable.materials import material_summary, normalize_material
 from roundtable.models import (
     ConvergenceRecord,
     Discussion,
@@ -231,42 +232,179 @@ class RoundtableDB:
             if history[-1]["revision"] != expected_revision:
                 raise ValueError("Context revision conflict; read the current brief before updating")
             evidence = normalize_evidence(evidence) if evidence is not None else history[-1]["evidence"]
-            # A source ID identifies one source version for the entire review.
-            # Corrections to extracted items are allowed, but source identities cannot be repointed.
-            if evidence is not None:
-                known_sources = {
-                    source["id"]: source for entry in history for source in (entry["evidence"] or {}).get("sources", [])
-                }
-                for item in evidence["sources"]:
-                    if item["id"] in known_sources and item != known_sources[item["id"]]:
-                        raise ValueError("Source ID already identifies different metadata; use a new source ID")
-            initial = history[0]
-            conn.execute(
-                """INSERT OR IGNORE INTO context_revisions
-                   (discussion_id, revision, context, source, reason, created_at) VALUES (?, 0, ?, ?, ?, ?)""",
-                (discussion_id, initial["context"], initial["source"], initial["reason"], initial["created_at"]),
+            revision = self._append_context_revision(
+                conn, discussion_id, history, context, source=source.strip(), reason=reason, evidence=evidence
             )
-            revision = expected_revision + 1
-            conn.execute(
-                """INSERT INTO context_revisions
-                   (discussion_id, revision, context, source, reason, created_at, evidence)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    discussion_id,
-                    revision,
-                    context,
-                    source.strip(),
-                    reason,
-                    int(time.time()),
-                    json.dumps(evidence, ensure_ascii=False) if evidence is not None else None,
-                ),
-            )
-            conn.execute("UPDATE discussions SET context = ? WHERE id = ?", (context, discussion_id))
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
             raise
         return {"context": context, "context_revision": revision, "source": source.strip(), "evidence": evidence}
+
+    def _append_context_revision(
+        self,
+        conn: sqlite3.Connection,
+        discussion_id: str,
+        history: list[dict[str, Any]],
+        context: str | None,
+        *,
+        source: str,
+        reason: str | None,
+        evidence: dict[str, Any] | None,
+    ) -> int:
+        """Append within the caller's write transaction; source identities cannot be repointed."""
+        if evidence is not None:
+            known_sources = {
+                item["id"]: item for entry in history for item in (entry["evidence"] or {}).get("sources", [])
+            }
+            for item in evidence["sources"]:
+                if item["id"] in known_sources and item != known_sources[item["id"]]:
+                    raise ValueError("Source ID already identifies different metadata; use a new source ID")
+            self._validate_material_citations(conn, discussion_id, evidence)
+        initial = history[0]
+        conn.execute(
+            """INSERT OR IGNORE INTO context_revisions
+               (discussion_id, revision, context, source, reason, created_at) VALUES (?, 0, ?, ?, ?, ?)""",
+            (discussion_id, initial["context"], initial["source"], initial["reason"], initial["created_at"]),
+        )
+        revision = history[-1]["revision"] + 1
+        conn.execute(
+            """INSERT INTO context_revisions
+               (discussion_id, revision, context, source, reason, created_at, evidence)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                discussion_id,
+                revision,
+                context,
+                source,
+                reason,
+                int(time.time()),
+                json.dumps(evidence, ensure_ascii=False) if evidence is not None else None,
+            ),
+        )
+        conn.execute("UPDATE discussions SET context = ? WHERE id = ?", (context, discussion_id))
+        return int(revision)
+
+    def _validate_material_citations(
+        self, conn: sqlite3.Connection, discussion_id: str, evidence: dict[str, Any]
+    ) -> None:
+        materials = {
+            row["source_id"]: json.loads(row["material"])
+            for row in conn.execute(
+                "SELECT source_id, material FROM materials WHERE discussion_id = ?", (discussion_id,)
+            )
+        }
+        segments = {key: {s["id"]: s for s in value["segments"]} for key, value in materials.items()}
+        for item_index, item in enumerate(evidence["items"]):
+            for index, citation in enumerate(item["citations"]):
+                path = f"evidence.items[{item_index}].citations[{index}]"
+                source_id = citation["source_id"]
+                segment_id = citation.get("segment_id")
+                if source_id not in materials:
+                    if segment_id is not None:
+                        raise ValueError(f"{path}.segment_id: source has no imported material")
+                    continue
+                if segment_id is None:
+                    raise ValueError(f"{path}.segment_id: required for imported material")
+                segment = segments[source_id].get(segment_id)
+                if segment is None:
+                    raise ValueError(f"{path}.segment_id: unknown material segment")
+                if citation["locator"] != segment["locator"]:
+                    raise ValueError(f"{path}.locator: must match the imported segment locator")
+                if (
+                    item["verification"] == "verified"
+                    and segment["status"] != "ready"
+                    and "review_note" not in citation
+                ):
+                    raise ValueError(
+                        f"{path}.review_note: describe the actual verification of this incomplete extraction"
+                    )
+
+    def get_material(self, conn: sqlite3.Connection, discussion_id: str, source_id: str) -> dict[str, Any] | None:
+        row = conn.execute(
+            "SELECT material FROM materials WHERE discussion_id = ? AND source_id = ?", (discussion_id, source_id)
+        ).fetchone()
+        return json.loads(row["material"]) if row else None
+
+    def get_material_summaries(self, conn: sqlite3.Connection, discussion_id: str) -> list[dict[str, Any]]:
+        return [
+            material_summary(json.loads(row["material"]))
+            for row in conn.execute(
+                "SELECT material FROM materials WHERE discussion_id = ? ORDER BY created_at, source_id",
+                (discussion_id,),
+            )
+        ]
+
+    def add_material(
+        self,
+        conn: sqlite3.Connection,
+        discussion_id: str,
+        material: dict[str, Any],
+        *,
+        source: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """Import immutable source content and register its identity in one brief revision."""
+        material = normalize_material(material)
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError("source is required")
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValueError("expected_revision must be a non-negative integer")
+        source_id = material["source"]["id"]
+        summary = material_summary(material)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            disc = self.get_discussion(conn, discussion_id)
+            if disc is None:
+                raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
+            if disc.status not in {"active", "assembling"}:
+                raise DiscussionNotActiveError("Cannot import into a concluded or cancelled review; create a follow-up")
+            history = self.get_context_history(conn, discussion_id)
+            current = history[-1]
+            existing = self.get_material(conn, discussion_id, source_id)
+            if existing is not None:
+                if existing != material:
+                    raise ValueError("Material source ID is immutable; use a new source ID")
+                conn.execute("COMMIT")
+                return {
+                    "created": False,
+                    "context_revision": current["revision"],
+                    "material": summary,
+                }
+            if current["revision"] != expected_revision:
+                raise ValueError("Context revision conflict; read the current brief before importing")
+            if any(
+                item["id"] == source_id for entry in history for item in (entry["evidence"] or {}).get("sources", [])
+            ):
+                raise ValueError("Source ID already used by evidence; import under a new source ID")
+            previous_evidence = current["evidence"] or {"sources": [], "items": []}
+            evidence = {
+                "sources": [*previous_evidence["sources"], material["source"]],
+                "items": previous_evidence["items"],
+            }
+            conn.execute(
+                "INSERT INTO materials (discussion_id, source_id, material, created_at) VALUES (?, ?, ?, ?)",
+                (
+                    discussion_id,
+                    source_id,
+                    json.dumps(material, ensure_ascii=False),
+                    int(time.time()),
+                ),
+            )
+            revision = self._append_context_revision(
+                conn,
+                discussion_id,
+                history,
+                disc.context,
+                source=source.strip(),
+                reason="Imported material",
+                evidence=evidence,
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        return {"created": True, "context_revision": revision, "material": summary}
 
     def get_decision_report(self, conn: sqlite3.Connection, discussion_id: str) -> dict[str, Any] | None:
         row = conn.execute(

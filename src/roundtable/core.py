@@ -26,6 +26,7 @@ from roundtable.exceptions import (
     DiscussionNotActiveError,
     DiscussionNotFoundError,
 )
+from roundtable.materials import material_summary, select_segments
 from roundtable.models import ConvergenceRecord, Discussion, Participant, Speech, review_round_counts
 from roundtable.notify import Notifier, validate_notification_config
 from roundtable.output import OutputBuilder
@@ -427,6 +428,42 @@ class RoundtableCore:
         finally:
             conn.close()
 
+    def add_material(
+        self, discussion_id: str, material: dict[str, Any], *, source: str, expected_revision: int
+    ) -> dict[str, Any]:
+        """Accept an explicit extraction packet; never open a caller-supplied server path."""
+        conn = self.db.connect()
+        try:
+            result = self.db.add_material(
+                conn, discussion_id, material, source=source, expected_revision=expected_revision
+            )
+            if result["created"]:
+                self._emit("context_updated", discussion_id=discussion_id, revision=result["context_revision"])
+            return {"ok": True, "discussion_id": discussion_id, **result}
+        finally:
+            conn.close()
+
+    def read_material(
+        self, discussion_id: str, source_id: str, *, offset: int = 0, limit: int = 10, query: str | None = None
+    ) -> dict[str, Any]:
+        """Read complete requested segments; ordinary discussion exports contain no raw material."""
+        conn = self.db.connect()
+        try:
+            conn.execute("BEGIN")
+            if self.db.get_discussion(conn, discussion_id) is None:
+                raise DiscussionNotFoundError(f"Discussion {discussion_id} not found")
+            material = self.db.get_material(conn, discussion_id, source_id)
+            if material is None:
+                raise ValueError("Material source not found in this discussion")
+            return {
+                "ok": True,
+                "discussion_id": discussion_id,
+                "material": material_summary(material),
+                **select_segments(material, offset=offset, limit=limit, query=query),
+            }
+        finally:
+            conn.close()
+
     def record_finding(
         self, discussion_id: str, finding_type: str, content: str, related_speeches: list[int]
     ) -> dict[str, Any]:
@@ -544,6 +581,7 @@ class RoundtableCore:
                 "context": disc.context,
                 "context_revision": context_history[-1]["revision"],
                 "evidence": context_history[-1]["evidence"],
+                "materials": self.db.get_material_summaries(conn, discussion_id),
                 "decision_report": self.db.get_decision_report(conn, discussion_id),
                 "context_history": context_history,
                 "conclusion": disc.conclusion,
@@ -631,6 +669,7 @@ class RoundtableCore:
                 "context": disc.context,
                 "context_revision": context_history[-1]["revision"],
                 "evidence": context_history[-1]["evidence"],
+                "materials": self.db.get_material_summaries(conn, discussion_id),
                 "decision_report": self.db.get_decision_report(conn, discussion_id),
                 "conclusion": disc.conclusion,
                 **review_round_counts(disc, self.db.get_speeches(conn, discussion_id)),
@@ -726,6 +765,7 @@ class RoundtableCore:
                 "context": disc.context,
                 "context_revision": context_history[-1]["revision"],
                 "evidence": context_history[-1]["evidence"],
+                "materials": self.db.get_material_summaries(conn, discussion_id),
                 "decision_report": self.db.get_decision_report(conn, discussion_id),
                 "context_history": context_history,
                 "conclusion": disc.conclusion,
@@ -811,7 +851,12 @@ class RoundtableCore:
                 raise ValueError("Context revision conflict; read the current brief before concluding")
             if report is not None:
                 report = normalize_report(report, current["evidence"])
-                conclusion = render_report(report, current["evidence"], current["revision"])
+                conclusion = render_report(
+                    report,
+                    current["evidence"],
+                    current["revision"],
+                    materials=self.db.get_material_summaries(conn, discussion_id),
+                )
                 conn.execute(
                     """INSERT INTO decision_reports (discussion_id, context_revision, report) VALUES (?, ?, ?)
                        ON CONFLICT(discussion_id) DO UPDATE SET

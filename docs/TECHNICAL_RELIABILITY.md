@@ -52,7 +52,7 @@ HTTP Bridge 使用并发请求处理；MCP 在工作线程执行同步工具。�
 
 两种 Bridge 共用 GenericBridge 的服务实现。/invite 和 /summon 都遵守接受策略；只有数据库响应 status=accepted 时才返回 accepted=true。端口绑定成功后才注册 Agent，注册失败则关闭监听；重复 start 不创建第二个服务，stop 后可以重启。
 
-HTTP 请求体限制为1 MiB，读取空闲超时为10秒。不支持 chunked 编码，拒绝重复、无效或负数 Content-Length；无效 JSON/UTF-8 返回 JSON 400，超长请求返回413。请求帧错误不会直接断开而不返回结果。
+HTTP 请求体限制为8 MiB，容纳材料包的 Unicode JSON 转义；材料本身仍受片段数与字符数限制。读取空闲超时为10秒。不支持 chunked 编码，拒绝重复、无效或负数 Content-Length；无效 JSON/UTF-8 返回 JSON 400，超长请求返回413。请求帧错误不会直接断开而不返回结果。
 
 
 ## Viewer 会话与请求错误

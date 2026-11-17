@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from roundtable.evidence import render_report
+from roundtable.materials import material_summary
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -17,6 +18,8 @@ def synthetic_snapshot():
         '开展 7 天试点，预算 1.25 人天。成本 < 2.5 & "time" > 0.5。\n第二行：[Plan_A] (trial) *literal* #tag!'
     )
     statement = "合成样本的处理时间为 1.25 秒，上限 10.5 秒。\n第二行：保留边界 <sample> & 证据尾部 END_OF_EVIDENCE。"
+    review_note = "已逐项核对合成表格的行列，1.25 与 10.5 对应不同字段。"
+    extraction_note = "图表与阅读顺序待检查；<sample> & 原文不能代替视觉检查。"
     evidence = {
         "sources": [
             {
@@ -33,7 +36,14 @@ def synthetic_snapshot():
                 "kind": "fact",
                 "verification": "verified",
                 "statement": statement,
-                "citations": [{"source_id": "S1", "locator": "第 2 页，第 1.25 节"}],
+                "citations": [
+                    {
+                        "source_id": "S1",
+                        "locator": "第 2 页，第 1.25 节",
+                        "segment_id": "p2",
+                        "review_note": review_note,
+                    }
+                ],
                 "applicability": "仅用于本地合成报告验收",
             }
         ],
@@ -47,7 +57,20 @@ def synthetic_snapshot():
         "revisit_conditions": ["若试点成本超过 2.5 人天，则重新评估范围。"],
         "next_actions": ["记录成功标准与负责人。\n7 天后复核，保留未解决问题。"],
     }
-    conclusion = render_report(report, evidence, 1)
+    material = {
+        "source": evidence["sources"][0],
+        "format": "pdf",
+        "segments": [
+            {
+                "id": "p2",
+                "locator": "第 2 页，第 1.25 节",
+                "text": "RAW_MATERIAL_ONLY",
+                "status": "needs_review",
+                "note": extraction_note,
+            }
+        ],
+    }
+    conclusion = render_report(report, evidence, 1, materials=[material_summary(material)])
     return {
         "snapshot": {
             "topic": "试点范围决策 · 合成报告",
@@ -62,7 +85,7 @@ def synthetic_snapshot():
                 "disagreement": ["Unresolved process question"],
             },
         },
-        "literals": recommendation.splitlines() + statement.splitlines(),
+        "literals": recommendation.splitlines() + statement.splitlines() + [review_note, extraction_note],
     }
 
 
@@ -161,6 +184,7 @@ try {
   assert.equal(view.processOpen, false);
   assert(view.reportVisible && view.activeVisible && view.waitingHidden);
   assert(!view.text.includes('STALE_VERDICT'));
+  assert(!view.text.includes('RAW_MATERIAL_ONLY'));
   for (const literal of input.literals) assert(view.text.includes(literal), literal + '\n' + view.text);
   for (const escaped of ['1\\.25', '&lt;', '&amp;', '\\[']) assert(!view.text.includes(escaped), escaped);
   assert.equal(view.scroll, 0);

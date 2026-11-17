@@ -17,6 +17,7 @@ from typing import Any
 from roundtable.core import RoundtableCore
 from roundtable.db import RoundtableDB
 from roundtable.evidence import EVIDENCE_SCHEMA, REPORT_SCHEMA
+from roundtable.materials import MATERIAL_SCHEMA
 
 TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
@@ -297,6 +298,47 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "roundtable_add_material",
+        "description": (
+            "Import an immutable material packet and register its source in an active/assembling discussion. "
+            "Increments the context revision without consuming a turn; exact retries are idempotent. "
+            "Prepare files locally; the server does not read file paths."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "discussion_id": {"type": "string"},
+                "material": MATERIAL_SCHEMA,
+                "source": {"type": "string", "description": "Safe provenance of this import, e.g. coordinator"},
+                "expected_revision": {"type": "integer", "minimum": 0},
+            },
+            "required": ["discussion_id", "material", "source", "expected_revision"],
+        },
+    },
+    {
+        "name": "roundtable_read_material",
+        "description": (
+            "Read requested full material segments. Ordinary discussion reads expose only material summaries. "
+            "Query matches literal substrings with Unicode casefolding; no regex or semantic search."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "discussion_id": {"type": "string"},
+                "source_id": {"type": "string"},
+                "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0,
+                    "description": "Offset within matching segments; use next_offset to continue",
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+                "query": {"type": "string", "description": "Optional literal substring filter"},
+            },
+            "required": ["discussion_id", "source_id"],
+        },
+    },
+    {
         "name": "roundtable_record_finding",
         "description": "Record an evidence-linked consensus, disagreement or new point. Does not infer or verify it.",
         "inputSchema": {
@@ -327,7 +369,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "roundtable_read",
-        "description": "Read full speeches, current brief and revision history, conclusion and actual round counts.",
+        "description": (
+            "Read full speeches, current brief and revision history, conclusion and actual round counts. "
+            "Includes material summaries, not raw segments; use roundtable_read_material for those."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -340,7 +385,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "roundtable_status",
-        "description": "Get discussion status including convergence metrics.",
+        "description": "Get discussion status, convergence metrics and material summaries without raw segments.",
         "inputSchema": {
             "type": "object",
             "properties": {"discussion_id": {"type": "string"}},
@@ -358,7 +403,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "roundtable_summarize",
-        "description": "Format recorded evidence and the full saved conclusion; no semantic synthesis.",
+        "description": (
+            "Format recorded evidence, material summaries and the full saved conclusion; "
+            "no raw material segments or semantic synthesis."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -604,6 +652,23 @@ def handle_tool_call(core: RoundtableCore, db: RoundtableDB, name: str, argument
                 expected_revision=arguments["expected_revision"],
                 reason=arguments.get("reason"),
                 evidence=arguments.get("evidence"),
+            )
+
+        elif name == "roundtable_add_material":
+            return core.add_material(
+                arguments["discussion_id"],
+                arguments["material"],
+                source=arguments["source"],
+                expected_revision=arguments["expected_revision"],
+            )
+
+        elif name == "roundtable_read_material":
+            return core.read_material(
+                arguments["discussion_id"],
+                arguments["source_id"],
+                offset=arguments.get("offset", 0),
+                limit=arguments.get("limit", 10),
+                query=arguments.get("query"),
             )
 
         elif name == "roundtable_record_finding":

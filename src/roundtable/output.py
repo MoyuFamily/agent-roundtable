@@ -98,6 +98,7 @@ class OutputBuilder:
             conv_history,
             context_history=self.db.get_context_history(conn, disc.id),
             findings=findings,
+            materials=self.db.get_material_summaries(conn, disc.id),
         )
 
     def notify_concluded(self, conn: sqlite3.Connection, disc: Discussion, notifier: Notifier) -> None:

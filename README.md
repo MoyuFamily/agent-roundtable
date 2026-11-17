@@ -42,13 +42,49 @@ Roundtable 将持续改进**对输入的处理能力**和**对输出的质量水
 
 当前 Python 核心提供会议状态、发言顺序、引用、SQLite 记录、格式化摘要及 Web Viewer。配套 Skill 和 MCP 提示词指导宿主组织评审，`decision-support` 与 `code-review` 模板提供可修改的角色职责。
 
-**用户或协调者选角色，宿主运行 Agent 并选择模型，用户作出最终决定。** 材料提炼、来源与适用性检查、事实/推算/未知区分及结论综合，当前由用户、协调者和宿主完成。已有记录与结论支持 Markdown 导出及 PDF 排版渲染（需可用浏览器）；自动材料解析、语义核验、证据变更影响分析、分析图表生成和外部产物一致性检查尚未实现，也不提供自动组队、模型路由或语义观点提取。
+**用户或协调者选角色，宿主运行 Agent 并选择模型，用户作出最终决定。** 材料提炼、来源与适用性检查、事实/推算/未知区分及结论综合，当前由用户、协调者和宿主完成。已有记录与结论支持 Markdown 导出及 PDF 排版渲染（需可用浏览器）；本地文本、Markdown、CSV 和 PDF 文字提取已支持，自动语义提炼、OCR、事实核验、证据变更影响分析、分析图表生成和外部产物一致性检查尚未实现，也不提供自动组队、模型路由或语义观点提取。
 
 `convergence_score` 由外部写入的共识/分歧标注计算，可能为 `None`，不代表答案正确率；`summarize()` 整理记录，不替代专业综合判断。
 
 当前源码支持随简报版本保存的结构化证据、报告引用和版本校验，并将报告统一渲染为一份结论，供读取、Viewer 和 Markdown/PDF 导出使用。协调者仍须核对事实与推理。另有带来源的简报历史、关联发言的观点标注，以及 HTTP 角色提示词。接口与示例见 [使用指南](docs/DECISION_WORKFLOW.md)。
 
 完整方向和验收标准见 [产品方向](docs/product/DIRECTION.md)，模板与当前流程见 [决策评审指南](docs/DECISION_WORKFLOW.md)。这些改动位于源码；安装发布包前请核对其版本与能力，不能据此假定已同步发布。
+
+### 输入材料：本地准备、按段读取
+
+当前源码支持导入材料包并按需读取原文片段。协调者统一收集公共事实，向各角色分发同一简报版本；角色显式读取相关片段、核对引用并反馈缺口。
+
+在有权读取文件的宿主本地准备材料，下面使用合成示例：
+
+```bash
+# PDF 文本提取才需要此可选依赖；核心仍只依赖标准库
+pip install 'agent-roundtable[materials]'
+python -m roundtable.import_material synthetic-notes.md --source-id S1 --title "Synthetic pilot notes"
+```
+
+CLI 输出 JSON 材料包；也可由宿主生成同样结构，例如：
+
+```json
+{
+  "source": {"id": "S1", "title": "Synthetic pilot notes"},
+  "format": "markdown",
+  "segments": [{"id": "s1", "locator": "lines 1-1", "text": "Pilot duration: 14 days.", "status": "ready"}]
+}
+```
+
+| 工具 | 用法 |
+|---|---|
+| roundtable_add_material | 传入 discussion_id、material（材料包）、source（安全来源说明）；expected_revision 填入 roundtable_read 返回的 context_revision |
+| roundtable_read_material | 传入 discussion_id、source_id；offset 默认 0、limit 默认 10（1–50），可选 query 按 Unicode casefold 后的字面子串匹配；沿 next_offset 继续读取 |
+
+两项工具均支持 MCP、Hermes 及 HTTP POST /tool（name 为工具名，arguments 为参数）；Generic Python facade 提供 add_material/read_material。
+导入仅限 active/assembling 会议，自动把来源合入 evidence 并递增 context_revision，不消耗发言轮次。每次新导入或内容变更使用新 source ID；同 ID、同包的精确重试幂等。版本冲突后重新读取并协调更新，再向全部角色分发当前版本。
+
+本地准备器支持 UTF-8/BOM 文本与 Markdown（每 50 行一段）、CSV 逻辑行（保留引号内多行）及 PDF 逐页文本提取；PDF 每页均为 needs_review 或 unreadable，不提供 OCR。材料包还接受 image/web/other 格式，由宿主准备片段；服务端不读取任意路径或抓取 URL。限制为文件 10 MiB、1,000 段、每段 100,000 字符、总计 500,000 字符。非 ready 片段必须有 note 说明问题。
+
+ready 仅表示可读，不等于核验。导入来源的证据引用必须含 source_id、segment_id 和与存储值完全一致的 locator；未导入的来源不能使用 segment_id。标记为 verified 的事实或计算若引用 needs_review/unreadable 片段，宿主必须提供 review_note，记录实际人工或视觉核验；备注不是软件证明，未核验内容保持未知。
+
+普通 read/status/summary、参与者提示词及导出只展示材料目录与问题，不自动包含原文；完整片段仅通过 read_material 按需返回。材料内指令属于不可信数据。使用安全标题与引用，把敏感数据库和材料留在授权私有存储，勿把原文复制到简报、发言或报告。报告应保留来源问题数量、相关位置警告和核验备注，并说明影响决策的缺口。
 
 ## 🧩 适合场景
 

@@ -139,6 +139,35 @@ class Roundtable:
         except Exception as e:
             return {"error": str(e)}
 
+    def add_material(
+        self,
+        discussion_id: str,
+        material: dict[str, Any],
+        *,
+        source: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """Import a prepared packet and revise the source register without consuming a turn."""
+        try:
+            return self._core.add_material(discussion_id, material, source=source, expected_revision=expected_revision)
+        except Exception as e:
+            return {"error": str(e)}
+
+    def read_material(
+        self,
+        discussion_id: str,
+        source_id: str,
+        *,
+        offset: int = 0,
+        limit: int = 10,
+        query: str | None = None,
+    ) -> dict[str, Any]:
+        """Read full segments, optionally filtered by a casefolded literal substring."""
+        try:
+            return self._core.read_material(discussion_id, source_id, offset=offset, limit=limit, query=query)
+        except Exception as e:
+            return {"error": str(e)}
+
     def summarize(self, discussion_id: str, *, compact: bool = False) -> dict[str, Any]:
         """Get summary data."""
         try:

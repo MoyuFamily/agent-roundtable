@@ -250,16 +250,16 @@ def test_limits_reject_without_silent_truncation(tmp_path: Path, material: Paylo
             mt.normalize_material(packet_with(texts))
     text_path = tmp_path / "large.txt"
     exact = ("x" * 1999 + "\n") * 250
-    text_path.write_text(exact, encoding="utf-8")
+    text_path.write_bytes(exact.encode("utf-8"))
     packet = mt.prepare_material(text_path, source_id="S1", title="合成边界文本")
     assert "".join(segment["text"] for segment in packet["segments"]) == exact
     for text, error_path in ((exact + "x", r"^material.segments:"), ("x" * 100_001, r"^material.segments\[0\].text:")):
-        text_path.write_text(text, encoding="utf-8")
+        text_path.write_bytes(text.encode("utf-8"))
         with pytest.raises(ValueError, match=error_path):
             mt.prepare_material(text_path, source_id="S1", title="合成超限文本")
     csv_path = tmp_path / "large.csv"
     for text in ("x\n" * 1001, "x" * 100_000):
-        csv_path.write_text(text, encoding="utf-8")
+        csv_path.write_bytes(text.encode("utf-8"))
         with pytest.raises(ValueError, match=r"^material.segments"):
             mt.prepare_material(csv_path, source_id="S1", title="合成超限表格")
     with text_path.open("wb") as stream:

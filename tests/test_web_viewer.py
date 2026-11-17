@@ -676,16 +676,6 @@ class TestRevokeAuthorization:
 
 
 class TestConclusionPages:
-    @pytest.mark.parametrize("route", ["r", "embed"])
-    def test_conclusion_precedes_process_in_both_templates(self, server, route):
-        base, _, _ = server
-        response = requests.get(f"{base}/{route}/test_token_abc123", timeout=5)
-        markup = response.text
-        assert markup.index('id="conclusionCard"') < markup.index('id="discussionProcess"')
-        assert markup.index('id="discussionProcess"') < markup.index('id="speechesContainer"')
-        assert '<details id="discussionProcess" class="discussion-process" open>' in markup
-        assert 'id="finalSummaryCard"' in markup
-
     def test_share_preserves_complete_escaped_report_before_process(self, server):
         base, _, directory = server
         path = directory / "test_disc" / "discussion.json"

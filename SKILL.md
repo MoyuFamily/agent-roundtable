@@ -100,6 +100,45 @@ Capture the decision owner, goals, constraints, options, available materials,
 evidence gaps, and time/cost budget. Ask for missing information only when it
 could change the choice. Distinguish facts, predictions, preferences, and unknowns.
 
+The coordinator collects and verifies public information, including prices, and
+prepares one shared evidence brief before role analysis. Give every role the same
+brief revision and source materials. Independent analysis means independent
+judgment of this package, not separate public-information searches. The brief contains:
+
+- Scope: options, applicable configurations, constraints, and comparison date.
+- Source register: a stable source_id for each source version, origin (public URL
+  or safe document reference), page/section/table, version and publication/effective
+  date, retrieval date, applicable options, and verification status. Mark unavailable
+  metadata UNKNOWN. Keep IDs stable across brief revisions; give a changed source
+  version a new ID and record which source it supersedes instead of repointing an ID.
+- Facts: verified statements with source_id and page/section citations and option
+  applicability. Keep assumptions, calculations, predictions, and preferences separate.
+- Unknowns: missing, unreadable, stale, or conflicting evidence, the affected options,
+  why it could change the decision, and what the coordinator must check next.
+
+The coordinator's price table must use the same configuration, quantity/unit,
+term, and comparison date. Record each option's source_id/locator, currency, tax
+and included/excluded fees, region/channel, eligibility, effective/expiry dates,
+and verification status. Label list prices, discounts, starting prices, estimates,
+and actual quotes separately. A discount or starting price is not an actual quote;
+an applicable quote remains UNKNOWN until verified. Mark unmatched configurations
+or dates as non-comparable instead of ranking them as equivalent. Derived totals
+must show their source inputs, formula, and assumptions.
+
+For PDFs, text extraction alone cannot establish that information is missing.
+The coordinator must render and visually inspect the key pages, including images
+and tables, and record the pages checked. If that is unavailable or inconclusive,
+mark the fact unverified and queue a page check rather than declaring it absent.
+
+Keep sensitive originals, extracted text, page images, and source-reference maps
+in authorized private storage outside the public repository. Use only necessary,
+authorized, redacted facts and safe source IDs in shared briefs and speeches.
+Keep any sensitive meeting database and exports in private storage as well;
+the host controls access to participants, viewers, and notification destinations.
+Never copy private material, identifying metadata, or private paths into public
+code, documentation, logs, snapshots, or fixtures. Examples and tests must be
+synthetic; a source reference does not grant permission to disclose its contents.
+
 ### 2. Assign professional tasks
 
 Choose roles needed for this question; templates are starting points. Assign
@@ -131,10 +170,11 @@ continuing; do not claim a meeting was recorded when creation failed.
 
 ### 4. Analyze, then reconcile consequential conflicts
 
-For an independent initial pass, give each agent the shared brief and role task
-without peer conclusions. The host must separate contexts: this is a workflow
-convention, not database access isolation. Analysis may run in parallel where
-supported and authorized; record speeches in the configured order.
+For an independent initial pass, give each agent the same current brief revision,
+source materials, and its role task without peer conclusions. The host must
+separate contexts: this is a workflow convention, not database access isolation.
+Analysis may run in parallel where supported and authorized; record speeches
+in the configured order.
 
 In response turns, provide relevant contributions and ask roles to address
 conflicts, cite speech IDs, revise assumptions, or propose alternative and phased
@@ -145,13 +185,21 @@ Participant task:
 
 ~~~text
 Role and responsibility: [assigned task]
-Decision brief and source materials: [shared context]
+Decision brief and source materials: [shared context and context_revision]
 Phase: [independent analysis or response]
 Relevant peer contributions: [response phase only]
 
 Compare feasible options within your responsibility. Give concrete benefits,
 costs, constraints, evidence, and implications for other roles. State what
 would change your judgment. Mark facts, assumptions, preferences, and unknowns.
+Analyze only the shared evidence package and cite source_id plus page/section.
+Do not independently collect external facts, invent prices, or mix configurations,
+dates, or quote types. Label calculations and hypothetical inputs as such.
+Send factual gaps or conflicts to the coordinator with the affected option,
+source_id/locator if available, and the check needed; keep them UNKNOWN meanwhile.
+The coordinator alone gathers supplementary facts and shares a revised brief
+through roundtable_update_context. Have the host recheck context_revision before
+recording; if it changed, refresh your prompt and reconsider affected conclusions.
 In response turns, cite the relevant speech and explain revisions.
 Check your turn, then record the analysis with roundtable_speak.
 ~~~
@@ -163,13 +211,18 @@ response afterwards, with an explicit phase override when needed. Tool-only and
 HTTP hosts can obtain the same prompts with roundtable_get_prompt; prompt retrieval
 does not run a model.
 
-When the user corrects facts, read context_revision and call
-roundtable_update_context with a complete revised brief, actual source, reason,
-and expected_revision. Keep unaffected constraints and unknowns. Refresh role
-prompts afterwards; do not leave the update only in a speech. Revisions preserve
-history and do not consume turns. A concluded review needs a follow-up meeting
-for new facts. current_round is an engine cursor; use total_rounds and
-completed_rounds to report substantive progress.
+When a role reports a factual gap/conflict or the user corrects facts, the
+coordinator checks the sources centrally and keeps unresolved items UNKNOWN.
+Read context_revision with roundtable_read and call roundtable_update_context
+with a complete revised brief, actual safe source reference, reason, and
+expected_revision. Preserve unaffected constraints, unknowns, and stable source
+IDs. On a revision conflict, reread and reconcile before retrying. After a
+successful update, distribute the same complete revision and refresh prompts
+for every role, including roles that already spoke; have affected analyses
+reconsidered before reconciliation. Do not leave new evidence only in a speech
+or a private reply to one role. Revisions preserve history and do not consume
+turns. A concluded review needs a follow-up meeting for new facts. current_round
+is an engine cursor; use total_rounds and completed_rounds to report progress.
 
 ### 5. Decide whether another round is useful
 
@@ -189,7 +242,8 @@ The final brief should include:
 
 - Decision, objectives, constraints, consulted roles, and missing perspectives.
 - Feasible options with benefits, costs, dependencies, and conditions of use.
-- Recommendation and rationale, citing supporting speeches or source material.
+- Recommendation and rationale, citing source_id/page and supporting speeches
+  against the current shared revision; retain price comparability and quote labels.
 - Strongest remaining dissent, unverified assumptions, and information gaps.
 - Validation or actions, suggested owners, and conditions for revisiting.
 - Status: recommendation pending user decision, user-confirmed choice, or deferred.

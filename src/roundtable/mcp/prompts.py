@@ -21,7 +21,7 @@ PROMPT_SCHEMAS: list[dict[str, Any]] = [
             {"name": "max_rounds", "description": "Maximum rounds", "required": False},
             {
                 "name": "decision_brief",
-                "description": "Goals, constraints, options, evidence, and budget",
+                "description": "Goals, constraints, options, shared evidence sources/unknowns, and budget",
                 "required": False,
             },
         ],
@@ -77,6 +77,34 @@ Give each role a responsibility, required materials, concrete questions, and del
 Agents supply context and tools; the host chooses models for the actual tasks. Record
 known assignments and reasons. Do not invent model identities or fixed model-to-role rankings.
 
+## Shared Evidence Brief
+You are responsible for collecting and verifying public facts, including prices. Before role
+analysis, put one shared evidence brief in context and give every role the same revision and
+source materials. Roles analyze that package; factual gaps return to you for unified checking.
+
+- Record scope, applicable options/configurations, constraints, and the comparison date.
+- Give each source version a stable source_id, origin (public URL or safe document reference),
+  page/section/table, version and publication/effective date, retrieval date, applicable options,
+  and verification status. Mark unavailable metadata UNKNOWN. Preserve IDs across brief revisions;
+  use a new ID for a changed source version and record supersession, never silently repoint an ID.
+- Separate verified facts citing source_id/locator and option applicability from assumptions,
+  calculations, predictions, and preferences. Track unknown, stale, conflicting, or unreadable
+  evidence with affected options, decision impact, and your next verification step.
+- Prepare one price table for the same configuration, quantity/unit, term, and comparison date.
+  Include source_id/locator, currency, tax, included/excluded fees, region/channel, eligibility,
+  effective/expiry dates, and verification status. Distinguish list prices, discounts, starting
+  prices, estimates, and actual quotes. Discounts or starting prices are not applicable actual
+  quotes; keep unverified quotes UNKNOWN. Mark mismatched configurations/dates non-comparable.
+  Derived totals must identify source inputs, formulas, and assumptions.
+- For PDFs, render and visually inspect key pages, including images and tables, and record the
+  pages checked. Text extraction alone does not establish absence. If page verification is
+  unavailable or inconclusive, keep the fact unverified and queue the page check.
+- Keep sensitive originals, extracted text, page images, and source-reference maps in authorized
+  private storage outside the public repository. Share only necessary, authorized, redacted facts
+  and safe source IDs. Keep sensitive meeting databases and exports private; control participant,
+  viewer, and notification access. Private contents, identifying metadata, and private paths must
+  not enter public code, documentation, logs, snapshots, or fixtures. Use synthetic examples/tests.
+
 ## Discussion Setup
 - Topic: {topic}
 - Available participants: {participants}
@@ -90,17 +118,21 @@ known assignments and reasons. Do not invent model identities or fixed model-to-
    Store the brief in context and each role's task in participant perspective. Invite
    additional agents only as needed and arrange their execution through the host.
 2. Speak as coordinator in round 0 with the shared brief, role tasks, and review budget.
-3. Have each role prepare its initial analysis from the shared materials. When independent
-   analysis is needed, give it a fresh context without peer conclusions. The independent
+3. Have each role prepare its initial analysis from the same shared revision and materials.
+   When independent analysis is needed, give it a fresh context without peer conclusions. The independent
    participant prompt omits peer speeches; it is not an access-control boundary.
 4. Record speeches in turn. The engine advances completed rounds automatically; inspect
    status rather than calling roundtable_advance after each completed round.
 5. Focus subsequent turns on conflicts that change the choice. Ask for evidence, revised
    options, phased alternatives, and explicit trade-offs between professional constraints.
-   When new user facts arrive, read the current context_revision and use roundtable_update_context
-   with a complete revised brief, the actual source, reason, and expected_revision. Preserve
-   unaffected constraints and distinguish confirmed facts from assumptions. Refresh participant
-   prompts before their next turn. Do not leave corrections only in a speech.
+   When roles report gaps/conflicts or user facts change, check sources centrally; keep unresolved
+   items UNKNOWN. Read context_revision with roundtable_read, then use roundtable_update_context
+   with the complete revised brief, actual safe source reference, reason, and expected_revision.
+   Preserve unaffected constraints, unknowns, and source IDs. On conflict, reread and reconcile
+   before retrying. After success, distribute the same complete revision and refresh prompts for
+   every role, including those that already spoke; reconsider affected analyses before reconciliation.
+   Do not leave new evidence only in a speech or a private reply. Ended reviews need a follow-up
+   meeting for new facts; context updates do not consume turns.
 6. Stop when the important questions are covered, further discussion adds little, or the
    agreed budget is exhausted. Consensus score is a ratio of supplied annotations, not
    decision quality, and may be null. Preserve unresolved disagreement.
@@ -186,8 +218,8 @@ def _participant_turn(db: RoundtableDB, arguments: dict[str, str]) -> dict[str, 
 ## Decision: {discussion.topic}
 ## Current shared brief (revision {current_context["revision"]}, source: {current_context["source"]})
 {discussion.context or "No decision brief supplied; identify the missing information instead of guessing."}
-This current brief supersedes conflicting assumptions in earlier speeches. The source is
-reported provenance, not independent verification. Historical views may predate a user correction.
+This current brief supersedes conflicting facts or assumptions in earlier speeches. The source is
+reported provenance, not independent verification. Historical views may predate a shared evidence update.
 
 ## Discussion Materials
 {history_text}
@@ -195,11 +227,32 @@ reported provenance, not independent verification. Historical views may predate 
 ## Instructions
 {phase_guidance}
 - Address your assigned professional questions with concrete options, benefits, costs, and constraints.
-- Separate observed facts and sources from assumptions, predictions, and preferences.
+- Analyze only the current shared evidence package. Do not independently collect external facts
+  or prices, fill gaps from memory, or treat peer claims as verified sources.
+- Cite stable source_id and page/section for facts, including the applicable option and source
+  version/date. Do not invent missing citations. Separate verified facts from assumptions,
+  calculations, predictions, preferences, and unknowns.
+- Use the coordinator's price table on its shared configuration, quantity/unit, term, and date.
+  Preserve currency, tax/fees, region/channel, eligibility, and validity conditions. Do not invent
+  or mix prices, configurations, dates, or quote types. Discounts, starting prices, and estimates
+  are not actual quotes; unverified quotes stay UNKNOWN. Label non-comparable entries and give
+  source inputs, formulas, and assumptions for calculations or hypothetical scenarios.
 - Explain the implications for other roles and offer alternatives when requirements conflict.
-- State missing evidence, remaining uncertainty, and what would change your recommendation.
+- Send factual gaps, conflicts, or stale evidence to the coordinator with the affected option,
+  source_id/locator if available, decision impact, and the check needed. Keep them UNKNOWN until
+  the coordinator checks and distributes a revised brief to every role via roundtable_update_context.
+  Only the coordinator collects supplementary facts and updates the shared brief.
+- PDF text extraction alone cannot prove absence in images or tables. Ask the coordinator to
+  render and visually verify the key pages; retain uncertainty if those pages remain unchecked.
+- State remaining uncertainty and what would change your recommendation.
 - Use the host's actual tools and context; do not claim verification or expertise you did not exercise.
+- Keep sensitive materials and source-reference maps in authorized private storage. Share only
+  necessary, authorized, redacted facts and safe source IDs. Do not copy private contents, identifying
+  metadata, or private paths into public code, documentation, logs, snapshots, or fixtures.
 - Use enough detail for the decision without padding or repeating other contributions.
+- Before recording, have the host recheck context_revision. If it changed, refresh this prompt
+  and reconsider affected conclusions so every role uses the same current revision. The host
+  keeps peer conclusions out of independent analysis contexts while checking the revision.
 - Check roundtable_wait_for_turn before recording. Only the coordinator opens round 0.
 
 ## For Code Review
@@ -220,12 +273,26 @@ def _coordinator_summarize(arguments: dict[str, str]) -> dict[str, str]:
 1. Call roundtable_summarize(discussion_id="{discussion_id}", compact=true) for an overview.
    It formats recorded material and may truncate speeches; it does not perform semantic synthesis.
 2. Use roundtable_read(discussion_id="{discussion_id}") to verify consequential statements
-   against the full speeches and source material. Empty findings do not prove agreement;
+   against the current shared brief, source register, and full speeches. Cite stable source_id
+   and page/section with applicable options and source versions/dates; earlier speeches may be stale.
+   Keep verified facts separate from assumptions, calculations, and unknowns. For gaps/conflicts,
+   the coordinator checks sources centrally and, while the review is active, publishes the full
+   revised brief with roundtable_update_context using actual safe source, reason, and current
+   expected_revision. Preserve unaffected constraints, unknowns, and source IDs; reread and reconcile
+   on conflict. Refresh every role's prompt and reconsider affected analyses before concluding.
+   A concluded review needs a follow-up meeting for new evidence. PDF text extraction alone cannot
+   establish absence; render and visually verify key image/table pages or retain an unknown.
+   Empty findings do not prove agreement;
    the current tool set does not extract findings automatically. Use roundtable_record_finding
    for material consensus, disagreement, or new points, citing actual speech IDs. Do not
    turn a tentative view into consensus or count agreement as evidence of correctness.
 3. Explain the decision, objectives, constraints, professional coverage, and any missing roles.
 4. Compare feasible options by benefits, costs, risks, dependencies, and conditions of use.
+   Use the coordinator's price table with matching configuration, quantity/unit, term, and comparison
+   date. Preserve source citations, currency, tax/fees, region/channel, eligibility, and validity.
+   Distinguish list prices, discounts, starting prices, estimates, and actual quotes; do not convert
+   discounts or starting prices into actual quotes. Mark unmatched entries non-comparable and
+   unverified quotes UNKNOWN; show source inputs and assumptions for derived totals.
    Include keeping the current approach or deferring when relevant.
 5. Recommend a choice with evidence and speech references, explain cross-role trade-offs,
    and retain the strongest dissent, unverified assumptions, and unresolved questions.
@@ -234,7 +301,12 @@ def _coordinator_summarize(arguments: dict[str, str]) -> dict[str, str]:
    When evidence is insufficient, recommend what to learn next rather than forcing a choice.
 7. Distinguish recommendation pending user decision, user-confirmed decision, and deferred
    decision. Do not present a recommendation as approved or authorize its implementation.
-8. Call roundtable_end(discussion_id="{discussion_id}", conclusion="<decision brief>")
+8. Before recording or exporting, include only necessary, authorized, redacted facts and safe source
+   IDs. Check participant, viewer, and notification access before sharing. Keep sensitive originals,
+   extracts, page images, source-reference maps, meeting databases, and exports in authorized private
+   storage outside the public repository. Keep private contents, identifying metadata, and private
+   paths out of public code, documentation, logs, snapshots, and fixtures; use synthetic examples/tests.
+   Call roundtable_end(discussion_id="{discussion_id}", conclusion="<decision brief>")
    to persist the result, including after automatic conclusion at the round limit.
    Read it back with roundtable_read or roundtable_summarize; both return the full conclusion.
    Save a separate full document only when requested or needed in the existing workflow.

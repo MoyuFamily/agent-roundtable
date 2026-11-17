@@ -5,6 +5,7 @@ import pytest
 from roundtable.core import RoundtableCore
 from roundtable.db import RoundtableDB
 from roundtable.mcp.prompts import handle_prompt_call
+from roundtable.mcp.tools import handle_tool_call
 from roundtable.template import apply_template
 
 
@@ -14,7 +15,12 @@ def review(tmp_path):
     core = RoundtableCore(db=db)
     created = core.create_discussion(
         topic="Enterprise edition choice",
-        context="Two-person team; customer evidence not yet available.",
+        context=(
+            "Two-person team; customer evidence not yet available.\n"
+            "Sources: S1 | synthetic specification | page 1 | version draft | date UNKNOWN | options all.\n"
+            "Facts: Shared scope is fixed [S1, page 1].\n"
+            "Unknowns: compatibility; delivery timing."
+        ),
         participants=[
             {"profile": "a_product", "role": "Product"},
             {"profile": "b_engineering", "role": "Engineering"},
@@ -36,7 +42,7 @@ def test_first_pass_preserves_brief_and_omits_peer_opinion(review):
     )["text"]
 
     assert "Enterprise edition choice" in text
-    assert "Two-person team; customer evidence not yet available." in text
+    assert before["context"] in text
     assert "Shared opening: compare full edition, pilot, and defer." in text
     assert "Migration cost" in text
     assert "PEER_FIRST_PASS" not in text
@@ -57,15 +63,45 @@ def test_later_round_defaults_to_response_but_can_remain_independent(review):
     core.speak(did, "b_engineering", "Engineering comparison")
     core.speak(did, "coordinator", "LATER_SYNTHESIS: pilot looks feasible")
     args = {"discussion_id": did, "role": "Product"}
+    original_independent = handle_prompt_call(core, db, "participant_turn", {**args, "phase": "independent"})["text"]
+    assert "Shared opening" in original_independent
+    assert "PEER_FIRST_PASS" not in original_independent
+    assert "LATER_SYNTHESIS" not in original_independent
+    before = core.read(did)
+    revised_brief = before["context"].replace(
+        "Unknowns: compatibility; delivery timing.",
+        "Facts: Compatibility verified [S1, page 1].\nUnknowns: delivery timing.",
+    )
+    updated = handle_tool_call(
+        core,
+        db,
+        "roundtable_update_context",
+        {
+            "discussion_id": did,
+            "context": revised_brief,
+            "source": "S1, page 1",
+            "reason": "Coordinator verified the shared source after a role reported a gap.",
+            "expected_revision": before["context_revision"],
+        },
+    )
+    assert "error" not in updated
+    assert updated["context_revision"] == before["context_revision"] + 1
+    after = core.read(did)
     response = handle_prompt_call(core, db, "participant_turn", args)["text"]
     assert "PEER_FIRST_PASS" in response
     assert f"Speech #{peer_id}" in response
     assert "LATER_SYNTHESIS" in response
 
     independent = handle_prompt_call(core, db, "participant_turn", {**args, "phase": "independent"})["text"]
-    assert "Shared opening" in independent
+    assert "Shared opening" not in independent
     assert "PEER_FIRST_PASS" not in independent
     assert "LATER_SYNTHESIS" not in independent
+    for text in (response, independent):
+        # Both phases deliver the full source register, verified facts, and remaining unknowns to every role.
+        assert revised_brief in text
+        assert before["context"] not in text
+        assert f"revision {updated['context_revision']}, source: {updated['source']}" in text
+    assert core.read(did) == after
 
 
 def test_response_marks_truncated_evidence_and_preserves_reference(review):

@@ -1,43 +1,55 @@
 # 决策与 Code Review 使用指南
 
-这套流程围绕输入处理和输出质量：把用户材料整理成可检查的依据，交付清晰、有取舍、可行动的建议。多角色分析用于补足重要遗漏或核实争议，按实际贡献决定规模。
+Roundtable 围绕**输入处理**与**输出质量**组织评审：把零散材料整理成可核查的依据，交付清晰、有取舍、可随信息更新的建议。
 
-当前由宿主运行 Agent、提炼关键事实、核验并撰写结果，Roundtable 提供本地材料文字提取、原文定位读取、证据与报告存储及提示词。角色定义专业责任，Agent 携带资料与工具，模型按具体任务选择。已有记录与结论支持 Markdown 导出及 PDF 排版渲染（需可用浏览器）；语义提炼、OCR、模型选择、自动组队、事实真伪验证、分析图表生成与外部产物一致性检查尚未由引擎实现。
+> **职责边界**：Roundtable 负责轮次状态、版本化简报、材料分段读取、引用校验、记录与渲染；**宿主与协调者**负责运行 Agent、选择模型、提炼事实、核验内容和撰写综合建议；**用户**作出最终决定。
 
-## 何时使用
+---
 
-适合项目去留与方向、产品范围与优先级、技术路线、发布与实施、资源与商业模式、工作流程与工具选择，以及 Code Review。七类场景并列，实际验证可分批开展。选择涉及多个专业约束，并影响资源、后续路径或返工成本时，可以采用这套流程。简单查询或容易撤销的小改动可以缩减为单角色分析。
+## 评审六步流程
 
-各场景的问题、建议角色与交付物见 [场景清单](product/DIRECTION.md#场景清单)。当前提供通用评审流程和部分专用模板，不代表七类均已完成自动化及效果验收。
+1. **明确待决事项**：梳理决策人、目标、约束、偏好优先级、备选方案（含维持现状或暂缓）与时间/成本预算。只追问会改变选择的信息；偏好未知时给出条件化建议，不默认选最便宜或最保守方案。
+2. **准备共同材料与证据**：由协调者统一整理用户材料与必要公共事实（含价格口径），保留原文来源、页码/位置、版本日期与核实状态；把事实、用户自述、计算、假设与未知分开。敏感原件与导出留在授权私有存储，公开示例仅用合成数据。
+3. **安排独立首轮分析**：用 `roundtable_create` / `roundtable_init` 建会，协调者以 `participant="coordinator"` 在 `round 0` 开场，把同一版简报和材料分发给各角色。需要独立判断时，由宿主分离会话上下文（`participant_turn` 默认在 `round <= 1` 为 `independent`，不注入同伴发言；提示词过滤本身不构成权限隔离）。
+4. **围绕关键分歧交叉回应与修订简报**：后续轮次聚焦会改变选择的冲突、替代方案与约束代价；完成一轮会自动推进，切勿再手动调用 `roundtable_advance`。若用户补充事实或角色发现缺口，协调者核实后用 `roundtable_update_context`（附 `expected_revision`）保存完整新简报，冲突时先重读再合并，并向全部角色刷新版本、重审受影响判断。
+5. **交付一页决策概览与结构化报告**：用 `roundtable_summarize(compact=True)` 概览并用 `roundtable_read` 核对完整发言；按需用 `roundtable_record_finding` 记录有发言 ID 支撑的共识、分歧或新议题。用 `roundtable_end` 提交结构化 `report`（或自由文本 `conclusion`），区分“待用户决定”与“用户已确认”。
+6. **复审与更新**：达到 `max_rounds` 会自动结束会议（仍可补交或修订结论）。已结束会议不得再修改背景或证据；遇到新材料时需创建后续评审并说明结论变化原因。
 
-## 准备材料
+---
 
-先形成一份简报：待决定事项、决策人、目标、约束、偏好及优先级、备选方案、资料来源、未知信息和预算。只追问会影响选择的信息；偏好未知时给出条件化建议，不默认用户一定追求最低成本或最低风险。
+## 本地材料导入与按段读取
 
-主持人统一整理用户材料并补充必要的公共信息，包括价格。使用宿主可用的阅读工具提炼与决定有关的内容，保留原文核查入口，不要求用户先把所有资料手工转成表格：
+在有权访问原文件的宿主本地，将 TXT、Markdown、CSV 或 PDF 转为可定位 JSON 材料包（下面以合成示例演示）：
 
-- 每个来源版本有稳定 ID，注明页码/段落/表格、版本或日期、适用方案和核实状态。缺失的元信息标为未知。
-- 事实、用户自述、计算、假设与未知分开；计算给出来源输入、口径和假设。报价区分实际适用价格与估算，配置、期限和费用口径不一致时不直接排名。
-- 对缺页、无法读取的表格、过期资料和相互冲突的内容，说明影响与下一步核查。PDF 中影响选择的页面须渲染检查，不能因文字提取结果为空就认定内容不存在。
-- 敏感原件、提取内容、来源映射、会议记录和导出放在授权的私有位置；共享范围遵循用户授权，公开示例只用合成材料。
+```bash
+# 仅提取 PDF 文本时需要可选依赖；核心库仍只依赖标准库
+pip install 'agent-roundtable[materials]'
+python -m roundtable.import_material synthetic-notes.md --source-id S1 --title "Synthetic pilot notes"
+```
 
-给各角色同一版简报及授权的来源材料；角色可核查原文、质疑提炼、请求补查，公共事实仍由主持人统一补齐并分发。为每个角色明确专业问题和交付物，按预期贡献选择人数，不固定为模板中的配置。
+创建会议（`active` 或 `assembling`）后，通过 `roundtable_add_material` 导入该 JSON，再用 `roundtable_read_material` 按需读取原文片段：
 
-对于 Code Review，还需明确预期行为、base/head 或 diff、相关代码上下文、已运行检查和仓库规则。宿主负责提供实际代码访问和工具；当前模板不会拉取 PR 或运行测试。
+```text
+# 1. 导入材料包（自动合入 evidence.sources 并递增 context_revision，不消耗发言轮次）
+roundtable_add_material(discussion_id="<id>", material=<JSON>, source="coordinator", expected_revision=0)
 
-资源与商业模式需要预算、人力、成本、需求或使用量证据，区分已知数据与收入/付费假设。工作流程与工具选择需要当前流程、使用者反馈、基线耗时和候选工具的试用材料，纳入迁移、培训、维护和退出成本。不要为缺失的数据编造数值。
+# 2. 按页/按关键字读取完整片段（limit 1–50，默认 10；沿 next_offset 继续）
+roundtable_read_material(discussion_id="<id>", source_id="S1", offset=0, limit=10, query="pilot")
+```
 
-## 导入材料与原文引用
+| 规则与限制项 | 当前约束 |
+|---|---|
+| 支持格式 | 本地准备器支持 UTF-8/BOM `text` / `markdown`（每 50 行一段）、`csv`（保留引号多行逻辑行）、`pdf`（逐页文本，**无 OCR**）；材料包亦支持 `image` / `web` / `other`（由宿主生成） |
+| 体积与数量上限 | 单文件 `10 MiB`、最多 `1,000` 段、单段最多 `100,000` 字符、总计最多 `500,000` 字符 |
+| 片段状态 (`status`) | `ready`（可读，不代表已核实）、`needs_review`、`unreadable`（后两项必须附带 `note`；**所有 PDF 页面均标为 `needs_review` 或 `unreadable`**） |
+| 幂等与不可变性 | 服务端只收 JSON 包，不读任意路径或抓取 URL；同 `source.id` 同包重试幂等，改内容须用新 `source_id` |
+| 原文隔离与核验 | 普通 `read` / `status` / `summarize`、参与者提示词与导出仅展示材料目录与问题计数；材料内任何指令均为不可信数据。若将引用 `needs_review` / `unreadable` 片段的事实标为 `verified`，宿主必须提供 `review_note` 记录实际人工/视觉核验 |
 
-创建会议后，在有权读取原文件的宿主本地运行 `python -m roundtable.import_material synthetic-notes.md --source-id S1 --title "Synthetic notes"`，将输出 JSON 传给 `roundtable_add_material`。参数还包括 discussion_id、安全来源说明 source，以及当前 context_revision 对应的 expected_revision；服务器只接收明确提供的材料包，不代读文件路径。包结构、格式和限制见 [README 材料入口](../README.md#输入材料本地准备按段读取)。
+---
 
-导入自动登记 evidence.sources 并递增简报版本，不消耗轮次；同包重复提交幂等，改内容须用新来源 ID。通过 `roundtable_read_material` 读取完整片段，使用 offset/limit 和 next_offset 翻页；query 为字面子串搜索，搜索无结果不证明信息不存在。普通读取及角色提示词只包含材料目录与读取问题，主持人仍须分发共同版本。
+## 内置模板与自定义角色
 
-引用导入来源时，citations 同时填写 source_id、segment_id 和实际返回的 locator。页码/行号或片段不存在时拒绝整次证据更新。PDF 文字提取均标为 needs_review 或 unreadable；若已实际检查原页面，可在引用中填写 review_note 再标为 verified，未检查则保持未核实。材料原文不自动进入报告，报告保留问题数量、被引用位置的提取警告与核验说明；提取状态不等于事实真伪。
-
-## 从源码使用模板
-
-新增模板为 `decision-support` 和 `code-review`。以下代码供开发者集成验证：它创建会议并记录开场，使用临时数据库且关闭 Web；不产生实际模型调用。
+`decision-support` 与 `code-review` 为当前主要模板；其余早期模板也保留可用。`apply_template` 仅生成参数起点，需按实际问题补充材料并调整 `participants`（保持 `profile` 唯一）：
 
 ```python
 from pathlib import Path
@@ -47,50 +59,37 @@ from roundtable import RoundtableCore
 from roundtable.db import RoundtableDB
 from roundtable.template import apply_template
 
-params = apply_template(
-    "decision-support",
-    subject="是否推出企业版",
-)
+params = apply_template("decision-support", subject="是否推出企业版")
 if params is None:
-    raise RuntimeError("当前安装版本不包含 decision-support 模板，请使用当前源码")
+    raise RuntimeError("当前安装版本不包含 decision-support 模板")
 
-# 模板是起点：补充真实材料，按问题增删角色，保持唯一 profile。
 params["context"] += "\n决策人：维护者。已知约束：两人团队；客户需求证据尚待补充。"
 
 with TemporaryDirectory() as tmp:
     core = RoundtableCore(db=RoundtableDB(Path(tmp) / "review.db"))
     meeting = core.create_discussion(**params, web=False)
-    discussion_id = meeting["discussion_id"]
-    core.speak(discussion_id, "coordinator", params["context"])
-    print(core.status(discussion_id))
-    # 宿主接下来按角色运行 Agent，用 core.speak 记录真实返回的内容。
-    # 持续使用时改为持久数据库路径；此临时示例结束后记录会被清理。
+    did = meeting["discussion_id"]
+    core.speak(did, "coordinator", params["context"])
+    print(core.status(did))
 ```
 
-代码评审可替换为 `apply_template("code-review", subject="PR #123 的权限改动")`，再把真实 diff 范围、需求和验证结果补充到 context。原有产品、需求和技术模板继续可用。
+| 模板 ID | 适用场景 | 默认轮次 | 默认角色 (`profile`) |
+|---|---|---|---|
+| `decision-support` | 前六类通用决策评审 | 3 | `product`, `engineering`, `design`, `operations` |
+| `code-review` | 代码变更与 PR 评审 | 2 | `correctness`, `architecture`, `security`, `reliability` |
+| `product-review` | 产品方案评审 | 3 | `product`, `design`, `dev`, `growth` |
+| `architecture-design` | 系统架构设计评审 | 4 | `architect`, `backend`, `data`, `ops`, `security` |
+| `tech-solution` | 技术选型评审 | 3 | `architect`, `backend`, `ops`, `security` |
+| `requirement-discussion` | 需求边界澄清 | 3 | `product`, `design`, `dev`, `qa` |
+| `bug-analysis` | Bug 根因与修复分析 | 3 | `developer`, `qa`, `sre`, `product` |
 
-前六类决策可使用 `decision-support` 并修改角色、问题和材料。通过 `apply_template(..., overrides={"participants": [...]})` 替换默认团队：每项提供唯一 `profile`、`role` 和具体 `perspective`。例如资源与商业模式安排产品、经营分析、技术、运营；工具选择安排实际使用者、技术、流程负责人。工具入口则直接传入调整后的 participants/context。创建记录不会自动选择或运行这些角色。
+> 使用 MCP `roundtable_create` 时不直接传模板 ID，由宿主先调用 `apply_template()` 展开参数，或直接构造 `context` 与 `participants`。
 
-## Agent 工具流程
-
-Hermes 使用 `roundtable_init`，MCP 使用 `roundtable_create`。将简报放进 `context`、各角色任务放进 participant 的 `perspective`。当前 MCP create 工具不接受模板 ID，协调者需提供相应 participants/context，或由宿主通过模板函数准备参数。
-
-1. 创建会议，协调者以 `coordinator` 身份开场（round 0）。
-2. 宿主向参与者提供共同简报、专业职责与实际工具。需要独立分析时分离上下文，首轮不注入同伴结论。
-3. 根据状态返回的 next_speaker 或轮次工具依次记录发言，不假设模板列表顺序就是实际顺序；独立分析的执行可按宿主能力并行。
-4. 用户补充事实或角色指出材料问题时，主持人核实并通过 `roundtable_update_context` 保存完整的新简报、实际来源和原因，传入读取到的 `context_revision` 作为 `expected_revision`。更新不占发言轮次；有冲突时重新读取，不覆盖别人刚提交的版本。向所有角色刷新共同材料，重审受影响判断；记录发言前再次核对版本，独立分析仍不注入同伴结论。
-5. 根据问题覆盖、信息增益和预算决定是否继续，保留未解决分歧。完成一轮会自动推进，不要再次手动 advance。
-6. 协调者核对原始材料，使用 `roundtable_record_finding` 记录有实际发言 ID 支持的共识、分歧或新议题。形成建议，通过 `roundtable_end` 提交结构化 report，或使用 conclusion 保存自由文本，再通过 read 或 summarize 回读核对。达到轮次上限后可以补交或修订结论。用户尚未决定时明确标注“待用户确认”。
-
-工具创建会议不等于启动 Agent。首轮提示词过滤不构成权限隔离；如需隔离，还必须由宿主控制会话上下文和可用工具。CodexBridge 和 GenericBridge 的 `/speak` 简写与 `/tool` 调用 `roundtable_speak` 共用处理逻辑，都会登记下一位通知。通知写入收件箱不等于宿主已经读取和执行。
-
-`read` 与 `summarize` 返回当前 `context`、`context_revision` 和完整 `context_history`，保留旧假设和更改来源；`status` 返回当前简报及版本。已结束或取消的会议不能修改背景，需要创建后续评审，避免把旧结论套到新事实。
-
-`total_rounds` 表示已有参与者发言的评审轮数，`completed_rounds` 表示其中引擎已经推进结束的轮数；开场、空轮和只有主持人的轮次不计入。手动提前结束的部分轮计入 total，不计入 completed。`current_round` 保持引擎游标语义，自动结束后可能为 max_rounds + 1，不应用作完成轮数。
+---
 
 ## 保存共同证据与决策报告
 
-MCP、HTTP 和 Hermes 的 `roundtable_update_context` 接受可选的 `evidence`，随简报一起保存版本。材料由宿主读取并提炼；引擎检查字段、引用和版本，不判断内容是否真实。下面是合成示例中的 evidence：
+通过 `roundtable_update_context` 可随简报版本保存结构化 `evidence`（完整替换当前证据并保留历史；省略则沿用上一版，传空数组表示清空）。来源元数据一经登记不可更改（新版本请用新 `id`）：
 
 ```json
 {
@@ -114,11 +113,10 @@ MCP、HTTP 和 Hermes 的 `roundtable_update_context` 接受可选的 `evidence`
 }
 ```
 
-将其与完整 `context`、`source`、`expected_revision` 一起提交。`sources` 可提供安全的 `reference`、`version`、`date`，不填时显示未提供；不要填入敏感原件路径。`kind` 区分 fact、user_report、assumption、calculation、unknown；`verification` 表示提交者报告的 verified、unverified、conflicting。计算项必须提供 `derivation`，适用条件可写 `applicability`。未核实及冲突项保留原状态，不因被报告引用就变成已核实。
+- **`kind`**：`fact`、`user_report`、`assumption`、`calculation`（必须带 `derivation`）、`unknown`；可选 `applicability` 说明适用条件。
+- **`verification`**：`verified`（仅限 `fact` / `calculation` 且至少 1 条引用）、`unverified`、`conflicting`。引用已导入材料时必须同时提供 `source_id`、`segment_id` 和与存储值完全一致的 `locator`。
 
-更新时省略 evidence 会保留上一版；传完整对象会替换当前证据并保留历史，空 sources/items 表示明确清空。来源 ID 在一次评审中标识固定的来源元数据，变更原文版本等元数据需使用新 ID；事实提炼纠正可在新简报版本中修改条目。无效引用或旧 `expected_revision` 会拒绝整个更新，不会留下半份简报。
-
-有结构化证据时，`roundtable_end` 接受以下 `report`，同时传本次分析使用的 `expected_revision`：
+存在结构化证据时，用 `roundtable_end` 提交 `report` 与 `expected_revision`（不可与 `conclusion` 或 `force` 同传）：
 
 ```json
 {
@@ -132,68 +130,21 @@ MCP、HTTP 和 Hermes 的 `roundtable_update_context` 接受可选的 `evidence`
 }
 ```
 
-所有字段都需提供；rationale 和 next_actions 不能为空，每条理由必须引用本版存在的证据条目。其余列表允许为空，显示“未记录”，不自动解释为没有风险。`status` 为 proposed／confirmed／deferred，confirmed 仅记录用户实际已确认的决定。引擎不能证明用户确实批准，也不会因此执行建议。
+- **必填约束**：所有 7 个字段都需提供；`rationale` 与 `next_actions` 不可为空，且每条 `rationale` 只能引用当前版本存在的 `evidence_ids`；`status` 取 `proposed` / `confirmed` / `deferred`（`confirmed` 仅记录用户实际确认）。
+- **单一结论渲染**：提交成功后引擎在同一事务内生成规范化 Markdown 结论，`read`、`status`、`summarize`、`transcript` 资源、Web Viewer 与 Markdown/PDF 导出均复用该正文。
 
-提交时校验报告引用与简报版本，并在同一事务内保存报告、结论和会议状态。成功后生成唯一的结论 Markdown；读取、摘要、Viewer 和 Markdown/PDF 导出复用它。report 与自由文本 conclusion、force 不能同时提交。旧版自由文本仍可用；用自由文本替换结构化报告时会移除旧 report，避免出现两份不同的结论。
+---
 
-read/status/summarize 返回 `evidence` 和 `decision_report`（其中包含 report 与 context_revision）；参与者提示词自动带入同版证据。未结构化的旧会议返回 null，仍保留原始简报与结论。已结束会议不能改证据，后续新信息需发起新的评审。
+## Code Review 检查清单
 
-## MCP 提示词
+- **前置输入**：预期行为、明确 `base/head` 或 diff 范围、相关调用方上下文、已运行检查与仓库约定。宿主需直接提供代码与测试工具，模板不自动读取仓库。
+- **单条发现格式**：文件/行号或符号定位、触发条件、影响、证据或复现步骤、优先级与理由、修复建议、验证状态（推测明确标为待核实，不虚构测试通过）。
+- **结论收敛**：按根因去重，区分**阻塞项**、**非阻塞建议**与**未验证区域**，给出 `merge` / `changes-required` / `insufficient-information` 建议及理由。无问题不等于质量保证；建议不等于自动修复或合并授权。
 
-| 提示词 | 参数与行为 |
-|---|---|
-| `coordinator_kickoff` | topic、participants、可选 max_rounds/decision_brief；指导明确问题和角色任务 |
-| `participant_turn` | discussion_id、role、可选 perspective/phase；包括共享 context |
-| `coordinator_summarize` | discussion_id；指导比较方案、保留分歧和区分建议与决定 |
+---
 
-`participant_turn` 默认在 round 0–1 使用 `independent`：仅附带共享简报和协调者开场，不附带同伴发言。后续轮次默认 `response`：附带最近十条发言摘录及 ID，提醒核对完整内容。可显式传入 `phase="independent"` 或 `phase="response"`；实际阶段由宿主控制，不修改会议状态。
+## 交付结果与价值验证
 
-背景更新后，独立分析提示词使用当前简报，不再注入可能含旧假设的开场；旧开场仍保留在逐字记录。回应阶段会提醒当前简报优先于历史发言中的冲突假设。
-
-只支持工具调用或 HTTP 的宿主，也可调用 `roundtable_get_prompt`。例如向 Bridge 的 `/tool` 发送：
-
-```json
-{
-  "name": "roundtable_get_prompt",
-  "arguments": {
-    "name": "participant_turn",
-    "arguments": {
-      "discussion_id": "<会议 ID>",
-      "role": "技术评审",
-      "phase": "independent"
-    }
-  }
-}
-```
-
-该工具返回提示词文本，宿主负责把它交给实际参与者，不会自行运行模型。
-
-实际使用的模型及配置由宿主决定。不得把角色名当作模型身份，也不能把资料缺失包装成专业结论。
-
-## 交付结果
-
-默认先给简短的决策概览，让用户不用读会议记录也能理解：
-
-1. 建议是什么，还是需要先验证；区分待用户决定和已确认决定。
-2. 为什么：主要依据及来源，如何符合用户目标。
-3. 要付出什么代价，有哪些重要反对意见或未知。
-4. 哪些条件会改变建议。
-5. 下一步具体做什么。
-
-按需再展开方案对比、证据定位、计算、角色覆盖和未验证部分。影响选择的限制应在概览中可见。图表用于解释对比或变化，不能用精美排版代替核查。
-
-结构化报告的读取、摘要及 Markdown/PDF 导出复用同一份保存的结论。宿主另制的短答、图表或报告也须复用核对结果，交付前检查关键数字、条件和推荐一致。材料更新后，说明哪些判断改变、为什么改变，保留未变约束，更新或标记旧产物。内容语义与外部产物仍由宿主核查，版本和引用校验不代表引擎已自动重算或验证判断。
-
-Code Review 的每条发现包含代码位置、触发条件、影响、证据/复现、优先级理由、修复建议和验证状态。最终按根因去重，区分阻塞项、非阻塞建议、未验证部分，再给出合并、修复后再审或材料不足的建议。无问题报告不构成质量保证；评审授权不自动等于修复或合并授权。
-
-`summarize(compact=True)` 提供格式化摘要，发言摘录带有 ID 和截断标记；已保存的结论始终完整返回。read、status、summarize 和 transcript resource 都能回读结论。配置了 output_path 时，后续 summarize 导出也保留结论。协调者仍须核对完整发言和原始资料，摘要接口不执行语义综合。
-
-`roundtable_record_finding` 接受 finding_type（consensus、disagreement、new_point）、content、related_speeches。关联发言必须属于当前会议；完全相同内容和引用的重试不重复计数。返回的 findings 包含 ID 与来源发言，摘要保留标注来源。标注属于外部判断，工具不会自动验证，也不能由空列表推断意见一致。共识比例只描述已记录标注，不表示模型投票结果或结论正确率。
-
-## 验证价值
-
-先检查输入是否提取准确、来源是否可查、关键缺口是否保留，再检查结论是否有依据、符合用户目标、可行动，以及不同产物是否一致。记录用户纠正和补充材料的负担、人工整理时间和宿主补救。
-
-在相近材料与预算下，用真实任务比较单助手、独立多角色汇总、带交互的多角色评审；条件允许时再比较同模型与异模型安排。记录有效贡献、可行方案增量、误报/重复意见、总耗时、费用和采纳原因。没有增益时减少角色或停止后续讨论。代码评审另外记录已知缺陷漏报。无法观测的指标标为未知，不用更多格式、评论、更高共识或更长报告代替效果。
-
-完整优先级及维护决策标准见 [产品方向](product/DIRECTION.md)。
+- **默认一页概览**：先讲清建议与确认状态、核心依据与目标匹配度、代价与反对意见、改变判断的条件、下一步行动；详细对比、价格口径表格与原始引用按需展开。
+- **口径与指标**：`total_rounds` / `completed_rounds` 统计实际参与者评审轮数（不含 `round 0` 开场与空轮），不拿引擎游标 `current_round` 当完成轮数；`convergence_score` 是外部 `findings` 标注比例（`consensus / (consensus + disagreement)`，无标注时为 `None`），不代表正确率。
+- **价值对照**：在相近材料和预算下，对照单助手、独立多角色汇总与交互评审，记录有效新发现、漏报/误报、组织负担与人工纠偏成本；没有增益时应缩减角色或轮次。完整验收标准见 [产品方向](product/DIRECTION.md)。

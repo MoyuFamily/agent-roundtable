@@ -1,80 +1,80 @@
 # 技术可靠性与验证
 
-本页对应产品方向中的 P0 工程项。以下能力位于当前源码；尚未发布的源码改动不代表已有 PyPI 包包含它们。
+本页对应产品方向中的 P0 工程可靠性基础。以下能力位于当前源码；尚未发布的源码改动不代表已有 PyPI 包包含它们。
+
+## 关键工程边界与阈值
+
+| 模块 / 能力 | 约束或阈值 | 说明 |
+|---|---|---|
+| **材料包导入** | 单文件 `10 MiB`、最多 `1,000` 段、单段 `100,000` 字符、总计 `500,000` 字符 | 由 `roundtable.materials` 强制校验；不截断原文 |
+| **HTTP Bridge 请求** | 请求体上限 `8 MiB`、读取空闲超时 `10s` | 容纳含非 BMP Unicode 转义的材料包；拒绝 chunked 与重复/负 `Content-Length` |
+| **轮次等待 (`wait_seconds`)** | `0–30s`（单调时钟计时） | MCP 在工作线程执行、HTTP Bridge 并发服务，等待不阻塞发言 |
+| **收件箱读取 (`limit`)** | `1–500`（默认 `50`） | 支持按 `message_types` 过滤与显式幂等确认 (`roundtable_ack_inbox`) |
+| **MCP DB 观察器** | 约每 `200ms` 检查 `PRAGMA data_version` | 合并跨进程写入为订阅失效通知（依赖 `mcp>=1.30,<2`） |
+| **PDF 导出超时** | 默认 `60s`（`ROUNDTABLE_PDF_TIMEOUT_MS` 上限 `120s`） | 每请求独立临时目录与子进程，取消/超时自动回收进程树 |
+
+---
 
 ## 消息的读取、处理与确认
 
-可靠消费者采用两步协议：先调用 `roundtable_inbox(agent_id=..., mark_read=false)`，成功处理后调用 `roundtable_ack_inbox(agent_id=..., message_ids=[...])`。重试确认同一消息不会重复计数；混入其他 Agent 的消息 ID 会整批拒绝，不会部分确认。Agent ID 是共享服务中的逻辑身份，不是新的认证机制。
+- **两步可靠消费协议**：先调用 `roundtable_inbox(agent_id=..., mark_read=false, message_types=[...])`，成功处理后再调用 `roundtable_ack_inbox(agent_id=..., message_ids=[...])`。
+- **幂等与原子性**：重复确认同一消息不重复计数；混入其他 Agent 的消息 ID 会整批拒绝，不会部分确认。`agent_id` 是共享服务中的逻辑身份，不是新的认证机制。
+- **消费者分工**：`AgentDaemon` 只过滤消费 `summon` / `invitation`，成功响应后才确认，不消费 `turn` 或未知类型；失败消息保留未读供重启重试。邀请接受支持成功后的重试，用于恢复“已加入、尚未确认消息”的中断。
+- **兼容性**：`roundtable_inbox` 默认 `mark_read=true`，Bridge 的 `GET /inbox` 也保持读取即标记；需要重试保障时请显式采用上述两步协议，并避免多个消费者同时执行同一任务（提供至少一次处理基础，不承诺任意宿主副作用恰好一次）。
 
-`message_types` 可筛选消息类型，`limit` 为 1–500。Daemon 只读取 summon/invitation，确认成功响应后才标记已读。它不消费 turn 或未知类型；手动处理、失败消息仍留在队列，重启后可重试。类型筛选避免积压的轮次消息占满前50条，阻挡后续召集。邀请接受支持成功后的重试，用于恢复“已经加入、尚未确认消息”时的中断。
-
-为保持兼容，`roundtable_inbox` 的默认 mark_read 仍为 true，Bridge 的 GET /inbox 也保留读取即标记的行为。需要重试保障时应明确使用上述工具流程；避免两个消费者同时执行同一任务。这提供至少一次处理的基础，不承诺任意宿主副作用恰好执行一次。
+---
 
 ## MCP 订阅与共享数据库
 
-当前依赖范围为 `mcp>=1.30,<2`。stdio 和 SSE 的实际启动入口都声明 resources.subscribe；不是只在单元测试中构造能力对象。
-
-每个连接拥有一个随会话释放的数据库观察任务，约每200毫秒检查独立 SQLite 连接的 data_version。另一个 stdio 进程、HTTP Bridge 或 Daemon 提交到同一数据库，也会使订阅者收到通知。通知使用订阅者实际登记的 URI，包括 transcript 和 discussions 集合；取消订阅和断开连接会清理登记。
-
-通知表示“请重新读取”，不是每次写入的事件日志。当前会合并数据库写入，并保守地使当前会话的所有订阅失效，因此可能通知到内容未改变的资源；不承诺逐写入精确过滤、固定延迟或持久化通知重放。客户端重连后重新订阅并读取当前状态。独立数据库之间不会因此自动同步。
-
-本地启动：
+- 当前依赖范围为 `mcp>=1.30,<2`；stdio 与 SSE 实际入口均在初始化时声明 `resources.subscribe`。
+- 每个会话拥有独立 SQLite 连接与观察任务（约每 `200ms` 检查 `PRAGMA data_version`），另一个 stdio 进程、HTTP Bridge 或 Daemon 提交到同一数据库也会触发通知。
+- 通知使用订阅者实际登记的 URI（含 `transcript` 与 `discussions` 集合）；取消订阅与断开连接会清理登记。
+- **语义边界**：通知含义是“请重新读取”，保守使当前会话订阅失效并合并写入，不承诺逐写入精确过滤、固定延迟或持久化重放；重连后需重新订阅，独立数据库之间不自动同步。
 
 ```bash
+# 本地启动共享数据库 MCP Server（SSE 默认仅监听本机 127.0.0.1）
 python -m roundtable.mcp --db /path/to/shared.db
 python -m roundtable.mcp --http --host 127.0.0.1 --port 8200 --db /path/to/shared.db
 ```
 
-SSE 默认只监听本机。需要其他监听地址时显式设置 `--host`，网络访问控制由部署环境提供。
+---
 
 ## 从实际入口验证
 
 安装当前源码及测试依赖后：
 
 ```bash
-python -m pip install -e '.[dev,mcp]'
+python -m pip install -e '.[dev,mcp,materials]'
 python scripts/check_mcp_runtime.py --source-root . --transport stdio
 python scripts/check_mcp_runtime.py --source-root . --transport sse
 python -m pytest tests/test_agent_runtime.py tests/mcp/test_cli_runtime.py -q
 ```
 
-脚本会启动两个实际客户端，验证 initialize、工具/资源/提示词发现、订阅通知中的 URI、取消订阅、消息确认、读取端重启和结论恢复。stdio 模式启动两个独立服务器进程，共享临时数据库。SSE 模式连接同一服务器。固定发言仅是协议测试数据，没有调用模型。
+- `scripts/check_mcp_runtime.py` 启动真实双客户端进程，验证 `initialize`、工具/资源/提示词发现、订阅通知 URI、取消订阅、消息确认、读取端重启和结论恢复（固定测试发言，不调用模型）。
+- CI 与 release preflight 在干净 venv 安装 wheel 后运行同一脚本（不传 `--source-root`，以 `python -I` 从临时目录启动），避免本地 checkout 掩盖安装包缺失。
 
-CI 和 release preflight 在 wheel 安装到干净虚拟环境后，再运行同一脚本，不传 `--source-root`。服务器以 `python -I` 从临时目录启动，避免从 checkout 或 PYTHONPATH 导入源码而掩盖安装包缺失。核心包安装与 demo 检查保留，随后安装 wheel 的 mcp extra 并验证两种协议。源码依赖版本、模型运行和外部平台集成仍需各自验收。
+---
 
 ## 加入会议与并发请求
 
-接受邀请或召集时，状态变更和成员写入在同一事务提交；成员写入失败会回滚接受状态。召集到期检查直接发生在响应路径，不依赖此前已经轮询状态。已关闭会议拒绝新成员，已成功加入的重复请求可幂等返回。接受、拒绝和过期扫描不会相互覆盖终态。
+- **原子成员加入**：接受邀请或召集时，状态变更与 `participants` 写入在同一事务提交，失败自动回滚；过期检查直接在响应路径执行，不依赖前置轮询；已关闭会议拒绝新成员，重复接受幂等返回。
+- **并发请求与等待**：HTTP Bridge 使用多线程并发服务，MCP 在工作线程执行同步工具，轮次等待（`wait_seconds` `0–30s`）不会阻塞另一客户端提交发言。
+- **Bridge 鉴权与启停**：配置 `auth_token` 的 `CodexBridge` / `GenericBridge` 对 `/agent`、`/inbox`、`/status/...` 及所有写入端点校验 `Authorization: Bearer` 或 `X-Roundtable-Token`，保留 `/health` 公开探测；不存在的会议返回 JSON `404`。两种 Bridge 共用 `GenericBridge` 实现，先绑定端口再登记端点（失败关闭监听），重复 `start()` 幂等。
+- **请求体校验**：HTTP POST 请求体上限 `8 MiB`（兼容材料包 Unicode 转义），读取空闲超时 `10s`，拒绝 chunked 与重复/负 `Content-Length`，畸形 JSON/UTF-8 返回 `400`，超限返回 `413`。
 
-HTTP Bridge 使用并发请求处理；MCP 在工作线程执行同步工具。一个客户端等待轮次时，另一个客户端仍能提交发言。`wait_seconds` 限定为0–30秒，`waited` 返回单调时钟计算的实际等待时间；到期后宿主可再次查询。
-
-配置 auth_token 的 CodexBridge/GenericBridge 对 `/agent`、`/inbox`、`/status/...` 和写入端点统一验证令牌；`/health` 保留公开探测。未配置令牌的本机模式维持原行为。不存在的会议状态返回 JSON 404。
-
-两种 Bridge 共用 GenericBridge 的服务实现。/invite 和 /summon 都遵守接受策略；只有数据库响应 status=accepted 时才返回 accepted=true。端口绑定成功后才注册 Agent，注册失败则关闭监听；重复 start 不创建第二个服务，stop 后可以重启。
-
-HTTP 请求体限制为8 MiB，容纳材料包的 Unicode JSON 转义；材料本身仍受片段数与字符数限制。读取空闲超时为10秒。不支持 chunked 编码，拒绝重复、无效或负数 Content-Length；无效 JSON/UTF-8 返回 JSON 400，超长请求返回413。请求帧错误不会直接断开而不返回结果。
-
+---
 
 ## Viewer 会话与请求错误
 
-Python 的实时发布和跨进程写入共用 file_io：POSIX 使用 flock，Windows 使用 msvcrt 字节锁；整个读取、合并、替换过程持有同一个 sidecar 锁。快照通过同目录临时文件和 os.replace 更新，失败时保留原文件并清理临时文件。JSON 和 JSONL 明确使用 UTF-8，避免系统默认编码破坏中文或 emoji。锁只协调遵守该协议的 Python 进程，不代表任意外部写入均安全。
+- **跨进程锁与原子写入**：Python 实时发布与跨进程同步共用 `file_io.py`（POSIX `flock` / Windows `msvcrt` 字节锁）；整个读取-合并-替换持有同一 sidecar 锁，通过同目录临时文件 + `os.replace` 原子更新，所有 JSON/JSONL 显式使用 UTF-8。
+- **独立链接撤销**：HTTP 撤销链接写入 `revocations/<token_hash>` 独立标记，不再覆盖整个 `discussion.json`；访问校验同时识别独立标记与历史快照中的 `revoked_token_hashes`，旧快照写回无法还原已撤销链接。
+- **会话与降级路径**：密码校验仅签发以 token 哈希命名的会话 Cookie（服务重启后会话密钥轮换，需重新输入密码）。Express 与内置无依赖 HTTP 路径均捕获异步路由异常返回 JSON 错误；未安装 Node 依赖时内置路径仍可读取讨论。
 
-HTTP 撤销链接写入 revocations/<token_hash> 独立标记，不再覆盖 discussion.json，因此不与 Python 快照更新争抢整个文件。访问检查同时识别标记和历史快照中的 revoked_token_hashes；后续 Python 发布会合并当前 token 的标记。旧快照写回不能撤销该标记，删除整个 Viewer 时才清理标记目录。
-
-密码验证只签发以 token 哈希命名的会话 Cookie，不再重复签发带原始 token 的旧格式。会话密钥仍在每次服务启动时生成，重启后需重新输入密码；历史讨论文件的格式迁移保留。
-
-Express 与无依赖的内置 HTTP 路径都会处理异步路由异常，返回 JSON 错误并保持进程运行。内置路径用于尚未安装 Node 依赖时读取讨论，是仍在使用的降级能力；PDF 和旧 bcrypt 密码校验仍需要对应依赖。回归通过无依赖目录中的实际进程验证该路径。
+---
 
 ## PDF 导出
 
-Viewer 的 pdf-worker.mjs 从安装位置加载 md-to-pdf，导出时不运行 npx 或下载依赖。每个请求使用独立临时目录和渲染进程，默认60秒超时（可通过 `ROUNDTABLE_PDF_TIMEOUT_MS` 设置，最大120秒）；请求断开或超时会终止渲染并清理文件。渲染函数等 worker 关闭后清理目录，再返回 PDF 内容或错误，因此正常与失败 HTTP 响应都在清理完成后发送。在 POSIX 平台通过 Puppeteer 的信号处理器终止它独立创建的浏览器进程组，worker 未按时退出时再强制终止 worker 进程组。
-
-Windows 使用 taskkill /T /F 结束本次 worker 及其子进程，并等待命令结束后清理文件。浏览器 profile 放在请求目录下；POSIX 浏览器的 socket 临时目录单独创建在短路径 /tmp 下，以免深层工作目录超过 Unix socket 路径长度限制。两处目录都随请求释放。取消测试等待真实浏览器启动后明确断开连接，再核对目录及相关进程是否清理。
-
-Windows CI 曾在子进程退出后报告 profile 目录 EBUSY。目录删除采用异步、最多5次、100毫秒递增间隔的重试，超过上限继续报错，不忽略残留。清理异常即使发生在客户端断开后也会记录。
-
-CI 在 Ubuntu 的 Python 3.10/3.11/3.12 和 Windows Server 2025 runner 的 Python 3.12 上运行完整源码检查，要求实际 Chrome/PDF 测试通过。Windows 验证包含独立进程文件锁、Unicode 文件往返、HTTP Bridge、MCP stdio/SSE 和取消后的进程检查；这不等同于所有 Windows 桌面版本、真实宿主应用或 Windows 安装包均已验收。干净 wheel 安装验证目前运行在 Ubuntu。
-
-原始 HTML、脚本和远程图片作为文本处理，不在导出浏览器中执行或请求；代码块、表格和正文仍按 Markdown 排版。可用 `PUPPETEER_EXECUTABLE_PATH` 指定 Chrome/Chromium 可执行文件。受控 CI 环境需要关闭浏览器沙箱时显式设置 `ROUNDTABLE_PDF_NO_SANDBOX=1`，默认不关闭。
-
-PDF 测试只在预检发现依赖缺失时允许跳过，运行过程中返回503视为失败。设置 `ROUNDTABLE_REQUIRE_PDF=1` 后，缺少依赖也会失败；CI 采用该模式。验证覆盖实际渲染、并发导出、超时清理、未授权导出拒绝及阻止正文中的远程资源请求。
+- **进程与目录隔离**：`pdf-worker.mjs` 从已安装的 Viewer 路径加载 `md-to-pdf`（不运行 `npx` 或临时下载依赖）。每次导出使用独立临时目录与渲染子进程，默认超时 `60s`（可通过 `ROUNDTABLE_PDF_TIMEOUT_MS` 调整，最大 `120s`）。
+- **取消与跨平台清理**：POSIX 通过 Puppeteer 信号处理与进程组回收浏览器；Windows 使用 `taskkill /T /F` 结束 worker 进程树，并用最多 5 次、递增 `100ms` 的异步重试清理短暂持锁（`EBUSY`）的 profile 目录。浏览器 socket 临时目录单独建在短路径 `/tmp` 下以避开 Linux Unix socket 路径长度上限；响应始终在临时目录清理完成后发送。
+- **安全与环境变量**：讨论正文中的原始 HTML、脚本和远程图片作为纯文本渲染，不在导出浏览器中执行或请求远程资源。可通过 `PUPPETEER_EXECUTABLE_PATH` 指定本地 Chrome/Chromium，受控 CI 环境如需关闭沙箱可显式设置 `ROUNDTABLE_PDF_NO_SANDBOX=1`；测试中设置 `ROUNDTABLE_REQUIRE_PDF=1` 会在缺少浏览器时直接失败（CI 默认模式）。
+- **CI 验证范围**：GitHub Actions 在 Ubuntu（Python 3.10/3.11/3.12）和 Windows Server 2025（Python 3.12）运行完整源码回归并要求真实 Chrome/PDF 导出通过；干净 wheel 安装烟雾检查运行在 Ubuntu。

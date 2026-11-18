@@ -53,5 +53,5 @@ Each round, the `roundtable_read` context grows significantly:
 **Mitigation**: In Round 3-4, pass a coordinator-written summary instead of `roundtable_read` output to keep context manageable.
 
 ## Output
-- Conclusion document: `/Users/parsifal/Repo/Service/ai-relay/docs/AI-RELAY-ITERATION-PLAN.md`
+- Conclusion document: `<local-repo>/ai-relay/docs/AI-RELAY-ITERATION-PLAN.md`
 - Notifications: 10+ messages pushed to company group (open, per-speech, round-end, concluded)

@@ -1,6 +1,7 @@
 # Source distribution hygiene
 include README.md
 include README_EN.md
+include CONTRIBUTING.md
 include LICENSE
 include CHANGELOG.md
 include SECURITY.md
@@ -10,12 +11,18 @@ recursive-include src/roundtable/web *.html *.css *.js *.json *.mjs *.cjs
 recursive-include src/roundtable/templates *.json
 recursive-include src/roundtable/skills *.md *.py *.json
 include src/skills/SKILL.md
-recursive-include docs *.md
+include docs/*.md
+include docs/product/DIRECTION.md
+include docs/product/CODE_REVIEW_ACCEPTANCE.md
+include docs/design/DESIGN-SPEC.md
 
+prune docs/archive
 prune docs/internal
-prune docs/product
+prune docs/design/assets
+prune landing
 prune src/skills/references
 prune .github
+prune .claude
 prune .hermes
 prune .venv
 prune node_modules

@@ -16,7 +16,7 @@ Always retrieve the core instance using the `_get_core()` helper from the tool w
 
 ```python
 import sys
-sys.path.insert(0, "/Users/parsifal/.hermes/hermes-agent")
+sys.path.insert(0, "<hermes-home>/hermes-agent")
 from tools.roundtable_tools import _get_core
 
 core = _get_core()

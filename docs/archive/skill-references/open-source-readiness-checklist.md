@@ -1,6 +1,6 @@
 # Roundtable Open-Source Readiness Checklist
 
-Identified during pre-release review on 2026-05-21. Repository: `/Users/parsifal/Repo/Monorepo/roundtable/`
+Identified during pre-release review on 2026-05-21. Repository: `<local-repo>/agent-roundtable/`
 
 ## 🔴 Must Fix Before Release
 

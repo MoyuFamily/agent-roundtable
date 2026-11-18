@@ -3,7 +3,7 @@
 **Date**: 2026-05-23  
 **Discussion ID**: `rt_xxxxxxxx`  
 **WebViewer**: `http://0.0.0.0:8206/r/Am7_gvvXRBehEmhEIWv9JjvWd4g7`  
-**Conclusion doc**: `/Users/parsifal/Repo/Service/ai-relay/docs/roundtable-open-source-readiness.md`
+**Conclusion doc**: `<local-repo>/ai-relay/docs/roundtable-open-source-readiness.md`
 
 ## Configuration
 

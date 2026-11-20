@@ -55,7 +55,7 @@ def test_version_bump_updates_all_declarations_and_keeps_dry_run_read_only(relea
     subprocess.run([*command, "--dry-run"], cwd=release_repo, check=True, capture_output=True)
     assert before == {filename: (release_repo / filename).read_bytes() for filename in VERSION_FILES}
 
-    result = subprocess.run(command, cwd=release_repo, check=True, capture_output=True, text=True)
+    result = subprocess.run(command, cwd=release_repo, check=True, capture_output=True, encoding="utf-8")
     version = result.stdout.strip()
     for filename in VERSION_FILES[:4]:
         data = json.loads((release_repo / filename).read_text(encoding="utf-8"))
@@ -79,7 +79,9 @@ def test_changelog_releases_unreleased_section(release_repo: Path, notes: str) -
     original = f"# Changelog\n\n## [Unreleased]\n\n{notes}{previous}"
     changelog.write_text(original, encoding="utf-8")
     command = ["node", "scripts/release/changelog.js", "--version=3.0.0"]
-    preview = subprocess.run([*command, "--dry-run"], cwd=release_repo, check=True, capture_output=True, text=True)
+    preview = subprocess.run(
+        [*command, "--dry-run"], cwd=release_repo, check=True, capture_output=True, encoding="utf-8"
+    )
     assert changelog.read_text(encoding="utf-8") == original
     subprocess.run(command, cwd=release_repo, check=True, capture_output=True)
     result = changelog.read_text(encoding="utf-8")

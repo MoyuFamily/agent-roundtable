@@ -48,7 +48,7 @@ def test_shared_context_sync_is_revisioned_and_keeps_raw_material_private(tmp_pa
     )
     did = created["discussion_id"]
     path = tmp_path / did / "discussion.json"
-    assert json.loads(path.read_text())["context"] == "Initial brief"
+    assert json.loads(path.read_text(encoding="utf-8"))["context"] == "Initial brief"
     material = {
         "source": {"id": "S1", "title": "Synthetic input"},
         "format": "text",
@@ -72,17 +72,17 @@ def test_shared_context_sync_is_revisioned_and_keeps_raw_material_private(tmp_pa
     monkeypatch.setattr(remote, "_get_web_dir", lambda did: tmp_path / did)
     remote.update_context(did, "Latest brief <script>literal</script>", source="user", expected_revision=2)
     core.speak(did, "coordinator", "Opening after revision")
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     assert data["context_revision"] == 3
     assert data["context"] == "Latest brief <script>literal</script>"
     assert data["evidence"] == evidence
     assert "Checked synthetic claim" in data["evidence_markdown"]
     assert "line 1" in data["evidence_markdown"]
     assert data["materials"][0]["segment_count"] == 1
-    assert "PRIVATE_RAW_SENTINEL" not in path.read_text()
+    assert "PRIVATE_RAW_SENTINEL" not in path.read_text(encoding="utf-8")
     with pytest.raises(ValueError, match="revision conflict"):
         remote.update_context(did, "Stale", source="user", expected_revision=2)
-    assert json.loads(path.read_text())["context_revision"] == 3
+    assert json.loads(path.read_text(encoding="utf-8"))["context_revision"] == 3
 
 
 def test_cross_process_sync_flow(tmp_path, monkeypatch):

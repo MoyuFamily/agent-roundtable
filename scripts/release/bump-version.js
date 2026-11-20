@@ -127,7 +127,7 @@ function updateVersions(newVersion) {
     ["pyproject.toml", /^version = "[^"]+"/m, `version = "${newVersion}"`],
     ["src/roundtable/__init__.py", /^__version__ = "[^"]+"/m, `__version__ = "${newVersion}"`],
     ["src/skills/SKILL.md", /^version: .+$/m, `version: ${newVersion}`],
-    ["uv.lock", /(name = "agent-roundtable"\nversion = )"[^"]+"/, `$1"${newVersion}"`],
+    ["uv.lock", /(name = "agent-roundtable"\r?\nversion = )"[^"]+"/, `$1"${newVersion}"`],
   ];
   for (const [file, pattern, replacement] of replacements) {
     const content = readFileSync(join(ROOT, file), "utf-8");

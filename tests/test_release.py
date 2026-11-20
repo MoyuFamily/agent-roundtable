@@ -49,7 +49,11 @@ def release_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_version_bump_updates_all_declarations_and_keeps_dry_run_read_only(release_repo: Path) -> None:
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+def test_version_bump_updates_all_declarations_and_keeps_dry_run_read_only(release_repo: Path, newline: bytes) -> None:
+    for filename in VERSION_FILES:
+        path = release_repo / filename
+        path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", newline))
     before = {filename: (release_repo / filename).read_bytes() for filename in VERSION_FILES}
     command = ["node", "scripts/release/bump-version.js", "--type=patch"]
     subprocess.run([*command, "--dry-run"], cwd=release_repo, check=True, capture_output=True)

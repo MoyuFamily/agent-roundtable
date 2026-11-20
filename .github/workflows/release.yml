@@ -29,7 +29,11 @@ jobs:
           cache: npm
 
       - name: Run release preflight
-        run: scripts/release/preflight-check.sh
+        run: |
+          export PUPPETEER_EXECUTABLE_PATH="$(command -v google-chrome)"
+          export ROUNDTABLE_REQUIRE_PDF=1
+          export ROUNDTABLE_PDF_NO_SANDBOX=1
+          scripts/release/preflight-check.sh
 
   # ─── Build Python Package ───────────────────────────────────────────
   build:
@@ -105,8 +109,9 @@ jobs:
 
       - name: Publish to ClawHub
         run: |
-          clawhub publish . \
+          clawhub publish src/skills \
             --slug agent-roundtable \
+            --name "Agent Roundtable" \
             --version ${{ steps.version.outputs.VERSION }}
 
   # ─── GitHub Release ─────────────────────────────────────────────────
@@ -138,6 +143,12 @@ jobs:
           fi
           echo "$NOTES" > /tmp/release-notes.md
 
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -145,3 +156,4 @@ jobs:
           name: ${{ github.ref_name }}
           body_path: /tmp/release-notes.md
           generate_release_notes: true
+          files: dist/*

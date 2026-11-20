@@ -67,39 +67,13 @@ if [ -n "$BUMP_TYPE" ]; then
   BUMP_ARGS="--type=$BUMP_TYPE"
 fi
 
-# Cross-platform sed -i wrapper (macOS BSD sed needs '' after -i; GNU sed doesn't)
-sed_inplace() {
-  if [[ "$OSTYPE" == "darwin"* ]]; then
-    sed -i '' "$@"
-  else
-    sed -i "$@"
-  fi
-}
-
 if $DRY_RUN; then
   # Dry-run path: only show preview, never mutate files
   node "$SCRIPT_DIR/bump-version.js" --dry-run $BUMP_ARGS
   NEW_VERSION=$(node "$SCRIPT_DIR/bump-version.js" --dry-run $BUMP_ARGS | grep "New version:" | sed 's/.*v//')
 else
   NEW_VERSION=$(node "$SCRIPT_DIR/bump-version.js" $BUMP_ARGS)
-  ok "Version bumped to v$NEW_VERSION (package.json updated)"
-fi
-
-if $DRY_RUN; then
-  echo "  Would sync version $NEW_VERSION to pyproject.toml, SKILL.md, src/skills/SKILL.md"
-else
-  if [ -f "pyproject.toml" ]; then
-    sed_inplace "s/^version = .*/version = \"$NEW_VERSION\"/" pyproject.toml
-    ok "Synced version $NEW_VERSION to pyproject.toml"
-  fi
-  if [ -f "SKILL.md" ]; then
-    sed_inplace "s/^version: .*/version: $NEW_VERSION/" SKILL.md
-    ok "Synced version $NEW_VERSION to SKILL.md"
-  fi
-  if [ -f "src/skills/SKILL.md" ]; then
-    sed_inplace "s/^version: .*/version: $NEW_VERSION/" src/skills/SKILL.md
-    ok "Synced version $NEW_VERSION to src/skills/SKILL.md"
-  fi
+  ok "Version bumped to v$NEW_VERSION across packages, locks and skills"
 fi
 
 # ---------------------------------------------------------------------------
@@ -120,12 +94,13 @@ fi
 
 step 4 "Committing and tagging..."
 if $DRY_RUN; then
-  echo "  Would commit: package.json, pyproject.toml, SKILL.md, CHANGELOG.md"
+  echo "  Would commit version declarations, locks, skills and CHANGELOG.md"
   echo "  Would create tag: v$NEW_VERSION"
 else
-  git add package.json pyproject.toml SKILL.md src/skills/SKILL.md CHANGELOG.md
-  git -c user.name="agent-mafei" -c user.email="mafei@izmw.me" \
-    commit -m "chore(release): v$NEW_VERSION"
+  git add package.json package-lock.json pyproject.toml uv.lock \
+    src/roundtable/__init__.py src/roundtable/web/package.json \
+    src/roundtable/web/package-lock.json SKILL.md src/skills/SKILL.md CHANGELOG.md
+  git commit -m "chore(release): v$NEW_VERSION"
   git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
   ok "Committed and tagged v$NEW_VERSION"
 fi
@@ -147,7 +122,7 @@ fi
 
 BRANCH=$(git branch --show-current)
 git push origin "$BRANCH" 2>&1 && ok "Pushed branch" || die "Branch push failed"
-git push origin --tags 2>&1 && ok "Pushed tags" || die "Tag push failed"
+git push origin "v$NEW_VERSION" 2>&1 && ok "Pushed release tag" || die "Tag push failed"
 
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════${NC}"

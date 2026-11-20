@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-11-20
+
 ### Changed
 
 - Replace repeated login and demo checks with complete behavior scenarios. Verify viewer defaults through real core calls instead of rewriting Python's module cache or only inspecting signatures.
@@ -30,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Synchronize package, runtime, skill and lockfile versions during release. Validate tagged checkouts and installed wheel versions, publish the self-contained skill bundle, and attach distributions to GitHub Releases.
 - Preserve Unicode download names for Markdown and PDF with ASCII fallback and UTF-8 Content-Disposition parameters.
 - Persist fixed participant order and append late joiners atomically. Schema v8 migrates existing join-time and insertion order.
 - Validate required prompt arguments across MCP and HTTP. Response prompts include complete history by default, with an explicit excerpt option.

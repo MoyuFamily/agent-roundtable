@@ -61,19 +61,21 @@ pass "Git working directory clean"
 
 BRANCH=$(git branch --show-current)
 if [ -z "$BRANCH" ]; then
-  fail "Not on a branch (detached HEAD)."
-fi
-info "Branch: $BRANCH"
-git fetch --quiet 2>/dev/null || warn "Could not fetch from remote"
-REMOTE=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
-if [ -n "$REMOTE" ] && [ "$(git rev-parse HEAD)" != "$REMOTE" ]; then
-  warn "Local branch is not in sync with origin/$BRANCH"
+  RELEASE_TAG=$(git describe --tags --exact-match --match 'v[0-9]*' HEAD 2>/dev/null) || fail "Detached HEAD must point to a release tag."
+  info "Release tag: $RELEASE_TAG"
+else
+  info "Branch: $BRANCH"
+  git fetch --quiet 2>/dev/null || warn "Could not fetch from remote"
+  REMOTE=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
+  if [ -n "$REMOTE" ] && [ "$(git rev-parse HEAD)" != "$REMOTE" ]; then
+    warn "Local branch is not in sync with origin/$BRANCH"
+  fi
 fi
 
 echo ""
 echo "▶ Installing release check tools..."
 "$PYTHON_BIN" -m pip install --upgrade pip build twine >/dev/null
-"$PYTHON_BIN" -m pip install -e ".[dev,mcp]" >/dev/null
+"$PYTHON_BIN" -m pip install -e ".[dev,mcp,materials]" >/dev/null
 pass "Release tools installed"
 
 run "Ruff lint" "$PYTHON_BIN" -m ruff check src tests scripts/check_mcp_runtime.py
@@ -88,7 +90,7 @@ if [ -f "package.json" ]; then
     fi
     echo ""
     echo "▶ Installing npm dependencies..."
-    npm install --omit=dev
+    npm ci --omit=dev
     pass "npm dependencies installed"
     run "Node syntax check" npm run check
   else
@@ -111,6 +113,10 @@ for item in "$WEB_PKG_VERSION" "$PYPROJECT_VERSION" "$INIT_VERSION" "$SKILL_VERS
     fail "Version mismatch: package.json=$PKG_VERSION web/package.json=$WEB_PKG_VERSION pyproject=$PYPROJECT_VERSION __init__=$INIT_VERSION SKILL=$SKILL_VERSION src/skills=$SRC_SKILL_VERSION"
   fi
 done
+if [ -n "${RELEASE_TAG:-}" ] && [ "$RELEASE_TAG" != "v$PKG_VERSION" ]; then
+  fail "Release tag $RELEASE_TAG does not match package version $PKG_VERSION"
+fi
+run "Skill synchronization" bash scripts/sync_skill.sh check
 pass "Version check passed"
 
 echo ""
@@ -159,11 +165,14 @@ SMOKE_DIR=$(mktemp -d)
 "$SMOKE_DIR/venv/bin/python" -m pip install --upgrade pip >/dev/null
 "$SMOKE_DIR/venv/bin/python" -m pip install dist/*.whl >/dev/null
 "$SMOKE_DIR/venv/bin/python" - <<'PY'
-from importlib import resources
+import json
+from importlib import metadata, resources
+from pathlib import Path
 
 import roundtable
 
-assert roundtable.__version__ == "2.1.0"
+expected = json.loads(Path("package.json").read_text(encoding="utf-8"))["version"]
+assert roundtable.__version__ == metadata.version("agent-roundtable") == expected
 assert (resources.files("roundtable") / "web" / "viewer.js").is_file()
 assert (resources.files("roundtable") / "web" / "i18n.js").is_file()
 assert (resources.files("roundtable") / "web" / "package.json").is_file()

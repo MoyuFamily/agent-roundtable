@@ -7,7 +7,7 @@ Use this checklist when preparing `agent-roundtable` for **ClawHub / OpenClaw**,
 - **Skill source of truth**: `src/skills/SKILL.md` (`name: agent-roundtable`, `version: <semver>` matching `package.json` and `pyproject.toml`)
 - **Synced root copy**: `SKILL.md` (auto-generated via `./scripts/sync_skill.sh src2root`; `references/` is rewritten to `src/skills/references/`)
 - **Wheel-bundled MCP skill**: `src/roundtable/skills/mcp-roundtable/SKILL.md` (`name: mcp-roundtable`)
-- **ClawHub ignore file**: `src/skills/.clawhubignore` (Note: `.github/workflows/release.yml` runs `clawhub publish . --slug agent-roundtable` from the repo root, whereas Hermes Skill Hub targets `src/skills/`.)
+- **ClawHub ignore file** is `src/skills/.clawhubignore`. Both ClawHub and Hermes Skill Hub publish the self-contained `src/skills/` bundle.
 
 Always edit `src/skills/SKILL.md`, then sync and verify:
 
@@ -42,7 +42,7 @@ clawhub whoami
   ```
 - **ClawHub / OpenClaw** (from repo root, matching `release.yml`):
   ```bash
-  clawhub publish . --slug agent-roundtable --name "Roundtable" --version 2.1.0 \
+  clawhub publish src/skills --slug agent-roundtable --name "Roundtable" --version "<version>" \
     --tags discussion,multi-agent,collaboration,code-review,roundtable
   ```
   - **MIT-0 license gate**: `clawhub publish` requires server-side MIT-0 acceptance on the ClawHub website for the logged-in account (no `--accept-license` CLI flag exists).

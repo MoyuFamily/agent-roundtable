@@ -123,12 +123,20 @@ function formatEntry(version, date, commits) {
   return lines.join("\n");
 }
 
-function mergeWithExisting(newEntry) {
+function mergeWithExisting(newEntry, version, date) {
   if (!existsSync(CHANGELOG_PATH)) {
     return `# Changelog\n\nAll notable changes to this project will be documented in this file.\n\nThe format is based on [Keep a Changelog](https://keepachangelog.com/).\n\n${newEntry}`;
   }
 
   const existing = readFileSync(CHANGELOG_PATH, "utf-8");
+  const unreleased = existing.match(/(^## \[Unreleased\][^\n]*\n)([\s\S]*?)(?=^## \[|$(?![\s\S]))/m);
+  if (unreleased) {
+    const releaseEntry = unreleased[2].trim()
+      ? `## [${version}] - ${date}\n${unreleased[2]}`
+      : newEntry + "\n";
+    return existing.replace(unreleased[0],
+      `## [Unreleased]\n\n${releaseEntry}`);
+  }
   // Insert after the header (first ## line)
   const firstEntryIdx = existing.indexOf("\n## ");
   if (firstEntryIdx === -1) {
@@ -162,12 +170,12 @@ const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8"));
 const version = forceVersion || pkg.version;
 const date = new Date().toISOString().slice(0, 10);
 const entry = formatEntry(version, date, commits);
+const full = mergeWithExisting(entry, version, date);
 
 if (dryRun) {
   console.log("[changelog] Dry run — would add:\n");
-  console.log(entry);
+  console.log(full);
 } else {
-  const full = mergeWithExisting(entry);
   writeFileSync(CHANGELOG_PATH, full);
   console.log(`[changelog] CHANGELOG.md updated for v${version}`);
 }

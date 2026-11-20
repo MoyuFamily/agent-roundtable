@@ -1,7 +1,7 @@
 ---
 name: agent-roundtable
 description: "Turn source materials into evidence-backed, actionable recommendations for important decisions and Code Review, using host-run professional roles where they improve the result."
-version: 2.1.0
+version: 2.2.0
 platforms: [linux, macos, windows]
 metadata:
   hermes:

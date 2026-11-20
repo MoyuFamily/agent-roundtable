@@ -114,10 +114,28 @@ function getCurrentVersion() {
   return pkg.version;
 }
 
-function updatePackageVersion(newVersion) {
-  const pkg = JSON.parse(readFileSync(PKG_PATH, "utf-8"));
-  pkg.version = newVersion;
-  writeFileSync(PKG_PATH, JSON.stringify(pkg, null, 2) + "\n");
+function updateVersions(newVersion) {
+  const updates = new Map();
+  for (const file of ["package.json", "package-lock.json",
+    "src/roundtable/web/package.json", "src/roundtable/web/package-lock.json"]) {
+    const data = JSON.parse(readFileSync(join(ROOT, file), "utf-8"));
+    data.version = newVersion;
+    if (data.packages?.[""]) data.packages[""].version = newVersion;
+    updates.set(file, JSON.stringify(data, null, 2) + "\n");
+  }
+  const replacements = [
+    ["pyproject.toml", /^version = "[^"]+"/m, `version = "${newVersion}"`],
+    ["src/roundtable/__init__.py", /^__version__ = "[^"]+"/m, `__version__ = "${newVersion}"`],
+    ["src/skills/SKILL.md", /^version: .+$/m, `version: ${newVersion}`],
+    ["uv.lock", /(name = "agent-roundtable"\nversion = )"[^"]+"/, `$1"${newVersion}"`],
+  ];
+  for (const [file, pattern, replacement] of replacements) {
+    const content = readFileSync(join(ROOT, file), "utf-8");
+    if (!pattern.test(content)) throw new Error(`Version declaration missing in ${file}`);
+    updates.set(file, content.replace(pattern, replacement));
+  }
+  updates.set("SKILL.md", updates.get("src/skills/SKILL.md").replaceAll("references/", "src/skills/references/"));
+  for (const [file, content] of updates) writeFileSync(join(ROOT, file), content);
 }
 
 // CLI
@@ -140,6 +158,6 @@ if (dryRun) {
     console.log(`  ${c.breaking ? "⚠️" : "  "} ${c.raw}`);
   }
 } else {
-  updatePackageVersion(newVersion);
+  updateVersions(newVersion);
   console.log(newVersion);
 }

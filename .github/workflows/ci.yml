@@ -97,10 +97,13 @@ jobs:
           /tmp/roundtable-smoke/bin/python -m pip install --upgrade pip
           /tmp/roundtable-smoke/bin/python -m pip install dist/*.whl
           /tmp/roundtable-smoke/bin/python - <<'PY'
-          from importlib import resources
+          import json
+          from importlib import metadata, resources
+          from pathlib import Path
           import roundtable
 
-          assert roundtable.__version__ == "2.1.0"
+          expected = json.loads(Path("package.json").read_text(encoding="utf-8"))["version"]
+          assert roundtable.__version__ == metadata.version("agent-roundtable") == expected
           assert (resources.files("roundtable") / "web" / "viewer.js").is_file()
           assert (resources.files("roundtable") / "web" / "i18n.js").is_file()
           assert (resources.files("roundtable") / "web" / "pdf-worker.mjs").is_file()

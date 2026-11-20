@@ -20,7 +20,8 @@ from roundtable.core import RoundtableCore
 from roundtable.db import RoundtableDB
 from roundtable.exceptions import DiscussionNotFoundError
 from roundtable.mcp.bridges.base import AgentBridge
-from roundtable.mcp.tools import handle_tool_call
+from roundtable.mcp.prompts import PROMPT_SCHEMAS
+from roundtable.mcp.tools import TOOL_SCHEMAS, handle_tool_call
 
 logger = logging.getLogger(__name__)
 # A bounded 500k-character material can take 6 MB when JSON escapes non-BMP text.
@@ -194,6 +195,9 @@ def _make_handler(bridge: GenericBridge) -> type[BaseHTTPRequestHandler]:
                         "platform": bridge.platform,
                     },
                 )
+
+            elif path == "/schema":
+                self._respond(200, {"tools": TOOL_SCHEMAS, "prompts": PROMPT_SCHEMAS})
 
             elif path == "/agent":
                 conn = db.connect()

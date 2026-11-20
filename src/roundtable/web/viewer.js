@@ -60,6 +60,33 @@
     const $revokedState = document.getElementById('revokedState');
     const $scrollBottomBtn = document.getElementById('scrollBottomBtn');
     const $dispatchStatusPanel = document.getElementById('dispatchStatusPanel');
+    const $sharedContextPanel = document.getElementById('sharedContextPanel');
+    let renderedSharedContext = null;
+
+    function renderSharedContext(data) {
+      if (!$sharedContextPanel) return;
+      const context = {
+        brief: data.context || '',
+        revision: data.context_revision,
+        source: data.context_source || '',
+        evidence: data.evidence_markdown || '',
+        materials: data.materials_markdown || '',
+      };
+      const signature = JSON.stringify(context);
+      if (signature === renderedSharedContext) return;
+      renderedSharedContext = signature;
+      const visible = Boolean(context.brief || context.evidence || context.materials);
+      $sharedContextPanel.classList.toggle('hidden', !visible);
+      document.getElementById('sharedContextRevision').textContent =
+        Number.isInteger(context.revision) ? `v${context.revision} · ${context.source}` : '';
+      document.getElementById('sharedBriefText').textContent = context.brief;
+      document.getElementById('sharedEvidenceContent').innerHTML = renderMarkdown(context.evidence);
+      document.getElementById('sharedMaterialsContent').innerHTML = renderMarkdown(context.materials);
+      if (visible) {
+        $waitingState.classList.add('hidden');
+        $activeState.classList.remove('hidden');
+      }
+    }
 
     // ---- Auto-scroll logic ----
     const scrollEl = document.scrollingElement || document.documentElement;
@@ -222,6 +249,7 @@
 
       // Apply the report before process rendering can trigger any auto-scroll.
       state.status = data.status || state.status;
+      renderSharedContext(data);
       updateConclusion(data.conclusion);
       updateStatusUI();
 

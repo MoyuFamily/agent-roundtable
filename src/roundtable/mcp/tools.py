@@ -362,7 +362,16 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "type": "string",
                     "enum": ["coordinator_kickoff", "participant_turn", "coordinator_summarize"],
                 },
-                "arguments": {"type": "object", "additionalProperties": {"type": "string"}},
+                "arguments": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "description": (
+                        "Prompt-specific string arguments. participant_turn requires discussion_id and role; "
+                        "optional perspective, phase (independent|response), history (full|excerpt, default full). "
+                        "coordinator_kickoff requires topic and participants. "
+                        "coordinator_summarize requires discussion_id."
+                    ),
+                },
             },
             "required": ["name"],
         },

@@ -37,7 +37,7 @@ def main() -> None:
     bridge.start()
 
     print(f"Roundtable Codex bridge listening on http://{args.host}:{args.port}")
-    print("Use /health, /agent, /inbox, /tool, /speak, /status/<discussion_id>")
+    print("Use /health, /schema, /agent, /inbox, /tool, /speak, /status/<discussion_id>")
     try:
         input("Press Enter to stop...\n")
     except EOFError:

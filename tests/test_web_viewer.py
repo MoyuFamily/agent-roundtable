@@ -20,6 +20,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
 import requests
@@ -471,12 +472,27 @@ class TestExportPDF:
     @pytest.mark.parametrize("server", [{"capture_pdf_input": True}], indirect=True)
     def test_pdf_uses_identical_markdown_input(self, server):
         base, _, directory = server
-        markdown = requests.get(f"{base}/api/test_token_abc123/export/markdown", timeout=5)
-        response = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=10)
-        assert response.status_code == 200
-        pdf_input = (directory / "pdf-input.md").read_bytes()
-        assert pdf_input == markdown.content
-        assert pdf_input.decode("utf-8").count(CANONICAL_REPORT) == 1
+        path = directory / "test_disc" / "discussion.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for title in ("中文方向讨论", "Trial 🚀", "Simple_title", 'a/\\b\r\n";filename=evil'):
+            data["topic"] = title
+            path.write_text(json.dumps(data), encoding="utf-8")
+            markdown = requests.get(f"{base}/api/test_token_abc123/export/markdown", timeout=5)
+            response = requests.get(f"{base}/api/test_token_abc123/export/pdf", timeout=10)
+            for exported, extension in ((markdown, "md"), (response, "pdf")):
+                assert exported.status_code == 200
+                header = exported.headers["Content-Disposition"]
+                assert header.isascii()
+                filename = unquote(header.split("filename*=UTF-8''")[1])
+                assert filename.endswith(f".{extension}")
+                assert all(c not in filename for c in '/\\\r\n";')
+                if title == "中文方向讨论":
+                    assert filename == f"中文方向讨论.{extension}"
+                if title == "Trial 🚀":
+                    assert filename == f"Trial_🚀.{extension}"
+            pdf_input = (directory / "pdf-input.md").read_bytes()
+            assert pdf_input == markdown.content
+            assert pdf_input.decode("utf-8").count(CANONICAL_REPORT) == 1
 
     def test_export_pdf_invalid_token(self, server):
         base, _, _ = server
@@ -497,7 +513,9 @@ class TestExportPDF:
         for response in results:
             assert response.status_code == 200, response.text
             assert response.headers["content-type"] == "application/pdf"
-            assert response.headers["content-disposition"] == 'attachment; filename="Test_Discussion_Topic.pdf"'
+            assert response.headers["content-disposition"] == (
+                "attachment; filename=\"Test_Discussion_Topic.pdf\"; filename*=UTF-8''Test_Discussion_Topic.pdf"
+            )
             assert int(response.headers["content-length"]) == len(response.content)
             assert response.content.startswith(b"%PDF")
         assert not list(directory.glob("roundtable-pdf-*"))

@@ -104,21 +104,28 @@ def test_later_round_defaults_to_response_but_can_remain_independent(review):
     assert core.read(did) == after
 
 
-def test_response_marks_truncated_evidence_and_preserves_reference(review):
+def test_response_defaults_to_full_history_and_can_request_marked_excerpts(review):
     core, db, did, _ = review
     speech = core.speak(did, "b_engineering", "A" * 650 + "EVIDENCE_AT_END")
     text = handle_prompt_call(core, db, "participant_turn", {"discussion_id": did, "role": "Product"})["text"]
     assert f"Speech #{speech['speech_id']}" in text
-    assert "[excerpt; read the full speech before relying on it]" in text
-    assert "EVIDENCE_AT_END" not in text
-    assert "EVIDENCE_AT_END" in core.read(did)["speeches"][-1]["content"]
+    assert "EVIDENCE_AT_END" in text
+    excerpt = handle_prompt_call(
+        core, db, "participant_turn", {"discussion_id": did, "role": "Product", "history": "excerpt"}
+    )["text"]
+    assert "[excerpt: 600/665 characters; read the full speech before relying on it]" in excerpt
+    assert "EVIDENCE_AT_END" not in excerpt
+    for index in range(11):
+        core.speak(did, "coordinator", f"Follow-up {index}")
+    full = handle_prompt_call(core, db, "participant_turn", {"discussion_id": did, "role": "Product"})["text"]
+    assert "EVIDENCE_AT_END" in full and "Follow-up 10" in full
 
 
 def test_invalid_phase_does_not_change_meeting(review):
     core, db, did, _ = review
     before = core.read(did)
     with pytest.raises(ValueError, match="phase"):
-        handle_prompt_call(core, db, "participant_turn", {"discussion_id": did, "phase": "unknown"})
+        handle_prompt_call(core, db, "participant_turn", {"discussion_id": did, "role": "Product", "phase": "unknown"})
     assert core.read(did) == before
 
 

@@ -134,7 +134,7 @@ core.end_discussion(
 | [docs/README.md](docs/README.md) | 全部文档总览与阅读入口 |
 | [docs/DECISION_WORKFLOW.md](docs/DECISION_WORKFLOW.md) | 决策与 Code Review 指南：六步流程、本地材料导入、内置模板、结构化证据与报告 |
 | [docs/INTEGRATION_AND_API.md](docs/INTEGRATION_AND_API.md) | 接入方式与参考：`RoundtableCore`、Generic Facade、Hermes、MCP、HTTP Bridge、自定义 Adapter 与环境变量 |
-| [docs/architecture.md](docs/architecture.md) | 系统架构：模块分层、状态机、27 个 MCP 工具、Schema v7 与部署形态 |
+| [docs/architecture.md](docs/architecture.md) | 系统架构：模块分层、状态机、27 个 MCP 工具、Schema v8 与部署形态 |
 | [docs/TECHNICAL_RELIABILITY.md](docs/TECHNICAL_RELIABILITY.md) | 可靠性工程：消息确认协议、MCP 跨进程订阅、文件锁与隔离 PDF 导出 |
 | [docs/product/DIRECTION.md](docs/product/DIRECTION.md) | 产品方向、能力边界与 [Code Review 验收记录](docs/product/CODE_REVIEW_ACCEPTANCE.md) |
 

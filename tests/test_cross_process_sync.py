@@ -37,6 +37,54 @@ def core_with_web(tmp_path):
     return core
 
 
+def test_shared_context_sync_is_revisioned_and_keeps_raw_material_private(tmp_path, monkeypatch):
+    from roundtable.web_publisher import WebPublisher
+
+    core = RoundtableCore(db=RoundtableDB(tmp_path / "context.db"))
+    monkeypatch.setattr(WebPublisher, "_ensure_shared_server_running", lambda self: None)
+    monkeypatch.setattr(core, "_get_web_dir", lambda did: tmp_path / did)
+    created = core.create_discussion(
+        "Shared context", [{"profile": "z"}, {"profile": "a"}], context="Initial brief", web=True
+    )
+    did = created["discussion_id"]
+    path = tmp_path / did / "discussion.json"
+    assert json.loads(path.read_text())["context"] == "Initial brief"
+    material = {
+        "source": {"id": "S1", "title": "Synthetic input"},
+        "format": "text",
+        "segments": [{"id": "s1", "locator": "line 1", "text": "PRIVATE_RAW_SENTINEL", "status": "ready"}],
+    }
+    core.add_material(did, material, source="coordinator", expected_revision=0)
+    evidence = {
+        "sources": [material["source"]],
+        "items": [
+            {
+                "id": "F1",
+                "statement": "Checked synthetic claim",
+                "kind": "fact",
+                "verification": "verified",
+                "citations": [{"source_id": "S1", "segment_id": "s1", "locator": "line 1"}],
+            }
+        ],
+    }
+    core.update_context(did, "Revised brief", source="coordinator", expected_revision=1, evidence=evidence)
+    remote = RoundtableCore(db=RoundtableDB(core.db.db_path))
+    monkeypatch.setattr(remote, "_get_web_dir", lambda did: tmp_path / did)
+    remote.update_context(did, "Latest brief <script>literal</script>", source="user", expected_revision=2)
+    core.speak(did, "coordinator", "Opening after revision")
+    data = json.loads(path.read_text())
+    assert data["context_revision"] == 3
+    assert data["context"] == "Latest brief <script>literal</script>"
+    assert data["evidence"] == evidence
+    assert "Checked synthetic claim" in data["evidence_markdown"]
+    assert "line 1" in data["evidence_markdown"]
+    assert data["materials"][0]["segment_count"] == 1
+    assert "PRIVATE_RAW_SENTINEL" not in path.read_text()
+    with pytest.raises(ValueError, match="revision conflict"):
+        remote.update_context(did, "Stale", source="user", expected_revision=2)
+    assert json.loads(path.read_text())["context_revision"] == 3
+
+
 def test_cross_process_sync_flow(tmp_path, monkeypatch):
     """Test that cross-process calls synchronize findings and final summaries correctly."""
     db_path = tmp_path / "roundtable.db"

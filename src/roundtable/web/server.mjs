@@ -644,7 +644,16 @@ function buildMarkdown(data) {
 }
 
 function safeFilename(topic) {
-  return topic.replace(/[^a-zA-Z0-9一-鿿_-]/g, "_").slice(0, 60) || "discussion";
+  return Array.from(topic.replace(/[^\p{L}\p{N}\p{Extended_Pictographic}_-]/gu, "_"))
+    .slice(0, 60).join("") || "discussion";
+}
+
+function attachmentDisposition(topic, extension) {
+  const filename = `${safeFilename(topic)}.${extension}`;
+  const fallback = filename.replace(/[^a-zA-Z0-9_.-]/g, "_");
+  const encoded = encodeURIComponent(filename).replace(/[!'()*]/g,
+    character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1111,10 +1120,9 @@ router.get("/api/:token/export/markdown", async (req, res, params) => {
   if (!data) return sendJSON(res, { error: "Discussion not found" }, 404);
 
   const md = buildMarkdown(data);
-  const filename = safeFilename(data.topic || "Discussion");
   res.writeHead(200, {
     "Content-Type": "text/markdown; charset=utf-8",
-    "Content-Disposition": `attachment; filename="${filename}.md"`,
+    "Content-Disposition": attachmentDisposition(data.topic || "Discussion", "md"),
     "Access-Control-Allow-Origin": "*",
   });
   res.end(md);
@@ -1233,10 +1241,9 @@ router.get("/api/:token/export/pdf", async (req, res, params) => {
   try {
     const pdfBuffer = await renderPdf(buildMarkdown(data), controller.signal);
     if (res.destroyed) return;
-    const filename = safeFilename(data.topic || "Discussion");
     res.writeHead(200, {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${filename}.pdf"`,
+      "Content-Disposition": attachmentDisposition(data.topic || "Discussion", "pdf"),
       "Content-Length": pdfBuffer.length,
       "Access-Control-Allow-Origin": "*",
     });

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from roundtable.db import RoundtableDB
+from roundtable.evidence import render_evidence, render_materials
 from roundtable.file_io import append_jsonl, file_lock, write_json_atomic
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,24 @@ logger = logging.getLogger(__name__)
 class WebDiscussionSync:
     def __init__(self, db: RoundtableDB):
         self.db = db
+
+    def _context_snapshot(self, discussion_id: str) -> dict[str, Any]:
+        conn = self.db.connect()
+        try:
+            conn.execute("BEGIN")
+            current = self.db.get_context_history(conn, discussion_id)[-1]
+            materials = self.db.get_material_summaries(conn, discussion_id)
+            return {
+                "context": current["context"],
+                "context_revision": current["revision"],
+                "context_source": current["source"],
+                "evidence": current["evidence"],
+                "materials": materials,
+                "evidence_markdown": render_evidence(current["evidence"]) if current["evidence"] is not None else "",
+                "materials_markdown": render_materials(materials),
+            }
+        finally:
+            conn.close()
 
     def _participants_snapshot(self, conn: sqlite3.Connection, discussion_id: str) -> list[dict[str, Any]]:
         return [
@@ -113,6 +132,11 @@ class WebDiscussionSync:
                 refreshed_disc = self.db.get_discussion(conn, discussion_id)
                 if refreshed_disc:
                     disc = refreshed_disc
+
+                for key, value in self._context_snapshot(discussion_id).items():
+                    if key not in data or data[key] != value:
+                        data[key] = value
+                        changed = True
 
                 old_status = data.get("status")
                 if old_status != disc.status:

@@ -587,6 +587,10 @@
       color: var(--rt-text-secondary);
     }
     .discussion-process-content { padding-top: var(--rt-space-2); }
+    .shared-context { overflow-wrap: anywhere; }
+    .shared-brief-text { white-space: pre-wrap; margin-bottom: var(--rt-space-4); }
+    .shared-brief-text:empty { display: none; }
+    #sharedContextRevision { color: var(--rt-text-muted); font-size: 0.85em; font-weight: 400; }
     #conclusionTitle, #conclusionContent { position: relative; z-index: 1; }
     #conclusionTitle { color: var(--rt-text-primary); }
     #conclusionContent { color: var(--rt-text-secondary); overflow-wrap: anywhere; }

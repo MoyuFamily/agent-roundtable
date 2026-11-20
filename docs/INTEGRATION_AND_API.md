@@ -103,6 +103,7 @@ Python 中也可以直接实例化 `roundtable.mcp.bridges.GenericBridge`（默�
 | 端点 | 方法 | 用途 |
 |---|---|---|
 | `/health` | `GET` | 存活探测并刷新本地心跳时间戳 |
+| `/schema` | `GET` | 返回与 MCP 共用的工具 schema 和提示词参数定义，遵循 Bridge 鉴权 |
 | `/agent` | `GET` | 返回当前注册的 Agent 元信息 |
 | `/inbox` | `GET` | 读取未读收件箱消息（**兼容旧行为：读取即标记已读**；可靠消费请改用 `/tool` 调 `roundtable_inbox(mark_read=false)` + `roundtable_ack_inbox`） |
 | `/status/<discussion_id>` | `GET` | 获取讨论状态（不存在返回 JSON `404`） |
@@ -110,6 +111,8 @@ Python 中也可以直接实例化 `roundtable.mcp.bridges.GenericBridge`（默�
 | `/speak` | `POST` | `roundtable_speak` 的快捷入口（共用同一处理器与下一位通知逻辑） |
 | `/invite` / `/summon` | `POST` | 接收邀请/召集；仅当 `accept_policy == "auto"` 时自动加入并返回 `accepted: true` |
 | `/turn` | `POST` | 将轮次提示转发至已配置的 `webhook_url` |
+
+HTTP 宿主可先读取 `GET /schema`，再通过 `/tool` 调用 `roundtable_get_prompt`。`participant_turn` 必填字符串参数为 `discussion_id` 和 `role`，可选 `perspective`、`phase` 和 `history`。缺少必填项、空白值、拼错参数或非法阶段会返回错误。回应阶段默认 `history="full"` 包含全部完整发言。使用 `history="excerpt"` 时返回最近10条、每条最多600字符，并标明截取长度。独立阶段继续仅提供适用的协调者开场。
 
 ### 3. Agent Daemon & 调度器
 
@@ -149,6 +152,8 @@ rt.init(
 ---
 
 ## Web Viewer 与导出
+
+共享简报、修订号、证据及材料目录在讨论进行中即可展开查看，并随跨进程更新刷新。原始材料正文通过专用材料读取接口访问。Markdown 与 PDF 下载使用 ASCII 回退文件名和 UTF-8 扩展文件名，支持中文与 emoji 主题。
 
 - `create_discussion(..., web=True, web_port=8199, expires_at=None)` 默认尽力启动本地 Node.js 18+ Web Viewer，返回值包含 `web_status`（`ready` / `failed` / `disabled`）、`web_url`、`web_error`、`web_help`。
 - **iframe 嵌入**：分享弹窗支持复制精简嵌入视图（`/embed/<token>`，无顶部导航、无导出按钮、支持 SSE 实时更新；密码保护讨论会提示在新标签页打开）。

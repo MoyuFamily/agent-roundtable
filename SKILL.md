@@ -74,6 +74,9 @@ In scope: project direction, product scope/priorities, technical choices, releas
 
 ### Turn & Round Contract
 
+- `speech_order="fixed"` preserves the submitted participant array order. Late joiners are appended. Stored positions survive restarts, and legacy rows migrate by join time and insertion order.
+- HTTP hosts can inspect tools and prompt arguments through authenticated `GET /schema`. `participant_turn` requires string `discussion_id` and `role`, with optional `perspective`, `phase`, and `history`. Response history defaults to `full`; explicit `excerpt` includes the latest 10 speeches at up to 600 characters each with truncation markers. Independent prompts continue to exclude peer speeches.
+
 - `round 0` is reserved exclusively for `participant="coordinator"` opening the meeting. Participant analysis starts at `round 1`.
 - Completed rounds advance automatically. Call `roundtable_advance` ONLY to intentionally skip a turn—NEVER after a completed round.
 - Report progress using `total_rounds` and `completed_rounds`; `current_round` is an internal cursor (and equals `max_rounds + 1` after auto-completion).
@@ -99,6 +102,7 @@ In scope: project direction, product scope/priorities, technical choices, releas
    - Sources are immutable per `source.id`: exact identical retries are idempotent; modified content MUST use a new `source.id`.
 4. Call `roundtable_read_material(discussion_id, source_id, offset=0, limit=10, query=...)` to inspect segments (`limit` 1–50; follow `next_offset` with the same `query`).
    - `query` is a casefolded literal substring match; zero hits does NOT prove absence.
+   - Cache immutable segments by discussion ID, source ID and segment ID within authorized host storage. After a brief revision, refresh the prompt and catalog, reuse unchanged source segments, and fetch new source IDs or unread segments as needed. Give each role the relevant cached segments to avoid repeated full-packet downloads.
    - Ordinary `read`/`status`/`summarize`, participant prompts, and exports include material summaries and issues only—NEVER paste raw private extracts into briefs, speeches, or reports.
 
 ### Shared Evidence & Revision Contract (`roundtable_update_context`)

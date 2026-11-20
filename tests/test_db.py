@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -140,6 +141,10 @@ def test_v3_to_v4_migration_adds_query_indexes(tmp_path):
                 read_at INTEGER
             );
             PRAGMA user_version = 3;
+            CREATE TABLE participants (
+                discussion_id TEXT NOT NULL, participant TEXT NOT NULL, joined_at INTEGER NOT NULL,
+                PRIMARY KEY (discussion_id, participant)
+            );
         """)
 
         migrate_db(raw)
@@ -598,6 +603,64 @@ def test_fixed_order_rejects_out_of_turn_speech(rt_db, db_conn):
 
     with pytest.raises(ValueError, match="Next speaker: alice"):
         rt_db.add_speech(db_conn, disc.id, "bob", "jumping the queue")
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_fixed_order_survives_same_second_creation_migration_and_restart(rt_db, monkeypatch, legacy):
+    monkeypatch.setattr("roundtable.db.time.time", lambda: 1000)
+    names = ["z_first", "a_second", "m_third"]
+    with rt_db.connect() as conn:
+        disc = rt_db.create_discussion(conn, "Order", [{"profile": name} for name in names], max_rounds=2)
+        if legacy:
+            conn.executescript("""
+                DROP INDEX idx_participants_position;
+                ALTER TABLE participants RENAME TO participants_v8;
+                CREATE TABLE participants (
+                    discussion_id TEXT NOT NULL, participant TEXT NOT NULL,
+                    role TEXT, perspective TEXT, display_name TEXT,
+                    joined_at INTEGER NOT NULL, is_active INTEGER DEFAULT 1,
+                    PRIMARY KEY (discussion_id, participant)
+                );
+                INSERT INTO participants
+                SELECT discussion_id, participant, role, perspective, display_name, joined_at, is_active
+                FROM participants_v8 ORDER BY position;
+                DROP TABLE participants_v8;
+                PRAGMA user_version = 7;
+            """)
+    restarted = RoundtableDB(rt_db.db_path)
+    conn = restarted.connect()
+    try:
+        assert [p.participant for p in restarted.get_participants(conn, disc.id)] == names
+        assert restarted.get_active_participant_names(conn, disc.id) == names
+        assert restarted.add_speech(conn, disc.id, "coordinator", "Opening")["next_speaker"] == names[0]
+        for name, following in zip(names, [*names[1:], names[0]], strict=True):
+            assert restarted.add_speech(conn, disc.id, name, name)["next_speaker"] == following
+    finally:
+        conn.close()
+
+    def join(name):
+        connection = restarted.connect()
+        try:
+            return restarted.add_participant(connection, disc.id, name)
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert all(pool.map(join, ["late_z", "late_a"]))
+    assert not join("late_z")
+    conn = restarted.connect()
+    try:
+        order = restarted.get_active_participant_names(conn, disc.id)
+        assert order[:3] == names and set(order[3:]) == {"late_a", "late_z"}
+        positions = [
+            r[0]
+            for r in conn.execute(
+                "SELECT position FROM participants WHERE discussion_id = ? ORDER BY position", (disc.id,)
+            )
+        ]
+        assert positions == list(range(5))
+    finally:
+        conn.close()
 
 
 def test_participant_cannot_speak_twice_in_same_round(rt_db, db_conn):

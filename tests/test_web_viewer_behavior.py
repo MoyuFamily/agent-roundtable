@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from roundtable.evidence import render_report
+from roundtable.evidence import render_evidence, render_materials, render_report
 from roundtable.materials import material_summary
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,6 +76,11 @@ def synthetic_snapshot():
             "topic": "试点范围决策 · 合成报告",
             "status": "concluded",
             "conclusion": conclusion,
+            "context": "共享目标 <script>literal</script>\n第二行简报",
+            "context_revision": 1,
+            "context_source": "coordinator",
+            "evidence_markdown": render_evidence(evidence),
+            "materials_markdown": render_materials([material_summary(material)]),
             "participants": [{"profile": "a", "display_name": "Analyst", "role": "Research"}],
             "speeches": [{"id": 1, "round": 1, "participant": "a", "content": "Synthetic process notes."}],
             "round_summaries": [{"round": 1, "consensus": ["Recorded note"], "disagreement": []}],
@@ -179,6 +184,20 @@ try {
     waitingHidden: document.getElementById('waitingState').classList.contains('hidden'),
     scroll: window.scrollY,
   }));
+  await send({...input.snapshot, status:'active', conclusion:null, speeches:[], round_summaries:[]});
+  await page.click('#sharedContextPanel > summary');
+  let shared = await page.$eval('#sharedContextPanel', el => ({text:el.textContent, open:el.open,
+    scripts:el.querySelectorAll('script,sample,iframe').length}));
+  assert(shared.open && shared.text.includes('v1') && shared.text.includes('共享目标 <script>literal</script>'));
+  assert(shared.text.includes('END_OF_EVIDENCE') && shared.text.includes('第 2 页，第 1.25 节'));
+  assert(!shared.text.includes('RAW_MATERIAL_ONLY') && shared.scripts === 0);
+  input.snapshot.context_revision = 2;
+  input.snapshot.context = '用户修订后的共享目标';
+  await send({...input.snapshot, status:'active', conclusion:null, speeches:[], round_summaries:[]});
+  shared = await page.$eval('#sharedContextPanel', el => ({text:el.textContent, open:el.open}));
+  assert(shared.open && shared.text.includes('v2') && shared.text.includes('用户修订后的共享目标'));
+  assert(!shared.text.includes('第二行简报'));
+  await page.$eval('#sharedContextPanel', el => { el.open = false; });
   await send(input.snapshot);
   let view = await inspect();
   assert.equal(view.processOpen, false);

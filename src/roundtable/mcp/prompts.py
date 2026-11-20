@@ -39,6 +39,14 @@ PROMPT_SCHEMAS: list[dict[str, Any]] = [
                 "description": "independent or response; defaults to independent through round 1, then response",
                 "required": False,
             },
+            {
+                "name": "history",
+                "description": (
+                    "full (default) includes all response speeches; "
+                    "excerpt includes the latest 10 at 600 characters each"
+                ),
+                "required": False,
+            },
         ],
     },
     {
@@ -53,14 +61,24 @@ PROMPT_SCHEMAS: list[dict[str, Any]] = [
 
 def handle_prompt_call(core: RoundtableCore, db: RoundtableDB, name: str, arguments: dict[str, str]) -> dict[str, str]:
     """Render a prompt template. Returns {description, text}."""
+    schema = next((prompt for prompt in PROMPT_SCHEMAS if prompt["name"] == name), None)
+    if schema is None:
+        raise ValueError(f"Unknown prompt: {name}")
+    if not isinstance(arguments, dict) or any(not isinstance(value, str) for value in arguments.values()):
+        raise ValueError("Prompt arguments must be an object of strings")
+    allowed = {argument["name"] for argument in schema["arguments"]}
+    if set(arguments) - allowed:
+        raise ValueError(f"Unknown prompt arguments; allowed: {', '.join(sorted(allowed))}")
+    for argument in schema["arguments"]:
+        if argument["required"] and not arguments.get(argument["name"], "").strip():
+            raise ValueError(f"{name} requires non-empty {argument['name']}")
     if name == "coordinator_kickoff":
         return _coordinator_kickoff(arguments)
     elif name == "participant_turn":
         return _participant_turn(db, arguments)
     elif name == "coordinator_summarize":
         return _coordinator_summarize(arguments)
-    else:
-        return {"description": f"Unknown prompt: {name}", "text": f"Unknown prompt: {name}"}
+    raise ValueError(f"Unknown prompt: {name}")
 
 
 def _coordinator_kickoff(arguments: dict[str, str]) -> dict[str, str]:
@@ -158,8 +176,11 @@ identities or fixed model-to-role rankings.
 
 def _participant_turn(db: RoundtableDB, arguments: dict[str, str]) -> dict[str, str]:
     discussion_id = arguments.get("discussion_id", "")
-    role = arguments.get("role", "participant")
+    role = arguments["role"]
     perspective = arguments.get("perspective", "")
+    history = arguments.get("history", "full")
+    if history not in {"full", "excerpt"}:
+        raise ValueError("history must be full or excerpt")
 
     requested_phase = arguments.get("phase")
     if requested_phase is not None and requested_phase not in {"independent", "response"}:
@@ -186,7 +207,9 @@ def _participant_turn(db: RoundtableDB, arguments: dict[str, str]) -> dict[str, 
                     if speech.round == 0 and current_context["revision"] == 0
                 ]
             else:
-                speeches = db.get_speeches(conn, discussion_id)[-10:]
+                speeches = db.get_speeches(conn, discussion_id)
+                if history == "excerpt":
+                    speeches = speeches[-10:]
         finally:
             conn.close()
     except Exception:
@@ -198,10 +221,10 @@ def _participant_turn(db: RoundtableDB, arguments: dict[str, str]) -> dict[str, 
     history_text = (
         "\n\n".join(
             f"[Speech #{s.id}, round {s.round}, {s.participant}]\n"
-            + (s.content if phase == "independent" else s.content[:600])
+            + (s.content if phase == "independent" or history == "full" else s.content[:600])
             + (
-                " [excerpt; read the full speech before relying on it]"
-                if phase == "response" and len(s.content) > 600
+                f" [excerpt: 600/{len(s.content)} characters; read the full speech before relying on it]"
+                if phase == "response" and history == "excerpt" and len(s.content) > 600
                 else ""
             )
             for s in speeches
@@ -213,7 +236,11 @@ def _participant_turn(db: RoundtableDB, arguments: dict[str, str]) -> dict[str, 
         "Peer speeches are omitted from this prompt; the host must provide a separate context if isolation is needed."
         if phase == "independent"
         else "Respond to constraints from other roles, cite speech IDs, and explain what changed in your view. "
-        "This is only the latest 10 speeches; use roundtable_read to inspect earlier or excerpted evidence."
+        + (
+            "This contains all recorded speeches in full."
+            if history == "full"
+            else "This is only the latest 10 speeches; use roundtable_read to inspect earlier or excerpted evidence."
+        )
     )
 
     text = f"""## Objective
@@ -235,6 +262,8 @@ Source provenance is reported metadata, not independent verification.
 ## Imported Material Catalog
 {render_materials(materials) or "No imported materials recorded."}
 This inventory lists summaries and issues only; read relevant segments explicitly.
+Reuse authorized host-cached immutable segments by discussion/source/segment ID.
+Refresh the brief and catalog after revisions; fetch new sources or unread segments as needed.
 
 ## Discussion Materials
 {history_text}

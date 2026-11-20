@@ -71,6 +71,10 @@ def test_http_review_updates_prompts_turn_notices_and_restart(review_bridge):
     assert agent["endpoint"] == f"http://{bridge.host}:{bridge.port}"
     assert agent["platform"] == bridge.platform
     assert _get(bridge.port, "/inbox")["messages"] == []
+    schemas = _get(bridge.port, "/schema")
+    participant_schema = next(p for p in schemas["prompts"] if p["name"] == "participant_turn")
+    assert {a["name"] for a in participant_schema["arguments"] if a["required"]} == {"discussion_id", "role"}
+    assert any(tool["name"] == "roundtable_get_prompt" for tool in schemas["tools"])
 
     def tool(name, **arguments):
         result = _post(bridge.port, "/tool", {"name": name, "arguments": arguments})
@@ -118,12 +122,25 @@ def test_http_review_updates_prompts_turn_notices_and_restart(review_bridge):
         "/tool",
         {
             "name": "roundtable_get_prompt",
-            "arguments": {"name": "participant_turn", "arguments": {"discussion_id": did, "phase": "independent"}},
+            "arguments": {
+                "name": "participant_turn",
+                "arguments": {"discussion_id": did, "role": "Engineering", "phase": "independent"},
+            },
         },
     )
     assert "new constraint" in prompt["text"]
     assert "Old assumption" not in prompt["text"]
     assert "FIRST_VIEW" not in prompt["text"]
+    for invalid in ({}, {"role": " "}, {"participant": "b"}, {"role": 123}, {"role": "Engineer", "history": "bad"}):
+        rejected = _post(
+            bridge.port,
+            "/tool",
+            {
+                "name": "roundtable_get_prompt",
+                "arguments": {"name": "participant_turn", "arguments": {"discussion_id": did, **invalid}},
+            },
+        )
+        assert "error" in rejected and "text" not in rejected
     final = _post(bridge.port, "/speak", {"discussion_id": did, "participant": "b", "content": "SECOND_VIEW"})
     assert final["discussion_complete"]
     ended = tool(
@@ -263,7 +280,7 @@ def test_auth_covers_reads_and_writes_without_exposing_credentials(bridge_type, 
         participants=[{"profile": "a"}, {"profile": "b"}],
         web=False,
     )["discussion_id"]
-    cases = [("GET", "/agent"), ("GET", "/inbox"), ("GET", f"/status/{did}"), ("POST", "/tool")]
+    cases = [("GET", "/agent"), ("GET", "/schema"), ("GET", "/inbox"), ("GET", f"/status/{did}"), ("POST", "/tool")]
     for method, path in cases:
         body = {"name": "roundtable_list_agents", "arguments": {}} if method == "POST" else None
         for token in [None, "wrong-token"]:

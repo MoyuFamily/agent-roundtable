@@ -142,14 +142,14 @@ class RoundtableDB:
                    VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)""",
                 (disc_id, topic, context, status, max_rounds, speech_order, created_by, now, output_path, notif_json),
             )
-            for p in participants:
+            for position, p in enumerate(participants):
                 profile = p.get("profile", "").strip()
                 conn.execute(
                     """INSERT INTO participants
                        (discussion_id, participant, role, perspective,
-                        display_name, joined_at, is_active)
-                       VALUES (?, ?, ?, ?, ?, ?, 1)""",
-                    (disc_id, profile, p.get("role"), p.get("perspective"), p.get("display_name"), now),
+                        display_name, joined_at, position, is_active)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
+                    (disc_id, profile, p.get("role"), p.get("perspective"), p.get("display_name"), now, position),
                 )
             conn.execute("COMMIT")
         except Exception:  # rollback any failure (sqlite or pre-execute) and re-raise
@@ -487,15 +487,16 @@ class RoundtableDB:
         now = int(time.time())
         cur = conn.execute(
             """INSERT OR IGNORE INTO participants
-               (discussion_id, participant, role, perspective, display_name, joined_at, is_active)
-               VALUES (?, ?, ?, ?, ?, ?, 1)""",
-            (discussion_id, participant, role, perspective, display_name or participant, now),
+               (discussion_id, participant, role, perspective, display_name, joined_at, position, is_active)
+               SELECT ?, ?, ?, ?, ?, ?, COALESCE(MAX(position), -1) + 1, 1
+               FROM participants WHERE discussion_id = ?""",
+            (discussion_id, participant, role, perspective, display_name or participant, now, discussion_id),
         )
         return cur.rowcount > 0
 
     def get_participants(self, conn: sqlite3.Connection, discussion_id: str) -> list[Participant]:
         rows = conn.execute(
-            "SELECT * FROM participants WHERE discussion_id = ? ORDER BY joined_at",
+            "SELECT * FROM participants WHERE discussion_id = ? ORDER BY position",
             (discussion_id,),
         ).fetchall()
         return [
@@ -515,7 +516,7 @@ class RoundtableDB:
         rows = conn.execute(
             """SELECT participant FROM participants
                WHERE discussion_id = ? AND is_active = 1
-               ORDER BY joined_at""",
+               ORDER BY position""",
             (discussion_id,),
         ).fetchall()
         return [r["participant"] for r in rows]

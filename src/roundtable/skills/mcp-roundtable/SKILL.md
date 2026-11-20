@@ -95,6 +95,11 @@ Roles define responsibilities, agents bring context/tools, hosts choose models a
 
 ## 6. Transport & Runtime Notes
 
+- Cache authorized immutable material segments by discussion ID, source ID and segment ID. Refresh prompts and the material catalog after each revision, reuse unchanged segments, and fetch only new source IDs or unread segments required by the role.
+
+- HTTP hosts can inspect tool and prompt schemas at authenticated `GET /schema`. `participant_turn` requires string `discussion_id` and `role`; missing, blank or unknown arguments return errors. Response history defaults to `full`. Explicit `history="excerpt"` returns the latest 10 speeches, at most 600 characters each, with truncation markers. Read complete speeches before relying on excerpts.
+- Fixed turns preserve the submitted participant array order and append late joiners. Stored positions survive restart, with legacy data migrated by join time and insertion order.
+
 - **Prompt parity**: Tool-only and HTTP hosts (`POST /tool`) can fetch identical phase-aware prompts via `roundtable_get_prompt` (`coordinator_kickoff`, `participant_turn`, `coordinator_summarize`). Retrieval does NOT execute a model.
 - **HTTP Bridge parity**: Both `GenericBridge` and `CodexBridge` route `/speak` and `/tool` (`roundtable_speak`) through the shared handler (preserving next-turn notices) and forward `roundtable_add_material` / `roundtable_read_material` via `/tool` using the advertised MCP schemas.
 - **Model execution**: Always owned by the host; creating or summoning into a discussion does NOT start an LLM.

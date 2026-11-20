@@ -904,7 +904,17 @@ class WebPublisher:
                 # 8. Preserve cross-process dispatch snapshots and joiners.
                 # The in-memory publisher may have been created before summoned
                 # agents accepted. Avoid reverting DB-backed sync fields.
-                for key in ("dispatches", "dispatch_summary"):
+                for key in (
+                    "dispatches",
+                    "dispatch_summary",
+                    "context",
+                    "context_revision",
+                    "context_source",
+                    "evidence",
+                    "materials",
+                    "evidence_markdown",
+                    "materials_markdown",
+                ):
                     if key in existing and key not in data:
                         data[key] = existing[key]
 

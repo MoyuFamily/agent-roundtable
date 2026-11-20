@@ -30,6 +30,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Preserve Unicode download names for Markdown and PDF with ASCII fallback and UTF-8 Content-Disposition parameters.
+- Persist fixed participant order and append late joiners atomically. Schema v8 migrates existing join-time and insertion order.
+- Validate required prompt arguments across MCP and HTTP. Response prompts include complete history by default, with an explicit excerpt option.
+- Synchronize shared briefs, revisions, evidence and material summaries into the live and embedded viewers. Preserve updates across publisher writes.
+- Expose HTTP tools and prompt schemas through authenticated GET /schema for host integration.
+
 - Share cross-platform viewer file locks and UTF-8 I/O; atomically replace snapshots on Windows and preserve the prior file when serialization fails.
 - Isolate browser profiles and short POSIX socket paths, and terminate Windows PDF worker process trees on cancellation. Verify cancellation after Chrome has actually started.
 - Persist HTTP link revocation independently from discussion snapshots so concurrent Python updates cannot be overwritten or undo a revocation.

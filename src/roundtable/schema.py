@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS participants (
     perspective TEXT,
     display_name TEXT,
     joined_at INTEGER NOT NULL,
+    position INTEGER,
     is_active INTEGER DEFAULT 1,
     PRIMARY KEY (discussion_id, participant),
     FOREIGN KEY (discussion_id) REFERENCES discussions(id) ON DELETE CASCADE
@@ -437,6 +438,31 @@ def _migrate_v6_to_v7(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _migrate_v7_to_v8(conn: sqlite3.Connection) -> None:
+    """Persist participant order, using join time and insertion order for old rows."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(participants)")}
+        if "position" not in columns:
+            conn.execute("ALTER TABLE participants ADD COLUMN position INTEGER")
+        rows = conn.execute(
+            "SELECT rowid, discussion_id FROM participants WHERE position IS NULL "
+            "ORDER BY discussion_id, joined_at, rowid"
+        ).fetchall()
+        positions: dict[str, int] = {}
+        for row_id, discussion_id in rows:
+            position = positions.get(discussion_id, 0)
+            conn.execute("UPDATE participants SET position = ? WHERE rowid = ?", (position, row_id))
+            positions[discussion_id] = position + 1
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_participants_position ON participants(discussion_id, position)"
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
 _MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migrate_v0_to_v1,
     _migrate_v1_to_v2,
@@ -445,6 +471,7 @@ _MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migrate_v4_to_v5,
     _migrate_v5_to_v6,
     _migrate_v6_to_v7,
+    _migrate_v7_to_v8,
 ]
 
 CURRENT_SCHEMA_VERSION = len(_MIGRATIONS)

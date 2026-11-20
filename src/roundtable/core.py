@@ -182,6 +182,7 @@ class RoundtableCore:
                     )
                     web_status = "ready"
                     self._publishers[disc.id] = publisher
+                    self._sync_web_discussion_state(disc.id, conn)
                     logger.info("Web viewer started for discussion %s: %s", disc.id, web_url)
                 except Exception as exc:
                     web_status = "failed"
@@ -423,6 +424,7 @@ class RoundtableCore:
                 reason=reason,
                 evidence=evidence,
             )
+            self._sync_web_discussion_state(discussion_id, conn)
             self._emit("context_updated", discussion_id=discussion_id, revision=result["context_revision"])
             return {"ok": True, "discussion_id": discussion_id, **result}
         finally:
@@ -438,6 +440,7 @@ class RoundtableCore:
                 conn, discussion_id, material, source=source, expected_revision=expected_revision
             )
             if result["created"]:
+                self._sync_web_discussion_state(discussion_id, conn)
                 self._emit("context_updated", discussion_id=discussion_id, revision=result["context_revision"])
             return {"ok": True, "discussion_id": discussion_id, **result}
         finally:

@@ -26,7 +26,7 @@
 │  ┌───────────────────────────────────────────────────────────────────────────┐  │
 │  │                     roundtable (Core Python Package)                      │  │
 │  │                                                                           │  │
-│  │  core.py ─── db.py ─── schema.py (v7) ─── evidence.py ─── materials.py   │  │
+│  │  core.py ─── db.py ─── schema.py (v8) ─── evidence.py ─── materials.py   │  │
 │  │     │                                                                     │  │
 │  │     ├── shared DB watcher (data_version) ──► MCP resource notifications   │  │
 │  │     ├── web_sync.py / web_publisher.py   ──► Web Viewer (Node / builtin) │  │
@@ -44,7 +44,7 @@ src/roundtable/
 ├── __init__.py          # 公共导出与适配器注册表
 ├── core.py              # RoundtableCore 业务逻辑、轮次推进与报告一致性协调
 ├── db.py                # SQLite 存储层（WAL 模式、事务校验与 CRUD）
-├── schema.py            # Schema v7 DDL 与增量迁移 (_MIGRATIONS)
+├── schema.py            # Schema v8 DDL 与增量迁移 (_MIGRATIONS)
 ├── models.py            # 纯 dataclass 模型与实际评审轮次计算 (review_round_counts)
 ├── evidence.py          # 结构化证据 (EVIDENCE_SCHEMA) 与决策报告 (REPORT_SCHEMA) 校验/渲染
 ├── materials.py         # 材料包契约 (MATERIAL_SCHEMA)、TXT/MD/CSV/PDF 分段读取与检索
@@ -225,7 +225,7 @@ src/roundtable/
 - **Bridge 设计**：`GenericBridge` 与 `CodexBridge` 共享 HTTP 请求处理器与 `AgentBridge.start/stop` 生命周期；`accept_policy=auto` 时自动接受邀请/召集，否则保持待处理；先绑定端口再登记端点，失败自动释放监听。HTTP Bridge 不运行模型，仅同步状态与转发可选 Webhook。
 - **调度模式**：`ManagedOrchestrator` 用于同平台直接建会（`mode="managed"`）；`FederatedOrchestrator` 用于跨平台按技能、可用性与心跳召集（`mode="federated"`）。两者共享同一套状态表。
 
-## 数据库 Schema (v7)
+## 数据库 Schema (v8)
 
 ```text
 discussions ──┬─► participants
@@ -244,7 +244,7 @@ discussions ──┬─► participants
 | 表 | 关键字段 | 说明 |
 |---|---|---|
 | `discussions` | `id`, `topic`, `status`, `current_round`, `max_rounds`, `conclusion` | 会议主表；`status` 含 `assembling/active/concluded/cancelled` |
-| `participants` | `discussion_id + participant (PK)`, `role`, `perspective` | 初始传入或接受 invite/summon 后加入 |
+| `participants` | `discussion_id + participant (PK)`, `role`, `perspective`, `position` | v8 保存初始数组顺序，后加入者追加，旧数据按加入时间与插入顺序迁移 |
 | `speeches` | `id`, `discussion_id`, `round`, `participant`, `content` | 逐轮发言记录 |
 | `findings` | `type (consensus/disagreement/new_point)`, `related_speeches` | 关联同场发言 ID 的显式观点标注 |
 | `convergence_history` | `discussion_id + round (PK)`, `score` | 基于标注计算的轮次比例历史 |

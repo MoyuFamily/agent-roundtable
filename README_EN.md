@@ -136,7 +136,7 @@ All seven scenarios share the same brief, evidence, independent first-pass, and 
 | [docs/README.md](docs/README.md) | Documentation index (Chinese) |
 | [docs/DECISION_WORKFLOW.md](docs/DECISION_WORKFLOW.md) | Decision & Code Review workflow, material import, templates, structured evidence & reports (Chinese) |
 | [docs/INTEGRATION_AND_API.md](docs/INTEGRATION_AND_API.md) | Integration modes, Python Core/Facade API, MCP/HTTP bridges, custom `RoundtableAdapter` & env vars (Chinese) |
-| [docs/architecture.md](docs/architecture.md) | System overview, state machine, 27 MCP tools, DB schema v7 & deployment modes (Chinese) |
+| [docs/architecture.md](docs/architecture.md) | System overview, state machine, 27 MCP tools, DB schema v8 & deployment modes (Chinese) |
 | [docs/TECHNICAL_RELIABILITY.md](docs/TECHNICAL_RELIABILITY.md) | Inbox ack protocol, MCP cross-process subscriptions, file locks & isolated PDF export (Chinese) |
 | [docs/product/DIRECTION.md](docs/product/DIRECTION.md) | Product strategy, boundaries & [Code Review acceptance report](docs/product/CODE_REVIEW_ACCEPTANCE.md) (Chinese) |
 

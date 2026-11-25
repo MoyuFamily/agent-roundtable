@@ -79,8 +79,7 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # Try Trusted Publishing first, fallback to API token
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
 
   # ─── Publish to ClawHub ─────────────────────────────────────────────
   publish-clawhub:
@@ -99,9 +98,9 @@ jobs:
         run: npm install -g clawhub
 
       - name: Configure ClawHub auth
-        run: |
-          mkdir -p ~/.config/clawhub
-          echo '{"registry":"https://clawhub.ai","token":"${{ secrets.CLAWHUB_TOKEN }}"}' > ~/.config/clawhub/config.json
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+        run: clawhub --no-input login --no-browser --token "$CLAWHUB_TOKEN"
 
       - name: Extract version from tag
         id: version
